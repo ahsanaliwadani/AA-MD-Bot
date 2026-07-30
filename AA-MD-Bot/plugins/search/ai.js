@@ -8,7 +8,7 @@ import { chatAI, addHistory, clearHistory } from '../../lib/aiEngine.js';
 
 export default {
   command: 'ai',
-  alias: ['gpt', 'gemini', 'aichat', 'chat', 'llama', 'mistral', 'claude', 'ask'],
+  alias: ['gpt', 'aichat', 'chat', 'ask', 'aibot'],
   description: 'Powerful AI chat — multi-model, memory, smart formatting',
   category: 'search',
 
