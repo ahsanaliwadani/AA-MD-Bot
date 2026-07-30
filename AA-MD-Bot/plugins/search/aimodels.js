@@ -84,6 +84,14 @@ const MODELS = {
       return await callPollinations(msgs, 'openai-fast');
     },
   },
+  gpt55:    {
+    label: 'GPT-5.5', emoji: '🧠',
+    fn: async (msgs, q) => {
+      try { return await callDC('/ai/gpt-5.5', q); } catch {}
+      try { return await callDC('/ai/gpt-5', q); } catch {}
+      return await callPollinations(msgs, 'openai-fast');
+    },
+  },
   grok:     {
     label: 'Grok 4.1', emoji: '⚡',
     fn: async (msgs, q) => {
@@ -92,12 +100,18 @@ const MODELS = {
     },
   },
   claude:   {
-    label: 'Claude', emoji: '🎭',
-    fn: (msgs) => callPollinations(msgs, 'claude-sonnet-4-5'),
+    label: 'Claude Sonnet 4.6', emoji: '🎭',
+    fn: async (msgs, q) => {
+      try { return await callDC('/ai/claude-sonnet-4.6', q); } catch {}
+      return await callPollinations(msgs, 'claude-sonnet-4-5');
+    },
   },
   deepseek: {
-    label: 'DeepSeek', emoji: '🔍',
-    fn: (msgs) => callPollinations(msgs, 'deepseek-r1'),
+    label: 'DeepSeek v4 Pro', emoji: '🔍',
+    fn: async (msgs, q) => {
+      try { return await callDC('/ai/deepseek-v4-pro', q); } catch {}
+      return await callPollinations(msgs, 'deepseek-r1');
+    },
   },
   mistral:  {
     label: 'Mistral', emoji: '🌀',
@@ -157,9 +171,10 @@ function makeModelPlugin(modelKey, command, aliases) {
 
 // Main export + named exports for satellite files
 export default makeModelPlugin('gemini',   'gemini',   ['geminiai', 'gemini3', 'gemini-3-pro']);
-export const gpt5Plugin     = makeModelPlugin('gpt5',     'gpt5',     ['gpt-5', 'chatgpt5', 'gpt5ai']);
-export const grokPlugin     = makeModelPlugin('grok',     'grok',     ['grok4', 'grok-4', 'grokfast', 'grok-ai']);
-export const claudePlugin   = makeModelPlugin('claude',   'claude',   ['claudeai', 'claude3', 'claude-ai']);
-export const deepseekPlugin = makeModelPlugin('deepseek', 'deepseek', ['dsai', 'deepseek-r1']);
-export const mistralPlugin  = makeModelPlugin('mistral',  'mistral',  ['mistralai', 'mistral-ai']);
-export const llamaPlugin    = makeModelPlugin('llama',    'llama',    ['llama3', 'llama-ai', 'llamaai']);
+export const gpt5Plugin       = makeModelPlugin('gpt5',     'gpt5',     ['gpt-5', 'chatgpt5', 'gpt5ai']);
+export const gpt55Plugin      = makeModelPlugin('gpt55',    'gpt55',    ['gpt-5.5', 'chatgpt55', 'gpt5point5']);
+export const grokPlugin       = makeModelPlugin('grok',     'grok',     ['grok4', 'grok-4', 'grokfast', 'grok-ai']);
+export const claudePlugin     = makeModelPlugin('claude',   'claude',   ['claudeai', 'claude3', 'claude-ai', 'claude-sonnet']);
+export const deepseekPlugin   = makeModelPlugin('deepseek', 'deepseek', ['dsai', 'deepseek-r1', 'deepseekv4', 'dsv4']);
+export const mistralPlugin    = makeModelPlugin('mistral',  'mistral',  ['mistralai', 'mistral-ai']);
+export const llamaPlugin      = makeModelPlugin('llama',    'llama',    ['llama3', 'llama-ai', 'llamaai']);

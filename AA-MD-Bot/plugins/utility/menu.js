@@ -44,14 +44,14 @@ const FOOTER = `\n> 🤖 *AA MD Bot*  •  👨‍💻 *Ahsan Ali Wadani*`;
 
 // ── Category display config ───────────────────────────────────────────────────
 const CAT_CFG = {
-  download:  { e: '⬇️',  n: 'DOWNLOADS',      max: 14 },
-  search:    { e: '🔍',  n: 'SEARCH & AI',     max: 18 },
-  media:     { e: '🎨',  n: 'MEDIA TOOLS',     max: 25 },
-  fun:       { e: '🎮',  n: 'FUN & GAMES',     max: 20 },
+  download:  { e: '⬇️',  n: 'DOWNLOADS',      max: 20 },
+  search:    { e: '🔍',  n: 'SEARCH & AI',     max: 30 },
+  media:     { e: '🎨',  n: 'MEDIA TOOLS',     max: 30 },
+  fun:       { e: '🎮',  n: 'FUN & GAMES',     max: 25 },
   group:     { e: '👥',  n: 'GROUP',           max: 18 },
   admin:     { e: '🛡️', n: 'GROUP ADMIN',     max: 20 },
-  tools:     { e: '🔧',  n: 'TOOLS',           max: 25 },
-  utility:   { e: '🛠️', n: 'UTILITY',         max: 16 },
+  tools:     { e: '🔧',  n: 'TOOLS',           max: 35 },
+  utility:   { e: '🛠️', n: 'UTILITY',         max: 20 },
   gb:        { e: '📱',  n: 'GB FEATURES',     max: 8  },
   islamic:   { e: '☪️',  n: 'ISLAMIC',         max: 0  },
 };
@@ -333,6 +333,50 @@ export default {
       menu += `│  _Ghost • Privacy • AutoRead • ViewOnce • OnlineAlert_\n`;
       menu += `╰${'─'.repeat(32)}\n`;
     }
+
+    // ── 🆕 New & Updated Commands ──────────────────────────────────────────
+    menu += `\n╭── 🆕  *NEW & UPDATED COMMANDS*\n`;
+    menu += `│\n`;
+    menu += `│  🤖 *AI Models*\n`;
+    menu += `│  ▸ *${pref}gpt55*        — GPT-5.5 (DC API)\n`;
+    menu += `│  ▸ *${pref}claude*       — Claude Sonnet 4.6 (DC API)\n`;
+    menu += `│  ▸ *${pref}deepseek*     — DeepSeek v4 Pro (DC API)\n`;
+    menu += `│  ▸ *${pref}gemini*       — Gemini 3 Pro\n`;
+    menu += `│  ▸ *${pref}gpt5*         — GPT-5\n`;
+    menu += `│  ▸ *${pref}grok*         — Grok 4.1 Fast\n`;
+    menu += `│  ▸ *${pref}mistral*      — Mistral AI\n`;
+    menu += `│  ▸ *${pref}llama*        — Llama AI\n`;
+    menu += `│\n`;
+    menu += `│  🎨 *Media / Canvas*\n`;
+    menu += `│  ▸ *${pref}jail*         — Jail bars overlay on image\n`;
+    menu += `│  ▸ *${pref}aiedit*       — AI image editor (nanobanana)\n`;
+    menu += `│\n`;
+    menu += `│  🔍 *Search / Stalk*\n`;
+    menu += `│  ▸ *${pref}telestalk*    — Telegram profile lookup\n`;
+    menu += `│  ▸ *${pref}igstalk*      — Instagram profile lookup\n`;
+    menu += `│  ▸ *${pref}wachannel*    — WhatsApp channel stalk\n`;
+    menu += `│\n`;
+    menu += `│  ⬇️ *Downloads*\n`;
+    menu += `│  ▸ *${pref}moviedl*      — Movie download (FZMovies etc)\n`;
+    menu += `│  ▸ *${pref}apk*          — APK downloader (DC primary)\n`;
+    menu += `│  ▸ *${pref}fb*           — Facebook video (DC primary)\n`;
+    menu += `│\n`;
+    menu += `│  🔧 *Tools*\n`;
+    menu += `│  ▸ *${pref}igboost*      — Instagram view booster\n`;
+    menu += `│  ▸ *${pref}tiktokboost*  — TikTok view booster\n`;
+    menu += `│  ▸ *${pref}ytboost*      — YouTube view booster\n`;
+    menu += `│  ▸ *${pref}boost*        — Universal view booster (auto-detect)\n`;
+    menu += `│  ▸ *${pref}tempnumber*   — Free temporary phone numbers (DC API)\n`;
+    menu += `│  ▸ *${pref}livescore*    — Live sports scores\n`;
+    menu += `│  ▸ *${pref}translate*    — Google translate (DC primary)\n`;
+    menu += `│\n`;
+    menu += `│  📖 *Islamic*\n`;
+    menu += `│  ▸ *${pref}quran*        — Full Quran reader (114 surahs)\n`;
+    menu += `│\n`;
+    menu += `│  🔞 *Fun (18+)*\n`;
+    menu += `│  ▸ *${pref}asian*        — Asian content search (DC API)\n`;
+    menu += `│  ▸ *${pref}xv*           — XVideos search & download\n`;
+    menu += `╰${'─'.repeat(32)}\n`;
 
     // ── Public categories ───────────────────────────────────────────────────
     // Skip 'islamic' and 'gb' — already shown above for owners; summary below for users
