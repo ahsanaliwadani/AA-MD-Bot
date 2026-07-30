@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { isConnectedSessionOwner } from "./sessionManager.js";
-import { handleViewOnceMessage } from "./viewOnce.js";
+import { handleViewOnceMessage } from "./antiViewOnce.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
