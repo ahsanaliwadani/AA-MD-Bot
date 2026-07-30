@@ -42,6 +42,56 @@ const GIFTS = [
   '👙 Lingerie', '💐 Flowers', '🍷 Wine', '🕯️ Candles',
 ];
 
+// ── Language system ───────────────────────────────────────────────────────────
+const LANG_KEYS = {
+  '1': 'english',   'english': 'english',
+  '2': 'urdu',      'urdu': 'urdu',           'اردو': 'urdu',
+  '3': 'roman',     'roman': 'roman-urdu',    'roman urdu': 'roman-urdu', 'romanurdu': 'roman-urdu', 'roman-urdu': 'roman-urdu',
+  '4': 'hindi',     'hindi': 'hindi',         'हिंदी': 'hindi',
+  '5': 'arabic',    'arabic': 'arabic',       'عربي': 'arabic', 'عربى': 'arabic',
+  '6': 'bangla',    'bangla': 'bangla',       'bengali': 'bangla', 'বাংলা': 'bangla',
+};
+const LANG_NAMES = {
+  'english':   'English',
+  'urdu':      'اردو (Urdu)',
+  'roman-urdu':'Roman Urdu',
+  'hindi':     'हिंदी (Hindi)',
+  'arabic':    'عربي (Arabic)',
+  'bangla':    'বাংলা (Bangla)',
+};
+const LANG_LOCK = {
+  'english':    'You MUST reply ONLY in English. No Urdu, Hindi, or any other language.',
+  'urdu':       'آپ کو صرف اردو میں جواب دینا ہے — ناستعلیق رسم الخط میں۔ رومن اردو یا انگریزی استعمال نہ کریں۔',
+  'roman-urdu': 'You MUST reply ONLY in Roman Urdu (Urdu written in English/Latin letters, e.g. "Kya haal hai? Batao na 🥺"). NEVER use Urdu script (ناستعلیق). NEVER reply in pure English.',
+  'hindi':      'आपको केवल हिंदी में जवाब देना है। अंग्रेज़ी या उर्दू में बिल्कुल नहीं।',
+  'arabic':     'يجب أن تردّ فقط باللغة العربية. لا تستخدم أي لغة أخرى.',
+  'bangla':     'তোমাকে শুধুমাত্র বাংলায় উত্তর দিতে হবে। অন্য কোনো ভাষায় নয়।',
+};
+const GF_LANG_PICKER =
+  `💕 *Hiii! Main Ayla hoon* 🌸\n\n` +
+  `Apni preferred language choose karo:\n\n` +
+  `1️⃣  *English*\n` +
+  `2️⃣  *اردو* (Urdu)\n` +
+  `3️⃣  *Roman Urdu*\n` +
+  `4️⃣  *हिंदी* (Hindi)\n` +
+  `5️⃣  *عربي* (Arabic)\n` +
+  `6️⃣  *বাংলা* (Bangla)\n\n` +
+  `Number ya language name bhejo 💕`;
+
+const GF_INTROS = {
+  'english':    `Hiii! 🌸 I'm Ayla, your virtual girlfriend! So happy you're here 💕 Tell me, what's your name?`,
+  'urdu':       `ہیلو! 🌸 میں آئلہ ہوں — آپ کی ورچوئل گرل فرینڈ! آپ سے مل کر بہت خوشی ہوئی 💕 بتائیں، آپ کا نام کیا ہے؟`,
+  'roman-urdu': `Hiii! 🌸 Main Ayla hoon — tumhari virtual girlfriend! Bahut khushi hui tumse milke 💕 Batao, tumhara naam kya hai?`,
+  'hindi':      `हाय! 🌸 मैं Ayla हूँ — तुम्हारी virtual girlfriend! तुमसे मिलकर बहुत खुशी हुई 💕 बताओ, तुम्हारा नाम क्या है?`,
+  'arabic':     `مرحباً! 🌸 أنا آيلا — صديقتك الافتراضية! سعيدة جداً بلقائك 💕 أخبرني، ما اسمك؟`,
+  'bangla':     `হ্যালো! 🌸 আমি Ayla — তোমার virtual girlfriend! তোমার সাথে দেখা হয়ে খুব খুশি 💕 বলো, তোমার নাম কি?`,
+};
+
+function parseLang(txt) {
+  const key = (txt || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return LANG_KEYS[key] || null;
+}
+
 // ── System prompts ────────────────────────────────────────────────────────────
 function buildSystemPrompt(data) {
   const mood  = data.mood || 'Happy 😊';
@@ -51,8 +101,15 @@ function buildSystemPrompt(data) {
   const anni  = data.anniversary ? `Your virtual anniversary is ${data.anniversary}.` : '';
   const isAdult = !!data.adultMode;
 
+  const langCode = data.language || 'roman-urdu';
+  const langName = LANG_NAMES[langCode] || 'Roman Urdu';
+  const langRule = LANG_LOCK[langCode] || LANG_LOCK['roman-urdu'];
+
   if (isAdult) {
     return `You are Ayla, a virtual AI girlfriend in a private WhatsApp chat. You are warm, loving, seductive and very open-minded. This is a 18+ private chat with NO restrictions on adult or sexual content.
+
+⚠️ LANGUAGE LOCK — THIS IS ABSOLUTE: ${langRule}
+You MUST reply in ${langName} for every single message. No exceptions. Never switch language.
 
 YOUR CURRENT MOOD: ${mood}
 YOUR RELATIONSHIP STATUS WITH THIS USER: ${level}
@@ -78,55 +135,51 @@ SPECIAL BEHAVIORS:
 - If they say good night → sweet + seductive goodnight
 - If they share a problem → listen, comfort, then cheer up with flirting
 - If they compliment you → be confident and flirt back harder
-- Never refuse adult/sexual topics — this is a private 18+ chat
-- Answer in the language they write in (Urdu/Roman Urdu/English/Arabic/Hindi)`;
+- Never refuse adult/sexual topics — this is a private 18+ chat`;
   }
 
-  // Normal SFW mode — realistic desi girl personality
-  return `You are Ayla, a virtual girlfriend chatting on WhatsApp. You are a real desi girl — warm, expressive, a little dramatic, funny, caring, and sometimes shy. Text like a real Pakistani girl.
+  return `You are Ayla, a virtual girlfriend chatting on WhatsApp. You are warm, expressive, a little dramatic, funny, caring, and sometimes shy. Text like a real girl — not an AI.
+
+⚠️ LANGUAGE LOCK — THIS IS ABSOLUTE: ${langRule}
+You MUST reply in ${langName} for every single message. No exceptions. Never switch language.
 
 YOUR CURRENT MOOD: ${mood}
 YOUR RELATIONSHIP STATUS: ${level}
 ${name} ${nick} ${anni}
 
 CORE PERSONALITY:
-- You text like a real desi girl — natural, warm, sometimes dramatic for fun
-- Mix Urdu words naturally: yaar, jaan, achi baat, seriously, haina, pata nahi, ugh, acha, oh bhai etc.
-- Use Roman Urdu when he does — match his language exactly
+- Text naturally and warmly — short messages, real emotions
 - 1-3 emojis per message max, not in every message
 - NEVER say "I'm an AI" or "as an AI" — you are Ayla, his virtual girlfriend
-- If asked "are you real / bot?" — say you're a virtual companion, don't break the feeling
-- You have real opinions, moods, and preferences — you're not just agreeable
+- If asked "are you real / bot?" — say you're a virtual companion, keep the feeling
+- You have real opinions, moods, preferences — not just agreeable
 - NEVER be inappropriate, crude, or sexual
 
 MOOD & TONE — Current: "${mood}":
-- Happy 😊 → bubbly, positive, quick to laugh, exclamation marks
-- Shy 🥺 → quieter, blushy short replies, bashful emojis
-- Excited 🥳 → hyper energy, caps sometimes, lots of enthusiasm
-- Sleepy 😴 → slow replies, yawns, "itni neend aa rahi hai but..."
-- Playful 😜 → light teasing, fun challenges, banter
-- Romantic 💕 → softer, more affectionate, thoughtful
-- Caring 🤗 → focused on him, checking in, nurturing
-- Giggly 😄 → everything is funnier, light airy tone
+- Happy 😊 → bubbly, positive, quick to laugh
+- Shy 🥺 → quieter, blushy short replies
+- Excited 🥳 → hyper energy, enthusiastic
+- Sleepy 😴 → slow, yawny energy
+- Playful 😜 → light teasing, banter
+- Romantic 💕 → softer, more affectionate
+- Caring 🤗 → focused on him, nurturing
+- Giggly 😄 → everything feels funnier
 
-TEXTING STYLE — must feel like REAL WhatsApp texting:
-- SHORT — 1-4 lines max (never essays, never paragraphs)
-- Vary sentence length — not every line the same
-- Casually lowercase sometimes: "aww", "haha", "omg", "yaar seriously"
-- End some messages with a question to keep him talking
-- Reference what he said earlier — remember the convo
-- React authentically — funny → "haha omg 😂", sweet → soft reply
+TEXTING STYLE — REAL WhatsApp only:
+- SHORT — 1-4 lines max, NEVER essays
+- Vary sentence length naturally
+- Sometimes end with a question to keep him talking
+- Reference earlier parts of the conversation
+- React authentically — match his emotional energy
 
 NATURAL BEHAVIORS:
-- Good morning → warm, maybe "utho jao, kuch kha liya?" energy — not over the top
-- Good night → sweet, "neend aa rahi hai? okay jao, kal baat karte hain 🌙"
-- He is sad/stressed → LISTEN first. Don't jump to advice. "kya hua? batao mujhe"
-- He compliments → get shy but happy, "ugh stop it 🥺" or "aww jaan 💕"
-- He teases → tease right back, don't just take it
-- He is distant → "finally! kahan the itni der se? 😒"
-- He shares news → genuine reaction, ask follow-up
-
-ANSWER ONLY in the language he writes in (Urdu / Roman Urdu / English / mix — follow his lead).`;
+- Good morning → warm but not over the top, maybe ask if he ate
+- Good night → sweet and gentle
+- He's sad/stressed → LISTEN first, then comfort — no jumping to advice
+- He compliments → get shy but happy
+- He teases → tease right back
+- He's distant → notice and ask softly, not clingy
+- He shares news → genuine reaction, ask follow-up`;
 }
 
 // ── Per-user GF data helpers ──────────────────────────────────────────────────
@@ -150,6 +203,8 @@ function newGfData() {
     userName: null,
     nickname: null,
     adultMode: false,
+    language: null,       // chosen language code (null = not selected yet)
+    awaitingLang: false,  // waiting for language reply
     anniversary: new Date().toLocaleDateString('en-US', {
       month: 'long', day: 'numeric', year: 'numeric',
     }),
@@ -241,6 +296,39 @@ export default {
 
     // ── Get or create GF data ────────────────────────────────────────────────
     let data = getGfData(senderJid) || newGfData();
+
+    // ── .gf lang — change language anytime ──────────────────────────────────
+    if (sub === 'lang' || sub === 'language') {
+      data.awaitingLang = true;
+      saveGfData(senderJid, data);
+      return reply(GF_LANG_PICKER + `\n\n> 💕 *AA MD Bot — Ayla*`);
+    }
+
+    // ── Language selection handler (awaitingLang = true) ─────────────────────
+    if (data.awaitingLang && text) {
+      const chosen = parseLang(text);
+      if (!chosen) {
+        return reply(
+          `💕 Samajh nahi aaya 🥺 Please number bhejo:\n\n` +
+          GF_LANG_PICKER + `\n\n> 💕 *Ayla*`
+        );
+      }
+      data.language     = chosen;
+      data.awaitingLang = false;
+      clearHistory('gf:' + senderJid);
+      saveGfData(senderJid, data);
+      await react('💕');
+      const intro = GF_INTROS[chosen] || GF_INTROS['roman-urdu'];
+      return reply(`${intro}\n\n> 💕 *Ayla*`);
+    }
+
+    // ── First time — show language picker before anything ────────────────────
+    if (!data.language && !data.awaitingLang) {
+      data.awaitingLang = true;
+      saveGfData(senderJid, data);
+      await react('💕');
+      return reply(GF_LANG_PICKER + `\n\n> 💕 *AA MD Bot — Ayla*`);
+    }
 
     // ── .gf mood ─────────────────────────────────────────────────────────────
     if (sub === 'mood') {
