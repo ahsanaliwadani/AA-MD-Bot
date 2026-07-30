@@ -4,6 +4,7 @@
 //   .aiedit make her hair blue
 //   .aiedit https://example.com/img.jpg make the background red
 import axios from 'axios';
+import { downloadMediaMessage } from '@whiskeysockets/baileys';
 
 const DC = 'https://apis.davidcyriltech.my.id';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
@@ -24,7 +25,10 @@ export default {
       // 1. Quoted image — upload to catbox to get public URL
       const quotedImg = quoted?.message?.imageMessage || quoted?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
       if (quotedImg) {
-        const buf = await sock.downloadMediaMessage(quoted).catch(() => null);
+        const buf = await downloadMediaMessage(
+          { message: { imageMessage: quotedImg }, key: quoted.key },
+          'buffer', {}, { reuploadRequest: sock.updateMediaMessage }
+        ).catch(() => null);
         if (buf) {
           const { default: FormData } = await import('form-data');
           const form = new FormData();

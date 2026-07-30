@@ -2,6 +2,7 @@
 // API: DavidCyrilTech /canvas/jail?image=<url>
 // Usage: reply/tag a user, or send .jail <image-url>
 import axios from 'axios';
+import { downloadMediaMessage } from '@whiskeysockets/baileys';
 
 const DC = 'https://apis.davidcyriltech.my.id';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
@@ -24,7 +25,10 @@ export default {
 
       // 1. Quoted image message
       if (quoted?.message?.imageMessage) {
-        const buf = await sock.downloadMediaMessage(quoted);
+        const buf = await downloadMediaMessage(
+          { message: { imageMessage: quoted.message.imageMessage }, key: quoted.key },
+          'buffer', {}, { reuploadRequest: sock.updateMediaMessage }
+        );
         const { default: FormData } = await import('form-data');
         // Upload to catbox for a public URL
         const form = new FormData();
