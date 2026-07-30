@@ -1,13 +1,14 @@
-import { parseCommand, isGroup } from './helper.js';
-import { getPlugin } from './pluginLoader.js';
-import { db } from './database.js';
-import { checkAnonRelay } from './anonRelay.js';
-import { logger } from './logger.js';
-import config from '../config.js';
-import { readFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { isConnectedSessionOwner } from './sessionManager.js';
+import { parseCommand, isGroup } from "./helper.js";
+import { getPlugin } from "./pluginLoader.js";
+import { db } from "./database.js";
+import { checkAnonRelay } from "./anonRelay.js";
+import { logger } from "./logger.js";
+import config from "../config.js";
+import { readFileSync, existsSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { isConnectedSessionOwner } from "./sessionManager.js";
+import { downloadContentFromMessage } from "@whiskeysockets/baileys";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -24,8 +25,9 @@ async function getCachedGroupMeta(sock, jid) {
   if (cached) {
     if (now - cached.ts < _GROUP_META_TTL) return cached.data; // fresh
     // Stale: return immediately, refresh in background
-    sock.groupMetadata(jid)
-      .then(meta => _groupMetaCache.set(jid, { data: meta, ts: Date.now() }))
+    sock
+      .groupMetadata(jid)
+      .then((meta) => _groupMetaCache.set(jid, { data: meta, ts: Date.now() }))
       .catch(() => {});
     return cached.data;
   }
@@ -35,8 +37,8 @@ async function getCachedGroupMeta(sock, jid) {
   return meta;
 }
 
-const CHANNEL_URL = 'https://whatsapp.com/channel/0029Vb8Yk2LL2AU78HliE617';
-const CHANNEL_NAME = 'AA MD Bot';
+const CHANNEL_URL = "https://whatsapp.com/channel/0029Vb8Yk2LL2AU78HliE617";
+const CHANNEL_NAME = "AA MD Bot";
 const WATERMARK = `\n\n> 🤖 *Powered by AA MD Bot*  👨‍💻 *Ahsan Ali Wadani*`;
 
 // Load banner thumbnail once for channel button
@@ -44,14 +46,17 @@ let _bannerThumb = null;
 function getBannerThumb() {
   if (_bannerThumb) return _bannerThumb;
   const paths = [
-    join(__dirname, '../banner.jpeg'),
-    join(__dirname, '../banner.jpg'),
-    join(__dirname, '../assets/banner.jpg'),
-    join(__dirname, '../../artifacts/aa-md-bot/public/banner.jpeg'),
+    join(__dirname, "../banner.jpeg"),
+    join(__dirname, "../banner.jpg"),
+    join(__dirname, "../assets/banner.jpg"),
+    join(__dirname, "../../artifacts/aa-md-bot/public/banner.jpeg"),
   ];
   for (const p of paths) {
     try {
-      if (existsSync(p)) { _bannerThumb = readFileSync(p); break; }
+      if (existsSync(p)) {
+        _bannerThumb = readFileSync(p);
+        break;
+      }
     } catch (_) {}
   }
   return _bannerThumb;
@@ -60,8 +65,9 @@ function getBannerThumb() {
 // Build contextInfo — always includes newsletter "View Channel" button.
 // Uses global (set at startup / .setnewsletter) with config as hard fallback.
 function buildChannelCtx() {
-  const newsletterJid  = global._AA_NEWSLETTER_JID  || config.newsletterJid;
-  const newsletterName = global._AA_NEWSLETTER_NAME || config.newsletterName || CHANNEL_NAME;
+  const newsletterJid = global._AA_NEWSLETTER_JID || config.newsletterJid;
+  const newsletterName =
+    global._AA_NEWSLETTER_NAME || config.newsletterName || CHANNEL_NAME;
   if (!newsletterJid) return null;
   return {
     forwardingScore: 999,
@@ -75,35 +81,40 @@ function buildChannelCtx() {
 }
 
 export function isOwner(jid) {
-  const num = jid?.split('@')[0]?.split(':')[0];
+  const num = jid?.split("@")[0]?.split(":")[0];
   if (num === config.superOwner) return true;
   if (isConnectedSessionOwner(jid)) return true;
-  const owners = db.settings.getValue('owners') || config.owners || [];
+  const owners = db.settings.getValue("owners") || config.owners || [];
   return owners.includes(num) || owners.includes(jid);
 }
 
 // SuperOwner is stored in Firebase db.settings so it applies across all servers.
 // Falls back to config.js if DB not yet set.
 function getSuperOwner() {
-  return String(db.settings.getValue('superOwner') || config.superOwner || '');
+  return String(db.settings.getValue("superOwner") || config.superOwner || "");
 }
 
 export function isSuperOwner(jid) {
-  const num = jid?.split('@')[0]?.split(':')[0];
+  const num = jid?.split("@")[0]?.split(":")[0];
   return num === getSuperOwner();
 }
 
 // Banned users stored in db.settings.bannedUsers (Firebase) — persists & syncs across servers
 function isBanned(jid) {
-  const banned = db.settings.getValue('bannedUsers') || [];
-  return banned.includes(jid) || banned.includes(jid.split('@')[0]?.split(':')[0]);
+  const banned = db.settings.getValue("bannedUsers") || [];
+  return (
+    banned.includes(jid) || banned.includes(jid.split("@")[0]?.split(":")[0])
+  );
 }
 
 function checkSpam(jid) {
   const now = Date.now();
   const win = config.spamInterval * 1000;
   const e = spamTracker.get(jid) || { count: 0, first: now };
-  if (now - e.first > win) { spamTracker.set(jid, { count: 1, first: now }); return false; }
+  if (now - e.first > win) {
+    spamTracker.set(jid, { count: 1, first: now });
+    return false;
+  }
   e.count++;
   spamTracker.set(jid, e);
   return e.count > config.spamMax;
@@ -113,71 +124,84 @@ function checkCooldown(jid, command) {
   const key = `${jid}:${command}`;
   const now = Date.now();
   const last = cooldowns.get(key);
-  if (last && now - last < config.cooldown * 1000) return config.cooldown - Math.floor((now - last) / 1000);
+  if (last && now - last < config.cooldown * 1000)
+    return config.cooldown - Math.floor((now - last) / 1000);
   cooldowns.set(key, now);
   return 0;
 }
 
 async function getMessageText(msg) {
   const m = msg.message;
-  if (!m) return '';
+  if (!m) return "";
   // Unwrap disappearing-message (ephemeral) and other wrapper containers
   const inner = m.ephemeralMessage?.message || m;
   // Unwrap document-with-caption wrapper
   const docInner = inner.documentWithCaptionMessage?.message || inner;
   // Unwrap viewOnce containers (reveal commands can be sent as viewOnce)
-  const voInner = inner.viewOnceMessage?.message || inner.viewOnceMessageV2?.message || inner;
+  const voInner =
+    inner.viewOnceMessage?.message || inner.viewOnceMessageV2?.message || inner;
 
   return (
-    inner.conversation                                                        ||
-    inner.extendedTextMessage?.text                                            ||
-    inner.imageMessage?.caption                                                ||
-    inner.videoMessage?.caption                                                ||
-    docInner.documentMessage?.caption                                          ||
-    inner.documentMessage?.caption                                             ||
+    inner.conversation ||
+    inner.extendedTextMessage?.text ||
+    inner.imageMessage?.caption ||
+    inner.videoMessage?.caption ||
+    docInner.documentMessage?.caption ||
+    inner.documentMessage?.caption ||
     // Ephemeral wrappers with media captions (disappearing messages)
-    inner.ephemeralMessage?.message?.imageMessage?.caption                     ||
-    inner.ephemeralMessage?.message?.videoMessage?.caption                     ||
-    inner.ephemeralMessage?.message?.documentMessage?.caption                  ||
+    inner.ephemeralMessage?.message?.imageMessage?.caption ||
+    inner.ephemeralMessage?.message?.videoMessage?.caption ||
+    inner.ephemeralMessage?.message?.documentMessage?.caption ||
     // ViewOnce messages can carry commands as captions
-    voInner.imageMessage?.caption                                               ||
-    voInner.videoMessage?.caption                                               ||
+    voInner.imageMessage?.caption ||
+    voInner.videoMessage?.caption ||
     // Edited messages — extract the edited body
-    inner.editedMessage?.message?.protocolMessage?.editedMessage?.conversation ||
-    inner.editedMessage?.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
+    inner.editedMessage?.message?.protocolMessage?.editedMessage
+      ?.conversation ||
+    inner.editedMessage?.message?.protocolMessage?.editedMessage
+      ?.extendedTextMessage?.text ||
     // Button / list / template responses
-    inner.buttonsResponseMessage?.selectedButtonId                              ||
-    inner.listResponseMessage?.singleSelectReply?.selectedRowId                ||
-    inner.templateButtonReplyMessage?.selectedId                               ||
-    inner.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson    ||
-    inner.interactiveMessage?.body?.text                                       ||
-    ''
+    inner.buttonsResponseMessage?.selectedButtonId ||
+    inner.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    inner.templateButtonReplyMessage?.selectedId ||
+    inner.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+    inner.interactiveMessage?.body?.text ||
+    ""
   );
 }
 
 async function react(sock, msg, emoji) {
-  await sock.sendMessage(msg.key.remoteJid, { react: { text: emoji, key: msg.key } }).catch(() => {});
+  await sock
+    .sendMessage(msg.key.remoteJid, { react: { text: emoji, key: msg.key } })
+    .catch(() => {});
 }
 
 // All text replies automatically get the watermark. Newsletter "lid" button only
 // appears when owner has run .setnewsletter — no fallback channel ad.
 async function reply(sock, msg, text, options = {}) {
-  const fullText = typeof text === 'string' ? text + WATERMARK : text;
+  const fullText = typeof text === "string" ? text + WATERMARK : text;
   const ctx = buildChannelCtx();
-  const payload = ctx ? { text: fullText, contextInfo: ctx, ...options } : { text: fullText, ...options };
+  const payload = ctx
+    ? { text: fullText, contextInfo: ctx, ...options }
+    : { text: fullText, ...options };
   return sock.sendMessage(msg.key.remoteJid, payload, { quoted: msg });
 }
 
 async function sendMsg(sock, jid, content, options = {}) {
   const ctx = buildChannelCtx();
-  if (typeof content === 'string') {
+  if (typeof content === "string") {
     const fullText = content + WATERMARK;
-    const payload = ctx ? { text: fullText, contextInfo: ctx, ...options } : { text: fullText, ...options };
+    const payload = ctx
+      ? { text: fullText, contextInfo: ctx, ...options }
+      : { text: fullText, ...options };
     return sock.sendMessage(jid, payload);
   }
   // Non-text messages (image/audio/video/sticker): append watermark to caption if present
-  if (content.caption && !content.caption.includes('AA MD Bot')) content.caption += WATERMARK;
-  const payload = ctx ? { contextInfo: ctx, ...content, ...options } : { ...content, ...options };
+  if (content.caption && !content.caption.includes("AA MD Bot"))
+    content.caption += WATERMARK;
+  const payload = ctx
+    ? { contextInfo: ctx, ...content, ...options }
+    : { ...content, ...options };
   return sock.sendMessage(jid, payload);
 }
 
@@ -205,6 +229,84 @@ async function sendMedia(sock, jid, msg, content) {
   return sock.sendMessage(jid, payload, { quoted: msg });
 }
 
+// ── Auto Anti-ViewOnce ────────────────────────────────────────────────────
+// Extracts view-once media (image/video) from ANY message shape WhatsApp
+// sends (wrapper variants + inline viewOnce flag), and — if the
+// .antiviewonce toggle is ON for this scope — downloads it and forwards it
+// to the bot owner's own "You" chat. Runs BEFORE the text/caption check in
+// handleMessage, since view-once media often carries no caption at all.
+// Fire-and-forget from the caller so it never delays command handling.
+function extractViewOnceMedia(msg) {
+  const container = msg.message?.ephemeralMessage?.message || msg.message;
+  if (!container) return null;
+
+  const wrapper =
+    container.viewOnceMessage?.message ||
+    container.viewOnceMessageV2?.message ||
+    container.viewOnceMessageV2Extension?.message;
+
+  if (wrapper) {
+    if (wrapper.imageMessage)
+      return { type: "image", content: wrapper.imageMessage };
+    if (wrapper.videoMessage)
+      return { type: "video", content: wrapper.videoMessage };
+    return null;
+  }
+
+  if (container.imageMessage?.viewOnce)
+    return { type: "image", content: container.imageMessage };
+  if (container.videoMessage?.viewOnce)
+    return { type: "video", content: container.videoMessage };
+
+  return null;
+}
+
+async function autoRevealViewOnce(
+  sock,
+  msg,
+  sessionId,
+  jid,
+  senderJid,
+  isGroupMsg,
+  settings,
+  ownJid,
+) {
+  try {
+    if (!ownJid) return;
+
+    const vo = extractViewOnceMedia(msg);
+    if (!vo) return; // not a view-once message — nothing to do
+
+    const active = isGroupMsg
+      ? (db.groups.get(sessionId, jid)?.antiviewonce ??
+        settings.antiViewOnce ??
+        false)
+      : (settings.antiViewOnce ?? false);
+
+    if (!active) return;
+
+    const stream = await downloadContentFromMessage(vo.content, vo.type);
+    let buffer = Buffer.from([]);
+    for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+
+    const senderName = senderJid?.split("@")[0] || "Unknown";
+    let caption =
+      `👁️ *View-Once Auto-Revealed*\n\n` +
+      `👤 From: ${senderName}\n` +
+      `💬 Chat: ${isGroupMsg ? "Group" : "Private"}` +
+      (vo.content.caption ? `\n📝 Caption: ${vo.content.caption}` : "");
+    caption += WATERMARK;
+
+    const payload =
+      vo.type === "image"
+        ? { image: buffer, caption }
+        : { video: buffer, caption };
+    await sock.sendMessage(ownJid, payload).catch(() => {});
+  } catch (err) {
+    logger.error({ err: err?.message }, "autoRevealViewOnce failed");
+  }
+}
+
 export async function handleMessage(sock, msg, sessionId) {
   try {
     const jid = msg.key.remoteJid;
@@ -213,21 +315,51 @@ export async function handleMessage(sock, msg, sessionId) {
     const isGroupMsg = isGroup(jid);
     const settings = db.settings.get();
 
+    // Bot's own JID — computed early so the auto-viewonce handler can use it
+    // too. Read from settings (saved at connect time, most reliable),
+    // fallback to sock.user?.id in case settings not yet written.
+    const ownJid =
+      db.settings.getValue("botJid") ||
+      (sock.user?.id || "").replace(/:.*@/, "@") ||
+      null;
+
+    // Fire off the auto-viewonce check immediately, before the text/caption
+    // gate below — view-once media frequently has no caption, so it would
+    // otherwise get dropped by `if (!text) return;` and never processed.
+    // Not awaited so it never delays normal command handling.
+    if (!fromMe) {
+      autoRevealViewOnce(
+        sock,
+        msg,
+        sessionId,
+        jid,
+        senderJid,
+        isGroupMsg,
+        settings,
+        ownJid,
+      );
+    }
+
     // Per-session settings override global — session-specific features go here
     const sessSets = db.sessionSettings.get(sessionId);
     // Merge: session settings take priority over global for per-number features
-    const eff = (key, fallback) => (sessSets[key] !== undefined ? sessSets[key] : (settings[key] !== undefined ? settings[key] : fallback));
+    const eff = (key, fallback) =>
+      sessSets[key] !== undefined
+        ? sessSets[key]
+        : settings[key] !== undefined
+          ? settings[key]
+          : fallback;
 
     // fromMe = self-chat ("You" tab) — always treated as owner
     const owner = isOwner(senderJid) || fromMe;
 
-    const botMode = eff('botMode', 'public');
-    if (botMode === 'private' && !owner && !fromMe) return;
+    const botMode = eff("botMode", "public");
+    if (botMode === "private" && !owner && !fromMe) return;
 
     // NOTE: auto-read is handled in sessionManager before commandHandler is called — no duplicate here.
 
     // Auto-react to every incoming message (not own messages, not view-once)
-    if (eff('autoReact', false) && !fromMe) {
+    if (eff("autoReact", false) && !fromMe) {
       const msgContent = msg.message || {};
       const innerContent = msgContent?.ephemeralMessage?.message || msgContent;
       const isViewOnce = !!(
@@ -238,8 +370,10 @@ export async function handleMessage(sock, msg, sessionId) {
         innerContent?.videoMessage?.viewOnce
       );
       if (!isViewOnce) {
-        const emoji = eff('autoReactEmoji', config.autoReactEmoji ?? '❤️');
-        sock.sendMessage(jid, { react: { text: emoji, key: msg.key } }).catch(() => {});
+        const emoji = eff("autoReactEmoji", config.autoReactEmoji ?? "❤️");
+        sock
+          .sendMessage(jid, { react: { text: emoji, key: msg.key } })
+          .catch(() => {});
       }
     }
 
@@ -268,12 +402,14 @@ export async function handleMessage(sock, msg, sessionId) {
     }
 
     if (isBanned(senderJid) && !owner) {
-      await reply(sock, msg, '❌ You are banned from using this bot.').catch(() => {});
+      await reply(sock, msg, "❌ You are banned from using this bot.").catch(
+        () => {},
+      );
       return;
     }
 
     if (!owner && settings.antiSpam && checkSpam(senderJid)) {
-      await reply(sock, msg, '⚠️ Too fast! Wait a moment.').catch(() => {});
+      await reply(sock, msg, "⚠️ Too fast! Wait a moment.").catch(() => {});
       return;
     }
 
@@ -282,40 +418,57 @@ export async function handleMessage(sock, msg, sessionId) {
 
     const cooldownLeft = checkCooldown(senderJid, command);
     if (cooldownLeft > 0 && !owner) {
-      await reply(sock, msg, `⏳ Wait *${cooldownLeft}s* before using this again.`).catch(() => {});
+      await reply(
+        sock,
+        msg,
+        `⏳ Wait *${cooldownLeft}s* before using this again.`,
+      ).catch(() => {});
       return;
     }
 
     // superOwnerOnly: allow if senderJid matches superOwner OR if fromMe on superOwner's own session
-    const sessionPhone = sock.user?.id?.split('@')[0]?.split(':')[0];
+    const sessionPhone = sock.user?.id?.split("@")[0]?.split(":")[0];
     const isSuperOwnerSelf = fromMe && sessionPhone === getSuperOwner();
-    if (plugin.superOwnerOnly && !isSuperOwner(senderJid) && !isSuperOwnerSelf) {
-      await reply(sock, msg, '👑 This command is reserved for the main developer only.').catch(() => {});
+    if (
+      plugin.superOwnerOnly &&
+      !isSuperOwner(senderJid) &&
+      !isSuperOwnerSelf
+    ) {
+      await reply(
+        sock,
+        msg,
+        "👑 This command is reserved for the main developer only.",
+      ).catch(() => {});
       return;
     }
 
     if (plugin.ownerOnly && !owner) {
-      await reply(sock, msg, '🔒 This command is for bot owners only.').catch(() => {});
+      await reply(sock, msg, "🔒 This command is for bot owners only.").catch(
+        () => {},
+      );
       return;
     }
 
     if (plugin.groupOnly && !isGroupMsg) {
-      await reply(sock, msg, '👥 Groups only.').catch(() => {});
+      await reply(sock, msg, "👥 Groups only.").catch(() => {});
       return;
     }
 
     if (plugin.privateOnly && isGroupMsg) {
-      await reply(sock, msg, '💬 Private chat only.').catch(() => {});
+      await reply(sock, msg, "💬 Private chat only.").catch(() => {});
       return;
     }
 
     if (plugin.adminOnly && isGroupMsg) {
       try {
         const meta = await getCachedGroupMeta(sock, jid);
-        const normJid = id => id?.includes(':') ? id.split(':')[0] + '@s.whatsapp.net' : id;
-        const admins = meta.participants.filter(p => p.admin).map(p => normJid(p.id));
+        const normJid = (id) =>
+          id?.includes(":") ? id.split(":")[0] + "@s.whatsapp.net" : id;
+        const admins = meta.participants
+          .filter((p) => p.admin)
+          .map((p) => normJid(p.id));
         if (!admins.includes(normJid(senderJid)) && !owner) {
-          await reply(sock, msg, '👮 Group admins only.').catch(() => {});
+          await reply(sock, msg, "👮 Group admins only.").catch(() => {});
           return;
         }
       } catch {}
@@ -323,16 +476,20 @@ export async function handleMessage(sock, msg, sessionId) {
 
     // Skip composing presence when fake last seen is active — firing "composing"
     // implicitly marks the number as online and resets the scheduled last-seen time.
-    const fakeLsActive = db.sessionSettings.getValue(sessionId, 'fake_lastseen_active');
-    if (eff('autoTyping', false) && !fromMe && !fakeLsActive) {
-      sock.sendPresenceUpdate('composing', jid).catch(() => {});
+    const fakeLsActive = db.sessionSettings.getValue(
+      sessionId,
+      "fake_lastseen_active",
+    );
+    if (eff("autoTyping", false) && !fromMe && !fakeLsActive) {
+      sock.sendPresenceUpdate("composing", jid).catch(() => {});
     }
 
     // Build quoted object with message + key so plugins can download media
-    const _ctxInfo = msg.message?.extendedTextMessage?.contextInfo
-                  || msg.message?.imageMessage?.contextInfo
-                  || msg.message?.videoMessage?.contextInfo
-                  || msg.message?.audioMessage?.contextInfo;
+    const _ctxInfo =
+      msg.message?.extendedTextMessage?.contextInfo ||
+      msg.message?.imageMessage?.contextInfo ||
+      msg.message?.videoMessage?.contextInfo ||
+      msg.message?.audioMessage?.contextInfo;
     const _quotedMsg = _ctxInfo?.quotedMessage;
     const quoted = _quotedMsg
       ? {
@@ -345,12 +502,6 @@ export async function handleMessage(sock, msg, sessionId) {
           },
         }
       : null;
-
-    // Bot's own JID — read from settings (saved at connect time, most reliable)
-    // Fallback to sock.user?.id in case settings not yet written
-    const ownJid = db.settings.getValue('botJid')
-      || (sock.user?.id || '').replace(/:.*@/, '@')
-      || null;
 
     // Per-session settings accessor — bound to this session's sessionId
     // Plugins use sessionSettings.get/set instead of db.settings for per-number features
@@ -375,10 +526,10 @@ export async function handleMessage(sock, msg, sessionId) {
     const scopedDb = {
       ...db,
       groups: {
-        get:    (groupId)       => db.groups.get(sessionId, groupId),
-        set:    (groupId, data) => db.groups.set(sessionId, groupId, data),
-        delete: (groupId)       => db.groups.delete(sessionId, groupId),
-        all:    ()              => db.groups.all(sessionId),
+        get: (groupId) => db.groups.get(sessionId, groupId),
+        set: (groupId, data) => db.groups.set(sessionId, groupId, data),
+        delete: (groupId) => db.groups.delete(sessionId, groupId),
+        all: () => db.groups.all(sessionId),
       },
     };
 
@@ -387,17 +538,22 @@ export async function handleMessage(sock, msg, sessionId) {
     // specifically to strip those tags, so their own responses should be tag-free.
     const _replyFn = plugin.noChannelCtx
       ? (t, opts = {}) => {
-          const fullText = typeof t === 'string' ? t + WATERMARK : t;
-          return sock.sendMessage(msg.key.remoteJid, { text: fullText, ...opts }, { quoted: msg });
+          const fullText = typeof t === "string" ? t + WATERMARK : t;
+          return sock.sendMessage(
+            msg.key.remoteJid,
+            { text: fullText, ...opts },
+            { quoted: msg },
+          );
         }
       : (t, opts) => reply(sock, msg, t, opts);
 
     const _sendFn = plugin.noChannelCtx
       ? (t, opts = {}) => {
-          if (typeof t === 'string') {
+          if (typeof t === "string") {
             return sock.sendMessage(jid, { text: t + WATERMARK, ...opts });
           }
-          if (t.caption && !t.caption.includes('AA MD Bot')) t.caption += WATERMARK;
+          if (t.caption && !t.caption.includes("AA MD Bot"))
+            t.caption += WATERMARK;
           return sock.sendMessage(jid, { ...t, ...opts });
         }
       : (t, opts) => sendMsg(sock, jid, t, opts);
@@ -411,14 +567,25 @@ export async function handleMessage(sock, msg, sessionId) {
       : (content) => sendMedia(sock, jid, msg, content);
 
     await plugin.execute({
-      sock, msg, jid, senderJid, fromMe, isGroupMsg,
-      command, args, text: argText, prefix, sessionId,
-      isOwner: owner, isSudo: owner,
+      sock,
+      msg,
+      jid,
+      senderJid,
+      fromMe,
+      isGroupMsg,
+      command,
+      args,
+      text: argText,
+      prefix,
+      sessionId,
+      isOwner: owner,
+      isSudo: owner,
       reply: _replyFn,
       react: (e) => react(sock, msg, e),
       send: _sendFn,
       sendMedia: _sendMediaFn,
-      db: scopedDb, config,
+      db: scopedDb,
+      config,
       sessionSettings,
       quoted,
       ownJid,
@@ -426,11 +593,11 @@ export async function handleMessage(sock, msg, sessionId) {
       logger,
     });
 
-    if (eff('autoTyping', false) && !fakeLsActive) {
-      sock.sendPresenceUpdate('paused', jid).catch(() => {});
+    if (eff("autoTyping", false) && !fakeLsActive) {
+      sock.sendPresenceUpdate("paused", jid).catch(() => {});
     }
   } catch (err) {
-    logger.error({ err: err.message }, 'handleMessage error');
+    logger.error({ err: err.message }, "handleMessage error");
   }
 }
 
