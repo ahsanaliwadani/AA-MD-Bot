@@ -7,14 +7,16 @@
 // view-once caption contains the configured keyword.
 // ============================================
 
-import moment from 'moment-timezone';
-import { logger } from './logger.js';
-import { db } from './database.js';
-import config from '../config.js';
+import moment from "moment-timezone";
+import { logger } from "./logger.js";
+import { db } from "./database.js";
+import config from "../config.js";
 
 // ── Direct-download helper (mirrors reveal.js Step 1) ────────────────────────
 async function dlBufDirect(mediaMsg, type) {
-  const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
+  const { downloadContentFromMessage } = await import(
+    "@whiskeysockets/baileys"
+  );
   const stream = await downloadContentFromMessage(mediaMsg, type);
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
@@ -30,12 +32,48 @@ function extractQuotedMediaForReveal(quotedMsg) {
     quotedMsg?.viewOnceMessage?.message ||
     quotedMsg?.ephemeralMessage?.message ||
     quotedMsg;
-  if (inner?.imageMessage) return { mediaMsg: inner.imageMessage, isVid: false, isAudio: false, mime: inner.imageMessage.mimetype || 'image/jpeg' };
-  if (inner?.videoMessage) return { mediaMsg: inner.videoMessage, isVid: true,  isAudio: false, mime: inner.videoMessage.mimetype || 'video/mp4'  };
-  if (inner?.audioMessage) return { mediaMsg: inner.audioMessage, isVid: false, isAudio: true,  mime: inner.audioMessage.mimetype || 'audio/mp4'  };
-  if (quotedMsg?.imageMessage) return { mediaMsg: quotedMsg.imageMessage, isVid: false, isAudio: false, mime: quotedMsg.imageMessage.mimetype || 'image/jpeg' };
-  if (quotedMsg?.videoMessage) return { mediaMsg: quotedMsg.videoMessage, isVid: true,  isAudio: false, mime: quotedMsg.videoMessage.mimetype || 'video/mp4'  };
-  if (quotedMsg?.audioMessage) return { mediaMsg: quotedMsg.audioMessage, isVid: false, isAudio: true,  mime: quotedMsg.audioMessage.mimetype || 'audio/mp4'  };
+  if (inner?.imageMessage)
+    return {
+      mediaMsg: inner.imageMessage,
+      isVid: false,
+      isAudio: false,
+      mime: inner.imageMessage.mimetype || "image/jpeg",
+    };
+  if (inner?.videoMessage)
+    return {
+      mediaMsg: inner.videoMessage,
+      isVid: true,
+      isAudio: false,
+      mime: inner.videoMessage.mimetype || "video/mp4",
+    };
+  if (inner?.audioMessage)
+    return {
+      mediaMsg: inner.audioMessage,
+      isVid: false,
+      isAudio: true,
+      mime: inner.audioMessage.mimetype || "audio/mp4",
+    };
+  if (quotedMsg?.imageMessage)
+    return {
+      mediaMsg: quotedMsg.imageMessage,
+      isVid: false,
+      isAudio: false,
+      mime: quotedMsg.imageMessage.mimetype || "image/jpeg",
+    };
+  if (quotedMsg?.videoMessage)
+    return {
+      mediaMsg: quotedMsg.videoMessage,
+      isVid: true,
+      isAudio: false,
+      mime: quotedMsg.videoMessage.mimetype || "video/mp4",
+    };
+  if (quotedMsg?.audioMessage)
+    return {
+      mediaMsg: quotedMsg.audioMessage,
+      isVid: false,
+      isAudio: true,
+      mime: quotedMsg.audioMessage.mimetype || "audio/mp4",
+    };
   return null;
 }
 
@@ -62,39 +100,55 @@ export function cleanViewOnceStore() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getPhoneNum(jid) {
   if (!jid) return null;
-  return jid.split('@')[0].split(':')[0];
+  return jid.split("@")[0].split(":")[0];
 }
 
 function formatPhone(num) {
-  if (!num) return 'Unknown';
-  return num.startsWith('+') ? num : `+${num}`;
+  if (!num) return "Unknown";
+  return num.startsWith("+") ? num : `+${num}`;
 }
 
 function normalizeMsg(message) {
   let m = message;
   for (let i = 0; i < 5; i++) {
-    if (m?.ephemeralMessage)             { m = m.ephemeralMessage.message;             continue; }
-    if (m?.documentWithCaptionMessage)   { m = m.documentWithCaptionMessage.message;   continue; }
+    if (m?.ephemeralMessage) {
+      m = m.ephemeralMessage.message;
+      continue;
+    }
+    if (m?.documentWithCaptionMessage) {
+      m = m.documentWithCaptionMessage.message;
+      continue;
+    }
     break;
   }
   return m;
 }
 
 function extractViewOnceMedia(normalized) {
-  const voMsg = normalized?.viewOnceMessage
-             || normalized?.viewOnceMessageV2
-             || normalized?.viewOnceMessageV2Extension;
+  const voMsg =
+    normalized?.viewOnceMessage ||
+    normalized?.viewOnceMessageV2 ||
+    normalized?.viewOnceMessageV2Extension;
 
-  if (voMsg?.message?.imageMessage) return { mediaMsg: voMsg.message.imageMessage, isVid: false };
-  if (voMsg?.message?.videoMessage) return { mediaMsg: voMsg.message.videoMessage, isVid: true  };
-  if (normalized?.imageMessage?.viewOnce) return { mediaMsg: normalized.imageMessage, isVid: false };
-  if (normalized?.videoMessage?.viewOnce) return { mediaMsg: normalized.videoMessage, isVid: true  };
+  if (voMsg?.message?.imageMessage)
+    return { mediaMsg: voMsg.message.imageMessage, isVid: false };
+  if (voMsg?.message?.videoMessage)
+    return { mediaMsg: voMsg.message.videoMessage, isVid: true };
+  if (normalized?.imageMessage?.viewOnce)
+    return { mediaMsg: normalized.imageMessage, isVid: false };
+  if (normalized?.videoMessage?.viewOnce)
+    return { mediaMsg: normalized.videoMessage, isVid: true };
   return null;
 }
 
 async function downloadBuffer(mediaMsg, isVid) {
-  const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
-  const stream = await downloadContentFromMessage(mediaMsg, isVid ? 'video' : 'image');
+  const { downloadContentFromMessage } = await import(
+    "@whiskeysockets/baileys"
+  );
+  const stream = await downloadContentFromMessage(
+    mediaMsg,
+    isVid ? "video" : "image",
+  );
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks);
@@ -116,88 +170,116 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     if (_processed.has(msgId)) return;
 
     const normalized = normalizeMsg(msg.message);
-    const extracted  = extractViewOnceMedia(normalized);
+    const extracted = extractViewOnceMedia(normalized);
     if (!extracted) return;
 
     const { mediaMsg, isVid } = extracted;
-    const mime     = mediaMsg.mimetype || (isVid ? 'video/mp4' : 'image/jpeg');
-    const caption  = mediaMsg.caption || '';
-    const chatJid  = msg.key.remoteJid;
-    const inGroup  = chatJid?.endsWith('@g.us');
-    const senderJid = msg.key.participant || chatJid || '';
-    const num      = getPhoneNum(senderJid);
-    const tz       = config.timezone || 'Asia/Karachi';
-    const time     = new Date().toLocaleString('en-PK', { timeZone: tz, hour12: true });
+    const mime = mediaMsg.mimetype || (isVid ? "video/mp4" : "image/jpeg");
+    const caption = mediaMsg.caption || "";
+    const chatJid = msg.key.remoteJid;
+    const inGroup = chatJid?.endsWith("@g.us");
+    const senderJid = msg.key.participant || chatJid || "";
+    const num = getPhoneNum(senderJid);
+    const tz = config.timezone || "Asia/Karachi";
+    const time = new Date().toLocaleString("en-PK", {
+      timeZone: tz,
+      hour12: true,
+    });
 
-    logger.info({ sessionId, msgId, chat: chatJid, isVid }, '👁️ ViewOnce detected — downloading');
+    logger.info(
+      { sessionId, msgId, chat: chatJid, isVid },
+      "👁️ ViewOnce detected — downloading",
+    );
 
     // Download
     let buf = null;
     try {
       buf = await downloadBuffer(mediaMsg, isVid);
     } catch (e) {
-      logger.warn({ err: e.message }, 'ViewOnce download failed');
+      logger.warn({ err: e.message }, "ViewOnce download failed");
     }
     if (!buf?.length) return; // leave _processed clear so messages.update can retry
 
     // Mark as successfully handled — prevents double-processing on retry events
     _processed.add(msgId);
-    if (_processed.size > _PROCESSED_MAX) _processed.delete(_processed.values().next().value);
+    if (_processed.size > _PROCESSED_MAX)
+      _processed.delete(_processed.values().next().value);
 
     // Store in memory only — no disk writes
-    const senderName = sock.contacts?.[senderJid]?.name
-               || sock.contacts?.[senderJid]?.notify
-               || formatPhone(num);
+    const senderName =
+      sock.contacts?.[senderJid]?.name ||
+      sock.contacts?.[senderJid]?.notify ||
+      formatPhone(num);
     const entry = {
-      buf, mime, isVid, num, time, inGroup,
-      caption, chatJid, senderJid, senderName,
+      buf,
+      mime,
+      isVid,
+      num,
+      time,
+      inGroup,
+      caption,
+      chatJid,
+      senderJid,
+      senderName,
       timestamp: Date.now(),
     };
     viewOnceStore.set(msgId, entry);
-    if (viewOnceStore.size > _MAX_STORE) viewOnceStore.delete(viewOnceStore.keys().next().value);
+    if (viewOnceStore.size > _MAX_STORE)
+      viewOnceStore.delete(viewOnceStore.keys().next().value);
 
-    logger.info({ sessionId, msgId, bytes: buf.length }, '✅ ViewOnce cached (memory only)');
+    logger.info(
+      { sessionId, msgId, bytes: buf.length },
+      "✅ ViewOnce cached (memory only)",
+    );
 
     // ── Auto-reply to sender ──────────────────────────────────────────────────
-    const autoReply = db.settings.getValue('voAutoReply');
+    const autoReply = db.settings.getValue("voAutoReply");
     if (autoReply && !msg.key.fromMe) {
       await sock.sendMessage(chatJid, { text: autoReply }).catch(() => {});
     }
 
-    // ── Always auto-forward to owner's "You" (self) chat ─────────────────────
-    // This runs unconditionally — every view-once is silently saved to your
-    // own chat so you can always review it later, regardless of antiviewonce.
-    const selfNum = sock.user?.id?.split('@')[0]?.split(':')[0];
-    const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
+    // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
+    const antiVOActive = inGroup
+      ? (db.groups.get(sessionId, chatJid)?.antiviewonce ??
+        db.settings.getValue("antiViewOnce") ??
+        false)
+      : (db.settings.getValue("antiViewOnce") ?? false);
 
-    if (selfJid) {
-      const date    = moment().tz(tz).format('DD/MM/YYYY');
-      const timeStr = moment().tz(tz).format('HH:mm:ss');
+    if (antiVOActive) {
+      const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
+      const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
 
-      const cap =
-        `🔓 *View-Once Auto-Saved*\n\n` +
-        `👤 *From:* ${formatPhone(num)}\n` +
-        `🕐 *Time:* ${timeStr}\n` +
-        `📅 *Date:* ${date}\n` +
-        `📍 *Chat:* ${inGroup ? 'Group' : 'DM'}\n` +
-        `\n> 👁️ *AA MD Bot*`;
+      if (selfJid) {
+        const date = moment().tz(tz).format("DD/MM/YYYY");
+        const timeStr = moment().tz(tz).format("HH:mm:ss");
 
-      await sock.sendMessage(
-        selfJid,
-        isVid ? { video: buf, caption: cap, mimetype: mime }
-              : { image: buf, caption: cap, mimetype: mime }
-      ).catch(() => {});
+        const cap =
+          `🔓 *View-Once Auto-Saved*\n\n` +
+          `👤 *From:* ${formatPhone(num)}\n` +
+          `🕐 *Time:* ${timeStr}\n` +
+          `📅 *Date:* ${date}\n` +
+          `📍 *Chat:* ${inGroup ? "Group" : "DM"}\n` +
+          `\n> 👁️ *AA MD Bot*`;
+
+        await sock
+          .sendMessage(
+            selfJid,
+            isVid
+              ? { video: buf, caption: cap, mimetype: mime }
+              : { image: buf, caption: cap, mimetype: mime },
+          )
+          .catch(() => {});
+      }
     }
-
   } catch (e) {
-    logger.warn({ err: e.message, stack: e.stack }, 'ViewOnce handler threw');
+    logger.warn({ err: e.message, stack: e.stack }, "ViewOnce handler threw");
   }
 }
 
 // ── Helpers for reply reveal ──────────────────────────────────────────────────
 // Extract plain text from any message type
 function extractText(m) {
-  if (!m) return '';
+  if (!m) return "";
   const norm = normalizeMsg(m);
   return (
     norm?.conversation ||
@@ -207,7 +289,8 @@ function extractText(m) {
     norm?.documentMessage?.caption ||
     norm?.audioMessage?.caption ||
     norm?.buttonsResponseMessage?.selectedDisplayText ||
-    norm?.listResponseMessage?.title || ''
+    norm?.listResponseMessage?.title ||
+    ""
   );
 }
 
@@ -223,16 +306,27 @@ function extractContextInfo(m) {
     if (!obj || depth > 8) return;
     // Yield contextInfo from any known message type at this level
     for (const key of [
-      'extendedTextMessage', 'imageMessage', 'videoMessage', 'documentMessage',
-      'audioMessage', 'buttonsResponseMessage', 'listResponseMessage',
-      'stickerMessage', 'contactMessage', 'locationMessage', 'templateButtonReplyMessage',
+      "extendedTextMessage",
+      "imageMessage",
+      "videoMessage",
+      "documentMessage",
+      "audioMessage",
+      "buttonsResponseMessage",
+      "listResponseMessage",
+      "stickerMessage",
+      "contactMessage",
+      "locationMessage",
+      "templateButtonReplyMessage",
     ]) {
       if (obj[key]?.contextInfo) yield obj[key].contextInfo;
     }
     // Walk into known envelope/wrapper types
     for (const wrapper of [
-      'ephemeralMessage', 'documentWithCaptionMessage',
-      'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension',
+      "ephemeralMessage",
+      "documentWithCaptionMessage",
+      "viewOnceMessage",
+      "viewOnceMessageV2",
+      "viewOnceMessageV2Extension",
     ]) {
       if (obj[wrapper]?.message) yield* walk(obj[wrapper].message, depth + 1);
       if (obj[wrapper]) yield* walk(obj[wrapper], depth + 1); // some wrap without .message
@@ -258,26 +352,26 @@ function hasFourSameEmoji(text) {
   if (!text) return false;
   try {
     // Segment the text into grapheme clusters (the correct "visual character" unit)
-    const segmenter = new Intl.Segmenter('und', { granularity: 'grapheme' });
+    const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
     const segments = [...segmenter.segment(text)];
 
     // Keep only segments that look like emoji:
     //  - Contains a codepoint with Emoji_Presentation or Extended_Pictographic property
     //  - OR is a keycap sequence (digit + \uFE0F + \u20E3)
     const emojiSegments = segments
-      .map(s => s.segment)
-      .filter(s => {
+      .map((s) => s.segment)
+      .filter((s) => {
         if (!s) return false;
         const cp = s.codePointAt(0);
         // Keycap sequences: #*0-9 + VS16 + combining enclosing keycap
-        if (s.length >= 2 && s.includes('\u20E3')) return true;
+        if (s.length >= 2 && s.includes("\u20E3")) return true;
         // Regional indicators (flags): U+1F1E0-U+1F1FF (appear in pairs)
-        if (cp >= 0x1F1E0 && cp <= 0x1F1FF) return true;
+        if (cp >= 0x1f1e0 && cp <= 0x1f1ff) return true;
         // Standard emoji ranges
-        if (cp >= 0x1F300) return true;  // Misc Symbols and Pictographs+
-        if (cp >= 0x2600 && cp <= 0x27BF) return true; // Misc Symbols, Dingbats
-        if (cp >= 0x2300 && cp <= 0x23FF) return true; // Misc Technical
-        if (cp >= 0xFE00) return true; // Variation selectors + specials
+        if (cp >= 0x1f300) return true; // Misc Symbols and Pictographs+
+        if (cp >= 0x2600 && cp <= 0x27bf) return true; // Misc Symbols, Dingbats
+        if (cp >= 0x2300 && cp <= 0x23ff) return true; // Misc Technical
+        if (cp >= 0xfe00) return true; // Variation selectors + specials
         return false;
       });
 
@@ -292,7 +386,7 @@ function hasFourSameEmoji(text) {
     const counts = {};
     for (const ch of text) {
       const cp = ch.codePointAt(0);
-      if (cp >= 0x1F300 || (cp >= 0x2600 && cp <= 0x27BF)) {
+      if (cp >= 0x1f300 || (cp >= 0x2600 && cp <= 0x27bf)) {
         counts[ch] = (counts[ch] || 0) + 1;
         if (counts[ch] >= 4) return true;
       }
@@ -310,29 +404,37 @@ export async function handleReplyReveal(msg, sock, sessionId) {
 
     const msgText = (
       msg.message?.conversation ||
-      msg.message?.extendedTextMessage?.text || ''
+      msg.message?.extendedTextMessage?.text ||
+      ""
     ).trim();
     if (!msgText) return;
 
     // ── Trigger check — must pass at least one ────────────────────────────────
-    const voKeyword    = db.settings.getValue('voKeyword');
-    const prefix       = db.settings.getValue('prefix') || '.';
-    const emojiEnabled = db.settings.getValue('emojiRevealEnabled') !== false; // default ON
+    const voKeyword = db.settings.getValue("voKeyword");
+    const prefix = db.settings.getValue("prefix") || ".";
+    const emojiEnabled = db.settings.getValue("emojiRevealEnabled") !== false; // default ON
 
     // Trigger 1: voword keyword present anywhere in the text
-    const hasKeyword = !!(voKeyword && msgText.toLowerCase().includes(voKeyword.toLowerCase()));
+    const hasKeyword = !!(
+      voKeyword && msgText.toLowerCase().includes(voKeyword.toLowerCase())
+    );
 
     // Trigger 2: 4 same emojis — works with OR without prefix
     // e.g. 🔥🔥🔥🔥 OR .🔥🔥🔥🔥 both trigger reveal
-    const textBody       = msgText.startsWith(prefix) ? msgText.slice(prefix.length) : msgText;
-    const isEmojiTrigger = emojiEnabled && textBody.length > 0 && hasFourSameEmoji(textBody);
+    const textBody = msgText.startsWith(prefix)
+      ? msgText.slice(prefix.length)
+      : msgText;
+    const isEmojiTrigger =
+      emojiEnabled && textBody.length > 0 && hasFourSameEmoji(textBody);
 
     if (!hasKeyword && !isEmojiTrigger) return; // not a reveal trigger — ignore
 
-    const triggerLabel = isEmojiTrigger ? 'emoji-trigger' : `keyword(${voKeyword})`;
+    const triggerLabel = isEmojiTrigger
+      ? "emoji-trigger"
+      : `keyword(${voKeyword})`;
 
     // ── Exact stanzaId lookup (works when owner used WhatsApp Reply) ──────────
-    const ctxInfo  = extractContextInfo(msg.message);
+    const ctxInfo = extractContextInfo(msg.message);
     const stanzaId = ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || null;
 
     let stored = stanzaId ? viewOnceStore.get(stanzaId) : null;
@@ -340,7 +442,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     if (!stored && stanzaId) {
       // Retry up to 3 s — handles race where messages.update hasn't arrived yet
       for (let i = 0; i < 6; i++) {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 500));
         stored = viewOnceStore.get(stanzaId);
         if (stored) break;
       }
@@ -351,9 +453,9 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     //  (a) stanzaId didn't match (ID format mismatch between devices), OR
     //  (b) no stanzaId (owner typed keyword/emoji without using WhatsApp Reply)
     if (!stored) {
-      const chatJid     = msg.key.remoteJid;
+      const chatJid = msg.key.remoteJid;
       const hadStanzaId = !!(ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId);
-      const TTL         = 60 * 60 * 1000; // 60-min in-memory TTL
+      const TTL = 60 * 60 * 1000; // 60-min in-memory TTL
 
       if (viewOnceStore.size > 0) {
         let newest = null;
@@ -376,13 +478,13 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       }
     }
 
-    const selfNum = sock.user?.id?.split('@')[0]?.split(':')[0];
+    const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
     const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
     if (!selfJid) return;
 
-    const tz      = config.timezone || 'Asia/Karachi';
-    const date    = moment().tz(tz).format('DD/MM/YYYY');
-    const timeStr = moment().tz(tz).format('HH:mm:ss');
+    const tz = config.timezone || "Asia/Karachi";
+    const date = moment().tz(tz).format("DD/MM/YYYY");
+    const timeStr = moment().tz(tz).format("HH:mm:ss");
 
     // ── Step 0: Direct download from quotedMessage media keys ────────────────
     // Works for fresh view-once media (before the key expires).
@@ -397,8 +499,12 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       if (quotedMsg) {
         const extracted = extractQuotedMediaForReveal(quotedMsg);
         if (extracted) {
-          const type = extracted.isAudio ? 'audio' : (extracted.isVid ? 'video' : 'image');
-          const buf  = await dlBufDirect(extracted.mediaMsg, type);
+          const type = extracted.isAudio
+            ? "audio"
+            : extracted.isVid
+              ? "video"
+              : "image";
+          const buf = await dlBufDirect(extracted.mediaMsg, type);
           if (buf?.length > 0) {
             const cap =
               `🔓 *View-Once Revealed*\n\n` +
@@ -407,18 +513,41 @@ export async function handleReplyReveal(msg, sock, sessionId) {
               `🔑 *Trigger:* ${triggerLabel}\n\n` +
               `> 👁️ *AA MD Bot*`;
             if (extracted.isAudio) {
-              await sock.sendMessage(selfJid, { audio: buf, mimetype: extracted.mime, ptt: extracted.mediaMsg?.ptt || false }).catch(() => {});
+              await sock
+                .sendMessage(selfJid, {
+                  audio: buf,
+                  mimetype: extracted.mime,
+                  ptt: extracted.mediaMsg?.ptt || false,
+                })
+                .catch(() => {});
             } else if (extracted.isVid) {
-              await sock.sendMessage(selfJid, { video: buf, caption: cap, mimetype: extracted.mime }).catch(() => {});
+              await sock
+                .sendMessage(selfJid, {
+                  video: buf,
+                  caption: cap,
+                  mimetype: extracted.mime,
+                })
+                .catch(() => {});
             } else {
-              await sock.sendMessage(selfJid, { image: buf, caption: cap, mimetype: extracted.mime }).catch(() => {});
+              await sock
+                .sendMessage(selfJid, {
+                  image: buf,
+                  caption: cap,
+                  mimetype: extracted.mime,
+                })
+                .catch(() => {});
             }
-            logger.info({ sessionId, trigger: triggerLabel }, '🔑 ViewOnce revealed via emoji trigger (direct)');
+            logger.info(
+              { sessionId, trigger: triggerLabel },
+              "🔑 ViewOnce revealed via emoji trigger (direct)",
+            );
             return;
           }
         }
       }
-    } catch (_) { /* direct download failed — fall through to store */ }
+    } catch (_) {
+      /* direct download failed — fall through to store */
+    }
 
     // ── Step 1+2: In-memory store lookup (fallback) ───────────────────────────
     if (!stored) return; // no cached view-once found
@@ -428,27 +557,32 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       `👤 *From:* ${formatPhone(stored.num)}\n` +
       `📅 *Date:* ${date}\n` +
       `⏰ *Time:* ${timeStr}\n` +
-      `📍 *Chat:* ${stored.inGroup ? 'Group' : 'DM'}\n` +
+      `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
       `🔑 *Trigger:* ${triggerLabel}\n` +
-      `💬 *Caption:* "${stored.caption || 'None'}"\n\n` +
+      `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
       `> 👁️ *AA MD Bot*`;
 
-    await sock.sendMessage(
-      selfJid,
-      stored.isVid
-        ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-        : { image: stored.buf, caption: cap, mimetype: stored.mime }
-    ).catch(() => {});
+    await sock
+      .sendMessage(
+        selfJid,
+        stored.isVid
+          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+          : { image: stored.buf, caption: cap, mimetype: stored.mime },
+      )
+      .catch(() => {});
 
-    logger.info({ sessionId, stanzaId, trigger: triggerLabel }, '🔑 ViewOnce revealed via emoji trigger (store)');
+    logger.info(
+      { sessionId, stanzaId, trigger: triggerLabel },
+      "🔑 ViewOnce revealed via emoji trigger (store)",
+    );
   } catch (e) {
-    logger.warn({ err: e.message }, 'handleReplyReveal threw');
+    logger.warn({ err: e.message }, "handleReplyReveal threw");
   }
 }
 
 // ── Manual reveal: by msgId (from !reveal, .reveal, or the reveal plugin) ─────
 export async function handleManualReveal(msgId, sock, replyJid) {
-  const selfNum = sock.user?.id?.split('@')[0]?.split(':')[0];
+  const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
   const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
   if (!selfJid) return;
 
@@ -458,14 +592,16 @@ export async function handleManualReveal(msgId, sock, replyJid) {
   const stored = viewOnceStore.get(id);
 
   if (!stored) {
-    await sock.sendMessage(replyJid, {
-      text:
-        `❌ *View-Once not found*\n\n` +
-        `Message ID not in cache.\n` +
-        `Make sure the bot was running when the view-once arrived,\n` +
-        `and that you're replying to the original message.\n\n` +
-        `> 👁️ *AA MD Bot*`,
-    }).catch(() => {});
+    await sock
+      .sendMessage(replyJid, {
+        text:
+          `❌ *View-Once not found*\n\n` +
+          `Message ID not in cache.\n` +
+          `Make sure the bot was running when the view-once arrived,\n` +
+          `and that you're replying to the original message.\n\n` +
+          `> 👁️ *AA MD Bot*`,
+      })
+      .catch(() => {});
     return;
   }
 
@@ -473,23 +609,25 @@ export async function handleManualReveal(msgId, sock, replyJid) {
     `🔓 *View-Once Revealed (Manual)*\n\n` +
     `👤 *From:* ${formatPhone(stored.num)}\n` +
     `🕐 *Time:* ${stored.time}\n` +
-    `📍 *Chat:* ${stored.inGroup ? 'Group' : 'DM'}\n` +
-    `💬 *Caption:* "${stored.caption || 'None'}"\n\n` +
+    `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
+    `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
     `> 👁️ *AA MD Bot*`;
 
-  await sock.sendMessage(
-    selfJid,
-    stored.isVid
-      ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-      : { image: stored.buf, caption: cap, mimetype: stored.mime }
-  ).catch(() => {});
+  await sock
+    .sendMessage(
+      selfJid,
+      stored.isVid
+        ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+        : { image: stored.buf, caption: cap, mimetype: stored.mime },
+    )
+    .catch(() => {});
 }
 
 // ── Reveal by quoted/replied message — used by .reveal plugin ─────────────────
 // Pass the full `msg` of the owner's command message. Extracts the quoted msgId
 // and reveals that view-once. Returns true if found, false if not in cache.
 export async function handleRevealByReply(msg, sock) {
-  const selfNum = sock.user?.id?.split('@')[0]?.split(':')[0];
+  const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
   const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
   if (!selfJid) return false;
 
@@ -502,25 +640,27 @@ export async function handleRevealByReply(msg, sock) {
   const stored = viewOnceStore.get(stanzaId);
   if (!stored) return false;
 
-  const tz      = config.timezone || 'Asia/Karachi';
-  const date    = moment().tz(tz).format('DD/MM/YYYY');
-  const timeStr = moment().tz(tz).format('HH:mm:ss');
+  const tz = config.timezone || "Asia/Karachi";
+  const date = moment().tz(tz).format("DD/MM/YYYY");
+  const timeStr = moment().tz(tz).format("HH:mm:ss");
 
   const cap =
     `🔓 *View-Once Revealed*\n\n` +
     `👤 *From:* ${formatPhone(stored.num)}\n` +
     `📅 *Date:* ${date}\n` +
     `⏰ *Time:* ${timeStr}\n` +
-    `📍 *Chat:* ${stored.inGroup ? 'Group' : 'DM'}\n` +
-    `💬 *Caption:* "${stored.caption || 'None'}"\n\n` +
+    `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
+    `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
     `> 👁️ *AA MD Bot*`;
 
-  await sock.sendMessage(
-    selfJid,
-    stored.isVid
-      ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-      : { image: stored.buf, caption: cap, mimetype: stored.mime }
-  ).catch(() => {});
+  await sock
+    .sendMessage(
+      selfJid,
+      stored.isVid
+        ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+        : { image: stored.buf, caption: cap, mimetype: stored.mime },
+    )
+    .catch(() => {});
 
   return true;
 }
@@ -528,8 +668,10 @@ export async function handleRevealByReply(msg, sock) {
 // ── Init: call once at startup ────────────────────────────────────────────────
 export function initViewOnce() {
   setInterval(cleanViewOnceStore, 60_000);
-  logger.info('👁️ ViewOnce feature initialized');
-  logger.info('👁️ Auto-reveal: .antiviewonce on/off');
-  logger.info('👁️ Emoji reveal: reply to a view-once with 4 same emojis (e.g. 🔥🔥🔥🔥) to reveal');
-  logger.info('👁️ Manual reveal: .avv in reply to a view-once message');
+  logger.info("👁️ ViewOnce feature initialized");
+  logger.info("👁️ Auto-reveal: .antiviewonce on/off");
+  logger.info(
+    "👁️ Emoji reveal: reply to a view-once with 4 same emojis (e.g. 🔥🔥🔥🔥) to reveal",
+  );
+  logger.info("👁️ Manual reveal: .avv in reply to a view-once message");
 }

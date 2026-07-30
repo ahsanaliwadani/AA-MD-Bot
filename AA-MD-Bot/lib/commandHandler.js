@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { isConnectedSessionOwner } from "./sessionManager.js";
-import { downloadContentFromMessage } from "@whiskeysockets/baileys";
+import { handleViewOnceMessage } from "./viewOnce.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -229,84 +229,6 @@ async function sendMedia(sock, jid, msg, content) {
   return sock.sendMessage(jid, payload, { quoted: msg });
 }
 
-// ── Auto Anti-ViewOnce ────────────────────────────────────────────────────
-// Extracts view-once media (image/video) from ANY message shape WhatsApp
-// sends (wrapper variants + inline viewOnce flag), and — if the
-// .antiviewonce toggle is ON for this scope — downloads it and forwards it
-// to the bot owner's own "You" chat. Runs BEFORE the text/caption check in
-// handleMessage, since view-once media often carries no caption at all.
-// Fire-and-forget from the caller so it never delays command handling.
-function extractViewOnceMedia(msg) {
-  const container = msg.message?.ephemeralMessage?.message || msg.message;
-  if (!container) return null;
-
-  const wrapper =
-    container.viewOnceMessage?.message ||
-    container.viewOnceMessageV2?.message ||
-    container.viewOnceMessageV2Extension?.message;
-
-  if (wrapper) {
-    if (wrapper.imageMessage)
-      return { type: "image", content: wrapper.imageMessage };
-    if (wrapper.videoMessage)
-      return { type: "video", content: wrapper.videoMessage };
-    return null;
-  }
-
-  if (container.imageMessage?.viewOnce)
-    return { type: "image", content: container.imageMessage };
-  if (container.videoMessage?.viewOnce)
-    return { type: "video", content: container.videoMessage };
-
-  return null;
-}
-
-async function autoRevealViewOnce(
-  sock,
-  msg,
-  sessionId,
-  jid,
-  senderJid,
-  isGroupMsg,
-  settings,
-  ownJid,
-) {
-  try {
-    if (!ownJid) return;
-
-    const vo = extractViewOnceMedia(msg);
-    if (!vo) return; // not a view-once message — nothing to do
-
-    const active = isGroupMsg
-      ? (db.groups.get(sessionId, jid)?.antiviewonce ??
-        settings.antiViewOnce ??
-        false)
-      : (settings.antiViewOnce ?? false);
-
-    if (!active) return;
-
-    const stream = await downloadContentFromMessage(vo.content, vo.type);
-    let buffer = Buffer.from([]);
-    for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-
-    const senderName = senderJid?.split("@")[0] || "Unknown";
-    let caption =
-      `👁️ *View-Once Auto-Revealed*\n\n` +
-      `👤 From: ${senderName}\n` +
-      `💬 Chat: ${isGroupMsg ? "Group" : "Private"}` +
-      (vo.content.caption ? `\n📝 Caption: ${vo.content.caption}` : "");
-    caption += WATERMARK;
-
-    const payload =
-      vo.type === "image"
-        ? { image: buffer, caption }
-        : { video: buffer, caption };
-    await sock.sendMessage(ownJid, payload).catch(() => {});
-  } catch (err) {
-    logger.error({ err: err?.message }, "autoRevealViewOnce failed");
-  }
-}
-
 export async function handleMessage(sock, msg, sessionId) {
   try {
     const jid = msg.key.remoteJid;
@@ -323,20 +245,16 @@ export async function handleMessage(sock, msg, sessionId) {
       (sock.user?.id || "").replace(/:.*@/, "@") ||
       null;
 
-    // Fire off the auto-viewonce check immediately, before the text/caption
+    // Fire off the anti-viewonce check immediately, before the text/caption
     // gate below — view-once media frequently has no caption, so it would
     // otherwise get dropped by `if (!text) return;` and never processed.
     // Not awaited so it never delays normal command handling.
+    // Delegates to viewOnce.js's handleViewOnceMessage — same retry-safe
+    // handler that's also wired to messages.update in sessionManager.js,
+    // so this doesn't duplicate/clash with it (dedup guard inside it).
     if (!fromMe) {
-      autoRevealViewOnce(
-        sock,
-        msg,
-        sessionId,
-        jid,
-        senderJid,
-        isGroupMsg,
-        settings,
-        ownJid,
+      handleViewOnceMessage(msg, sock, sessionId).catch((err) =>
+        logger.error({ err: err?.message }, "handleViewOnceMessage failed"),
       );
     }
 
