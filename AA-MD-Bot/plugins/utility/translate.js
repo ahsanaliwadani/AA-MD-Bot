@@ -20,7 +20,24 @@ const LANG_ALIASES = {
   ko: 'ko', korean: 'ko',
 };
 
-// Primary: Google Translate unofficial endpoint — auto-detects source language,
+const DC_TRANSLATE = 'https://apis.davidcyriltech.my.id/tools/translate';
+const UA_TR = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+
+// Primary: DavidCyrilTech translate API
+async function dcTranslate(text, targetLang) {
+  const res = await axios.get(DC_TRANSLATE, {
+    params: { text, to: targetLang },
+    headers: { 'User-Agent': UA_TR },
+    timeout: 15000,
+  });
+  const d = res.data?.result || res.data?.data || res.data;
+  const translated = d?.translated_text || d?.translation || d?.translatedText || d?.result || d?.text;
+  const detectedSrc = res.data?.detected_language || d?.detected_language || d?.from || 'auto';
+  if (!translated || translated === text) throw new Error('Empty');
+  return { translated, detectedSrc };
+}
+
+// Fallback 1: Google Translate unofficial endpoint — auto-detects source language,
 // no API key needed, supports 100+ languages.
 async function googleTranslate(text, targetLang) {
   const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
@@ -74,12 +91,13 @@ export default {
     try {
       let result = null;
 
-      // Try Google Translate first
-      try {
-        result = await googleTranslate(toTranslate, targetLang);
-      } catch {
-        // Fallback to MyMemory
-        result = await myMemoryTranslate(toTranslate, targetLang);
+      // Try DavidCyrilTech first, then Google, then MyMemory
+      for (const fn of [
+        () => dcTranslate(toTranslate, targetLang),
+        () => googleTranslate(toTranslate, targetLang),
+        () => myMemoryTranslate(toTranslate, targetLang),
+      ]) {
+        try { result = await fn(); if (result?.translated) break; } catch {}
       }
 
       if (!result?.translated) throw new Error('All sources failed');
