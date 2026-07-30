@@ -4,44 +4,91 @@
 //
 // Commands:
 //   .spotify <song name or Spotify URL>
-//   .spot <...>
-//   .spoti <...>
-//   .spt <...>
-//   .spotifydl <...>
+//   .spot / .spoti / .spt / .spdl
 //
-// Flow:
-//   1. ootaizumi API (user-provided, query-based)
-//   2. If Spotify URL → scrape og: meta → YouTube search → audio APIs
-//   3. If name search → YouTube search → audio APIs (davidcyriltech / eliteprotech)
+// Download chain (fastest → most reliable):
+//   1. YouTube search → race davidcyriltech + eliteprotech  (PRIMARY)
+//   2. YouTube search → yt-dlp SoundCloud search fallback   (SECONDARY)
 // ============================================
 
 import axios             from 'axios';
+import { execFile }      from 'child_process';
+import { promisify }     from 'util';
+import fs                from 'fs-extra';
 import path              from 'path';
 import { fileURLToPath } from 'url';
 
+const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TEMP      = path.join(__dirname, '../../temp');
+const YTDLP     = '/home/runner/.local/bin/yt-dlp';
 const FOOTER    = '\n\n> 🎵 *AA MD Bot*  •  👨‍💻 *Ahsan Ali Wadani*';
 const SP_RX     = /https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([a-zA-Z0-9]+)/i;
 const UA        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-const api       = axios.create({ timeout: 20000, headers: { 'User-Agent': UA } });
+const api       = axios.create({ timeout: 25000, headers: { 'User-Agent': UA } });
 
-// ── Method 1: ootaizumi API (user-provided) ───────────────────────────────────
-async function tryOotaizumi(query) {
+await fs.ensureDir(TEMP);
+
+// ── Method 1a: davidcyriltech (confirmed working) ─────────────────────────────
+async function tryDavidCyril(ytUrl) {
   const { data } = await api.get(
-    `https://api.ootaizumi.web.id/downloader/spotifyplay?query=${encodeURIComponent(query)}`
+    `https://apis.davidcyriltech.my.id/download/ytmp3?url=${encodeURIComponent(ytUrl)}`,
+    { timeout: 40000 }
   );
-  if (!data?.status || !data?.result?.download) throw new Error('ootaizumi: no download URL');
-  const s = data.result;
-  return {
-    title:    s.title   || query,
-    artist:   s.artists || s.artist || 'Unknown',
-    audioUrl: s.download,
-    image:    s.image   || s.cover  || null,
-    source:   'ootaizumi',
-  };
+  const url = data?.result?.download_url || data?.url || data?.download_url;
+  if (typeof url === 'string' && url.startsWith('http')) {
+    return { url, title: data?.result?.title || data?.title || '', thumb: data?.result?.thumbnail || data?.thumbnail || null, source: 'davidcyriltech' };
+  }
+  throw new Error('davidcyriltech: no URL');
 }
 
-// ── Method 2: Scrape Spotify metadata from og: tags ───────────────────────────
+// ── Method 1b: eliteprotech (confirmed working) ───────────────────────────────
+async function tryEliteProtech(ytUrl) {
+  const { data } = await api.get(
+    `https://eliteprotech-apis.zone.id/ytdown?url=${encodeURIComponent(ytUrl)}&format=mp3`,
+    { timeout: 40000 }
+  );
+  const url = data?.downloadURL || data?.download_url || data?.url || data?.result?.url;
+  if (typeof url === 'string' && url.startsWith('http')) {
+    return { url, title: data?.title || '', thumb: data?.thumbnail || null, source: 'eliteprotech' };
+  }
+  throw new Error('eliteprotech: no URL');
+}
+
+// ── Method 2: Race both API methods ──────────────────────────────────────────
+async function getAudioFromYT(ytUrl) {
+  const p1 = tryDavidCyril(ytUrl).catch(() => null);
+  const p2 = tryEliteProtech(ytUrl).catch(() => null);
+
+  // Resolve as soon as first success arrives
+  return new Promise(resolve => {
+    let settled = 0;
+    const check = v => {
+      if (v) return resolve(v);
+      if (++settled === 2) resolve(null);
+    };
+    p1.then(check);
+    p2.then(check);
+  });
+}
+
+// ── Method 3: YouTube search via HTML ────────────────────────────────────────
+async function searchYouTube(query) {
+  const { data: html } = await api.get(
+    `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' audio')}`,
+    { headers: { 'Accept-Language': 'en-US,en;q=0.9' }, timeout: 20000 }
+  );
+  const seen = new Set();
+  for (const [, id] of html.matchAll(/"videoId":"([a-zA-Z0-9_-]{11})"/g)) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      return { ytUrl: `https://www.youtube.com/watch?v=${id}`, videoId: id };
+    }
+  }
+  throw new Error('No YouTube results found');
+}
+
+// ── Method 4: Spotify og: metadata ───────────────────────────────────────────
 async function getSpotifyMeta(trackId) {
   const { data: html } = await api.get(`https://open.spotify.com/track/${trackId}`, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
@@ -53,62 +100,37 @@ async function getSpotifyMeta(trackId) {
   return { title, artist, image };
 }
 
-// ── Method 3: YouTube search via HTML scraping ────────────────────────────────
-async function searchYouTube(query) {
-  const { data: html } = await api.get(
-    `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' audio')}`,
-    { headers: { 'Accept-Language': 'en-US,en;q=0.9' } }
-  );
-  // Extract first video ID from page
-  const ids = [...html.matchAll(/"videoId":"([a-zA-Z0-9_-]{11})"/g)].map(m => m[1]);
-  // Filter out playlist/channel IDs — just take first unique one
-  const seen = new Set();
-  for (const id of ids) {
-    if (!seen.has(id)) {
-      seen.add(id);
-      return `https://www.youtube.com/watch?v=${id}`;
-    }
+// ── Method 5: yt-dlp SoundCloud fallback (downloads to temp file) ─────────────
+// Used only when both API methods fail
+async function tryYtdlpSoundCloud(query) {
+  const reqId   = `sc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const outPath = path.join(TEMP, `${reqId}.mp3`);
+
+  try {
+    await execFileP(YTDLP, [
+      '--no-playlist',
+      '--extract-audio',
+      '--audio-format', 'mp3',
+      '--audio-quality', '5',
+      '-o', outPath,
+      `scsearch1:${query}`,
+    ], { timeout: 60000 });
+
+    if (!await fs.pathExists(outPath)) throw new Error('No file after yt-dlp');
+    const stat = await fs.stat(outPath);
+    if (stat.size < 50000) throw new Error('File too small — likely preview only');
+
+    const buf = await fs.readFile(outPath);
+    return { buf, source: 'soundcloud' };
+  } finally {
+    fs.remove(outPath).catch(() => {});
   }
-  throw new Error('No YouTube results found');
-}
-
-// ── Method 4: Get audio URL from YouTube URL using free APIs ──────────────────
-// Races davidcyriltech and eliteprotech in parallel — first one wins.
-async function getAudioUrl(ytUrl) {
-  const enc = encodeURIComponent(ytUrl);
-
-  const p1 = api.get(`https://apis.davidcyriltech.my.id/download/ytmp3?url=${enc}`, { timeout: 30000 })
-    .then(({ data: d }) => {
-      const r   = d?.result || d;
-      const url = r?.download_url || r?.downloadUrl || r?.url || d?.url;
-      if (typeof url === 'string' && url.startsWith('http'))
-        return { url, title: r?.title || d?.title || '', source: 'davidcyriltech' };
-      return null;
-    })
-    .catch(() => null);
-
-  const p2 = api.get(`https://eliteprotech-apis.zone.id/ytdown?url=${enc}&format=mp3`, { timeout: 30000 })
-    .then(({ data: d }) => {
-      const url = d?.downloadURL || d?.download_url || d?.url || d?.result?.url || d?.result?.download_url;
-      if (typeof url === 'string' && url.startsWith('http'))
-        return { url, title: d?.title || '', source: 'eliteprotech' };
-      return null;
-    })
-    .catch(() => null);
-
-  // Return first successful result
-  return new Promise(resolve => {
-    let done = 0;
-    const check = v => { if (v) { resolve(v); } else if (++done === 2) resolve(null); };
-    p1.then(check);
-    p2.then(check);
-  });
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 export default {
   command: 'spotify',
-  alias: ['spot', 'spoti', 'spt', 'spotifydl', 'spdl'],
+  alias:   ['spot', 'spoti', 'spt', 'spotifydl', 'spdl'],
   description: 'Download Spotify tracks by name or URL 🎵',
   category: 'download',
   usage: '.spotify <song name or Spotify link>',
@@ -125,89 +147,112 @@ export default {
         `*Examples:*\n` +
         `▸ ${prefix}spotify Tum Hi Ho\n` +
         `▸ ${prefix}spotify Shape Of You Ed Sheeran\n` +
-        `▸ ${prefix}spotify Blinding Lights\n` +
+        `▸ ${prefix}spotify Blinding Lights The Weeknd\n` +
         `▸ ${prefix}spotify https://open.spotify.com/track/xxx\n\n` +
         `> 🎵 *AA MD Bot*`
       );
     }
 
-    if (input.length > 100) {
-      return reply(`❌ Query too long. Keep it under 100 characters.\n\n> 🎵 *AA MD Bot*`);
-    }
+    if (input.length > 120) return reply(`❌ Query too long (max 120 chars).\n\n> 🎵 *AA MD Bot*`);
 
     await react('⏳');
 
     let statusMsg;
+    const editStatus = async (txt) => {
+      try { await sock.sendMessage(jid, { edit: statusMsg?.key, text: txt }); } catch {}
+    };
+
     try {
       statusMsg = await sock.sendMessage(jid, {
         text: `🎵 *Spotify Downloader*\n\n🔍 _Searching: ${input.slice(0, 50)}_\n\n⏳ _Please wait..._${FOOTER}`,
       }, { quoted: msg });
-    } catch { /* ignore */ }
+    } catch {}
 
-    let result = null;
-
-    // ── Step 1: Determine search query ────────────────────────────────────────
-    const spMatch = input.match(SP_RX);
-    let searchQuery = input;
-    let coverImage  = null;
+    // ── Step 1: Resolve Spotify URL → metadata ─────────────────────────────
+    const spMatch    = input.match(SP_RX);
+    let searchQuery  = input;
+    let displayTitle = input;
+    let displayArtist = '';
+    let coverImage   = null;
 
     if (spMatch) {
-      // It's a Spotify URL — extract metadata first
       try {
         const meta = await getSpotifyMeta(spMatch[2]);
         if (meta.title) {
-          searchQuery = meta.artist ? `${meta.title} ${meta.artist}` : meta.title;
-          coverImage  = meta.image;
-          try {
-            await sock.sendMessage(jid, {
-              edit: statusMsg?.key,
-              text: `🎵 *Spotify Downloader*\n\n🎵 _${meta.title}_\n👤 _${meta.artist || 'Unknown'}_\n\n⏳ _Downloading..._${FOOTER}`,
-            });
-          } catch { /* ignore */ }
+          displayTitle  = meta.title;
+          displayArtist = meta.artist || '';
+          searchQuery   = displayArtist ? `${displayTitle} ${displayArtist}` : displayTitle;
+          coverImage    = meta.image;
+          await editStatus(
+            `🎵 *Spotify Downloader*\n\n🎵 _${displayTitle}_\n👤 _${displayArtist || 'Unknown'}_\n\n⏳ _Downloading..._${FOOTER}`
+          );
         }
-      } catch { /* ignore — use URL as query */ }
+      } catch { /* use URL as query */ }
     }
 
-    // ── Step 2: Try ootaizumi API ─────────────────────────────────────────────
+    // ── Step 2: YouTube search ─────────────────────────────────────────────
+    let ytResult = null;
     try {
-      result = await tryOotaizumi(searchQuery);
+      ytResult = await searchYouTube(searchQuery);
+      await editStatus(
+        `🎵 *Spotify Downloader*\n\n✅ _Found on YouTube_\n📥 _Getting audio..._\n\n⏳ _Please wait..._${FOOTER}`
+      );
     } catch (e) {
-      console.error('[spotify] ootaizumi failed:', e.message);
+      console.error('[spotify] YouTube search failed:', e.message);
     }
 
-    // ── Step 3: YouTube search + audio API fallback ───────────────────────────
-    if (!result) {
-      try {
-        try {
-          await sock.sendMessage(jid, {
-            edit: statusMsg?.key,
-            text: `🎵 *Spotify Downloader*\n\n🔄 _Searching YouTube..._\n\n⏳ _Please wait..._${FOOTER}`,
-          });
-        } catch { /* ignore */ }
-
-        const ytUrl   = await searchYouTube(searchQuery);
-        const audio   = await getAudioUrl(ytUrl);
-        if (audio?.url) {
-          result = {
-            title:    audio.title || searchQuery,
-            artist:   '',
-            audioUrl: audio.url,
-            image:    coverImage,
-            source:   audio.source,
-          };
-        }
-      } catch (e) {
-        console.error('[spotify] YouTube fallback failed:', e.message);
+    // ── Step 3a: Race davidcyriltech + eliteprotech ────────────────────────
+    let audioResult = null;
+    if (ytResult) {
+      audioResult = await getAudioFromYT(ytResult.ytUrl);
+      if (audioResult) {
+        displayTitle  = audioResult.title || displayTitle || searchQuery;
+        coverImage    = coverImage || audioResult.thumb;
       }
     }
 
-    if (!result) {
+    // ── Step 3b: yt-dlp SoundCloud fallback ──────────────────────────────
+    if (!audioResult) {
+      await editStatus(
+        `🎵 *Spotify Downloader*\n\n🔄 _Trying SoundCloud..._\n\n⏳ _Please wait..._${FOOTER}`
+      );
       try {
-        await sock.sendMessage(jid, {
-          edit: statusMsg?.key,
-          text: `❌ *Not Found*\n\n_Could not find "${input.slice(0, 50)}"_${FOOTER}`,
-        });
-      } catch { /* ignore */ }
+        const sc = await tryYtdlpSoundCloud(searchQuery);
+        if (sc?.buf) {
+          // Send buffer directly
+          const cleanName = (displayTitle || searchQuery).replace(/[<>:"/\\|?*]/g, '_').slice(0, 60);
+          const cap =
+            `╭━━━━━━━━━━━━━━━━━━━━\n` +
+            `┃  🎵 *SPOTIFY*\n` +
+            `┣━━━━━━━━━━━━━━━━━━━━\n` +
+            `┃ 🎶 *${(displayTitle || searchQuery).slice(0, 60)}*\n` +
+            (displayArtist ? `┃ 👤 ${displayArtist}\n` : '') +
+            `┃ 🔊 SoundCloud\n` +
+            `╰━━━━━━━━━━━━━━━━━━━━${FOOTER}`;
+
+          await sock.sendMessage(jid, {
+            audio:    sc.buf,
+            mimetype: 'audio/mpeg',
+            fileName: `${cleanName}.mp3`,
+          }, { quoted: msg });
+
+          await sock.sendMessage(jid, {
+            document: sc.buf,
+            mimetype: 'audio/mpeg',
+            fileName: `${cleanName}.mp3`,
+            caption:  cap,
+          }, { quoted: msg });
+
+          await editStatus(`✅ *Done!*\n\n🎵 _${(displayTitle || searchQuery).slice(0, 50)}_${FOOTER}`);
+          await react('✅');
+          return;
+        }
+      } catch (e) {
+        console.error('[spotify] SoundCloud fallback failed:', e.message);
+      }
+
+      // All methods failed
+      await editStatus(`❌ *Not Found*\n\n_Could not find "${input.slice(0, 50)}"_${FOOTER}`);
       await react('❌');
       return reply(
         `❌ *Spotify download failed*\n\n` +
@@ -219,57 +264,49 @@ export default {
       );
     }
 
-    // Update status — sending
-    const displayTitle  = (result.title || searchQuery).slice(0, 60);
-    const displayArtist = result.artist || '';
-    try {
-      await sock.sendMessage(jid, {
-        edit: statusMsg?.key,
-        text: `✅ *Found!*\n\n🎵 _${displayTitle}_${displayArtist ? '\n👤 _' + displayArtist + '_' : ''}\n\n📤 _Sending..._${FOOTER}`,
-      });
-    } catch { /* ignore */ }
+    // ── Step 4: Send audio (URL-based) ────────────────────────────────────
+    const cleanTitle = (displayTitle || searchQuery).slice(0, 60);
+    const cleanName  = cleanTitle.replace(/[<>:"/\\|?*]/g, '_');
 
-    // ── Send as audio message (with link preview card) ────────────────────────
+    await editStatus(
+      `✅ *Found!*\n\n🎵 _${cleanTitle}_${displayArtist ? '\n👤 _' + displayArtist + '_' : ''}\n\n📤 _Sending..._${FOOTER}`
+    );
+
+    // Audio playback message
     await sock.sendMessage(jid, {
-      audio: { url: result.audioUrl },
+      audio:    { url: audioResult.url },
       mimetype: 'audio/mpeg',
-      fileName: `${(result.title || searchQuery).replace(/[<>:"/\\|?*]/g, '_').slice(0, 60)}.mp3`,
-      contextInfo: result.image ? {
+      fileName: `${cleanName}.mp3`,
+      contextInfo: coverImage ? {
         externalAdReply: {
-          title:                displayTitle.substring(0, 30),
+          title:                cleanTitle.substring(0, 30),
           body:                 displayArtist.substring(0, 30) || 'Spotify',
-          thumbnailUrl:         result.image,
-          sourceUrl:            spMatch ? input : `https://open.spotify.com`,
+          thumbnailUrl:         coverImage,
+          sourceUrl:            spMatch ? input : 'https://open.spotify.com',
           mediaType:            1,
           renderLargerThumbnail: true,
         },
       } : undefined,
     }, { quoted: msg });
 
-    // ── Also send as document (for direct save) ────────────────────────────────
+    // Document (direct save)
     try {
       await sock.sendMessage(jid, {
-        document: { url: result.audioUrl },
+        document: { url: audioResult.url },
         mimetype: 'audio/mpeg',
-        fileName: `${(result.title || searchQuery).replace(/[<>:"/\\|?*]/g, '_').slice(0, 60)}.mp3`,
+        fileName: `${cleanName}.mp3`,
         caption:
           `╭━━━━━━━━━━━━━━━━━━━━\n` +
           `┃  🎵 *SPOTIFY*\n` +
           `┣━━━━━━━━━━━━━━━━━━━━\n` +
-          `┃ 🎶 *${displayTitle}*\n` +
+          `┃ 🎶 *${cleanTitle}*\n` +
           (displayArtist ? `┃ 👤 ${displayArtist}\n` : '') +
+          `┃ 🔊 ${audioResult.source}\n` +
           `╰━━━━━━━━━━━━━━━━━━━━${FOOTER}`,
       }, { quoted: msg });
-    } catch { /* ignore — audio message already sent */ }
+    } catch { /* ignore — audio already sent */ }
 
-    // Final status update
-    try {
-      await sock.sendMessage(jid, {
-        edit: statusMsg?.key,
-        text: `✅ *Done!*\n\n🎵 _${displayTitle}_${displayArtist ? '\n👤 _' + displayArtist + '_' : ''}${FOOTER}`,
-      });
-    } catch { /* ignore */ }
-
+    await editStatus(`✅ *Done!*\n\n🎵 _${cleanTitle}_${displayArtist ? '\n👤 _' + displayArtist + '_' : ''}${FOOTER}`);
     await react('✅');
   },
 };

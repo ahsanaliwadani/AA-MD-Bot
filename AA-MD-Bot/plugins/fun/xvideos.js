@@ -23,6 +23,11 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const FOOTER = '\n\n> 🔞 *AA MD Bot*  •  👨‍💻 *Ahsan Ali Wadani*';
 
 // ── Search xvideos and return first video page URL ────────────────────────────
+// XV URL format changed: /video.SLUG/title (slug = alphanumeric dot-prefixed)
+// Pattern: /video.abc123/video-title-here
+const XV_VIDEO_RE = /^\/video[./][a-zA-Z0-9_]+/;
+const XV_EXCLUDE  = /videos-i-like|favorites|channel|model|pornstar|tag|category|best-of/i;
+
 async function searchXvideos(query) {
   const url = `https://www.xvideos.com/?k=${encodeURIComponent(query)}&sort=new`;
   const { data } = await axios.get(url, {
@@ -31,23 +36,20 @@ async function searchXvideos(query) {
   });
 
   const $ = cheerio.load(data);
+  const seen = new Set();
   let firstHref = null;
 
-  // Try multiple selectors — site structure can vary
-  $('div.thumb-block a[href^="/video"]').each((_, el) => {
-    if (!firstHref) firstHref = $(el).attr('href');
+  // Walk all anchors, pick first valid unique video URL
+  $('a[href]').each((_, el) => {
+    if (firstHref) return;
+    const href = $(el).attr('href') || '';
+    if (XV_VIDEO_RE.test(href) && !XV_EXCLUDE.test(href) && !seen.has(href)) {
+      seen.add(href);
+      firstHref = href;
+    }
   });
 
-  if (!firstHref) {
-    $('a[href^="/video"]').each((_, el) => {
-      if (!firstHref) {
-        const href = $(el).attr('href');
-        if (href && /^\/video\d+/.test(href)) firstHref = href;
-      }
-    });
-  }
-
-  if (!firstHref) throw new Error('No results found');
+  if (!firstHref) throw new Error('No results found — try different keywords');
   return `https://www.xvideos.com${firstHref}`;
 }
 
