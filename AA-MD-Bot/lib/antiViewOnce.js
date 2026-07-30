@@ -131,23 +131,27 @@ function extractViewOnceMedia(normalized) {
     normalized?.viewOnceMessageV2Extension;
 
   if (voMsg?.message?.imageMessage)
-    return { mediaMsg: voMsg.message.imageMessage, isVid: false };
+    return { mediaMsg: voMsg.message.imageMessage, isVid: false, isAudio: false };
   if (voMsg?.message?.videoMessage)
-    return { mediaMsg: voMsg.message.videoMessage, isVid: true };
+    return { mediaMsg: voMsg.message.videoMessage, isVid: true,  isAudio: false };
+  if (voMsg?.message?.audioMessage)
+    return { mediaMsg: voMsg.message.audioMessage, isVid: false, isAudio: true  };
   if (normalized?.imageMessage?.viewOnce)
-    return { mediaMsg: normalized.imageMessage, isVid: false };
+    return { mediaMsg: normalized.imageMessage, isVid: false, isAudio: false };
   if (normalized?.videoMessage?.viewOnce)
-    return { mediaMsg: normalized.videoMessage, isVid: true };
+    return { mediaMsg: normalized.videoMessage, isVid: true,  isAudio: false };
+  if (normalized?.audioMessage?.viewOnce)
+    return { mediaMsg: normalized.audioMessage, isVid: false, isAudio: true  };
   return null;
 }
 
-async function downloadBuffer(mediaMsg, isVid) {
+async function downloadBuffer(mediaMsg, isVid, isAudio = false) {
   const { downloadContentFromMessage } = await import(
     "@whiskeysockets/baileys"
   );
   const stream = await downloadContentFromMessage(
     mediaMsg,
-    isVid ? "video" : "image",
+    isAudio ? "audio" : isVid ? "video" : "image",
   );
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
@@ -173,8 +177,8 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     const extracted = extractViewOnceMedia(normalized);
     if (!extracted) return;
 
-    const { mediaMsg, isVid } = extracted;
-    const mime = mediaMsg.mimetype || (isVid ? "video/mp4" : "image/jpeg");
+    const { mediaMsg, isVid, isAudio } = extracted;
+    const mime = mediaMsg.mimetype || (isAudio ? "audio/mp4" : isVid ? "video/mp4" : "image/jpeg");
     const caption = mediaMsg.caption || "";
     const chatJid = msg.key.remoteJid;
     const inGroup = chatJid?.endsWith("@g.us");
@@ -194,7 +198,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     // Download
     let buf = null;
     try {
-      buf = await downloadBuffer(mediaMsg, isVid);
+      buf = await downloadBuffer(mediaMsg, isVid, isAudio);
     } catch (e) {
       logger.warn({ err: e.message }, "ViewOnce download failed");
     }
@@ -214,6 +218,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       buf,
       mime,
       isVid,
+      isAudio,
       num,
       time,
       inGroup,
@@ -265,14 +270,26 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
           `📍 *Chat:* ${inGroup ? "Group" : "DM"}\n` +
           `\n> 👁️ *AA MD Bot*`;
 
-        await sock
-          .sendMessage(
-            selfJid,
-            isVid
-              ? { video: buf, caption: cap, mimetype: mime }
-              : { image: buf, caption: cap, mimetype: mime },
-          )
-          .catch(() => {});
+        if (isAudio) {
+          await sock
+            .sendMessage(selfJid, {
+              audio: buf,
+              mimetype: mime,
+              ptt: mediaMsg?.ptt || false,
+            })
+            .catch(() => {});
+          // Send caption as a follow-up text for audio (audio messages don't support caption)
+          await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+        } else {
+          await sock
+            .sendMessage(
+              selfJid,
+              isVid
+                ? { video: buf, caption: cap, mimetype: mime }
+                : { image: buf, caption: cap, mimetype: mime },
+            )
+            .catch(() => {});
+        }
       }
     }
   } catch (e) {
@@ -566,14 +583,25 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
       `> 👁️ *AA MD Bot*`;
 
-    await sock
-      .sendMessage(
-        selfJid,
-        stored.isVid
-          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-          : { image: stored.buf, caption: cap, mimetype: stored.mime },
-      )
-      .catch(() => {});
+    if (stored.isAudio) {
+      await sock
+        .sendMessage(selfJid, {
+          audio: stored.buf,
+          mimetype: stored.mime,
+          ptt: false,
+        })
+        .catch(() => {});
+      await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+    } else {
+      await sock
+        .sendMessage(
+          selfJid,
+          stored.isVid
+            ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+            : { image: stored.buf, caption: cap, mimetype: stored.mime },
+        )
+        .catch(() => {});
+    }
 
     logger.info(
       { sessionId, stanzaId, trigger: triggerLabel },
@@ -617,14 +645,25 @@ export async function handleManualReveal(msgId, sock, replyJid) {
     `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
     `> 👁️ *AA MD Bot*`;
 
-  await sock
-    .sendMessage(
-      selfJid,
-      stored.isVid
-        ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-        : { image: stored.buf, caption: cap, mimetype: stored.mime },
-    )
-    .catch(() => {});
+  if (stored.isAudio) {
+    await sock
+      .sendMessage(selfJid, {
+        audio: stored.buf,
+        mimetype: stored.mime,
+        ptt: false,
+      })
+      .catch(() => {});
+    await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+  } else {
+    await sock
+      .sendMessage(
+        selfJid,
+        stored.isVid
+          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+          : { image: stored.buf, caption: cap, mimetype: stored.mime },
+      )
+      .catch(() => {});
+  }
 }
 
 // ── Reveal by quoted/replied message — used by .reveal plugin ─────────────────
@@ -657,14 +696,25 @@ export async function handleRevealByReply(msg, sock) {
     `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
     `> 👁️ *AA MD Bot*`;
 
-  await sock
-    .sendMessage(
-      selfJid,
-      stored.isVid
-        ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-        : { image: stored.buf, caption: cap, mimetype: stored.mime },
-    )
-    .catch(() => {});
+  if (stored.isAudio) {
+    await sock
+      .sendMessage(selfJid, {
+        audio: stored.buf,
+        mimetype: stored.mime,
+        ptt: false,
+      })
+      .catch(() => {});
+    await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+  } else {
+    await sock
+      .sendMessage(
+        selfJid,
+        stored.isVid
+          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+          : { image: stored.buf, caption: cap, mimetype: stored.mime },
+      )
+      .catch(() => {});
+  }
 
   return true;
 }
