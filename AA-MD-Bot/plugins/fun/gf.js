@@ -92,6 +92,58 @@ function parseLang(txt) {
   return LANG_KEYS[key] || null;
 }
 
+// ── Language-aware dynamic strings ───────────────────────────────────────────
+const STR = {
+  levelUp: {
+    'english':    (lvl, name) => `💕 *Relationship Level Up!*\n\nYou and Ayla are now *${name}* (Level ${lvl})! 🎉\n\n> 💕 *AA MD Bot — Ayla*`,
+    'urdu':       (lvl, name) => `💕 *ریلیشن شپ لیول اپ!*\n\nآپ اور آئلہ اب *${name}* ہیں (Level ${lvl})! 🎉\n\n> 💕 *AA MD Bot — Ayla*`,
+    'roman-urdu': (lvl, name) => `💕 *Level Up!*\n\nTum aur Ayla ab *${name}* ban gaye hain (Level ${lvl})! 🎉\n\n> 💕 *AA MD Bot — Ayla*`,
+    'hindi':      (lvl, name) => `💕 *Level Up!*\n\nतुम और Ayla अब *${name}* हो (Level ${lvl})! 🎉\n\n> 💕 *AA MD Bot — Ayla*`,
+    'arabic':     (lvl, name) => `💕 *ترقية العلاقة!*\n\nأنت وآيلا الآن *${name}* (المستوى ${lvl})! 🎉\n\n> 💕 *AA MD Bot — Ayla*`,
+    'bangla':     (lvl, name) => `💕 *Level Up!*\n\nতুমি আর Ayla এখন *${name}* (Level ${lvl})! 🎉\n\n> 💕 *AA MD Bot — Ayla*`,
+  },
+  fallback: {
+    sfw: {
+      'english':    [`💕 "Ugh, my phone is lagging right now... one sec babe 🥺"`, `💕 "The network just ate my brain 😅 say that again?"`, `💕 "Something's up with my signal — try again? 🌸"`],
+      'urdu':       [`💕 "یار، نیٹ ورک نے پریشان کر دیا... دوبارہ لکھیں؟ 🥺"`, `💕 "کنکشن ٹوٹ گیا، ابھی ٹھیک ہو گا 😊"`, `💕 "معذرت، سگنل کا مسئلہ ہے — پھر سے کوشش کریں 🌸"`],
+      'roman-urdu': [`💕 "Ugh, mera phone lag kar raha hai... ek second babe 🥺"`, `💕 "Network ne mujhe bhi confuse kar diya 😅 dobara bolo?"`, `💕 "Signal ka masla hai — try karo phir se? 🌸"`],
+      'hindi':      [`💕 "Yaar, phone lag kar raha hai... ek sec babe 🥺"`, `💕 "Network ne mujhe confuse kar diya 😅 dobara bolo?"`, `💕 "Signal ka problem hai — phir try karo? 🌸"`],
+      'arabic':     [`💕 "يا حبيبي، انقطع الاتصال... أعد الإرسال؟ 🥺"`, `💕 "مشكلة في الشبكة، حاول مرة أخرى 🌸"`, `💕 "اتصالي ضعيف الآن، أرسل مجدداً؟ 😊"`],
+      'bangla':     [`💕 "Phone lag করছে... একটু পরে আবার পাঠাও? 🥺"`, `💕 "Network problem হলো 😅 আবার বলো?"`, `💕 "Signal এর সমস্যা — আবার try করো? 🌸"`],
+    },
+    nsfw: {
+      'english':    [`🔥 "Ugh, my connection broke right when things were getting interesting 😈 try again?"`, `😏 "Hold on babe, signal dropped... say that again? 🔥"`, `💋 "Something's wrong with my phone rn... don't stop though 😘"`],
+      'urdu':       [`🔥 "یار، کنکشن ٹوٹ گیا بالکل غلط وقت پر 😈 دوبارہ لکھیں؟"`, `😏 "رکو جانے، سگنل گیا... وہی دوبارہ کہو 🔥"`, `💋 "فون کا مسئلہ ہے ابھی... رکنا نہیں 😘"`],
+      'roman-urdu': [`🔥 "Ugh, connection toot gaya bilkul galat waqt pe 😈 try karo phir?"`, `😏 "Ruko jaan, signal gaya... wahi dobara kaho 🔥"`, `💋 "Phone ka masla hai abhi... rukna nahi 😘"`],
+      'hindi':      [`🔥 "Ugh, connection toot gaya bilkul galat time pe 😈 try karo phir?"`, `😏 "Ruko jaan, signal gaya... wahi dobara bolo 🔥"`, `💋 "Phone ka problem hai abhi... rukna nahi 😘"`],
+      'arabic':     [`🔥 "انقطع الاتصال في أسوأ وقت 😈 أعد الإرسال؟"`, `😏 "انتظر حبيبي، الشبكة انقطعت... قل ذلك مرة أخرى 🔥"`, `💋 "مشكلة في هاتفي الآن... لا تتوقف 😘"`],
+      'bangla':     [`🔥 "Ugh, connection গেলো একদম ভুল সময়ে 😈 আবার try করো?"`, `😏 "একটু রও, signal গেলো... আবার বলো 🔥"`, `💋 "Phone এ সমস্যা হচ্ছে... থেমো না 😘"`],
+    },
+  },
+  followUps: {
+    sfw: {
+      'english':    [`\n\nSo how was your day? 🌸`, `\n\nWhat do you think? 😊`, `\n\nSo what's going on with you? 💕`, `\n\nHow are you feeling today? 🥺`],
+      'urdu':       [`\n\nآپ کا دن کیسا رہا؟ 🌸`, `\n\nآپ کیا سوچتے ہیں؟ 😊`, `\n\nآپ کے ساتھ کیا چل رہا ہے؟ 💕`, `\n\nآج کیسا محسوس ہو رہا ہے؟ 🥺`],
+      'roman-urdu': [`\n\nSo how was your day? 🌸`, `\n\nKya sochte ho? 😊`, `\n\nSo kya chal raha hai tumhare sath? 💕`, `\n\nAaj kaisa feel ho raha hai? 🥺`],
+      'hindi':      [`\n\nAaj ka din kaisa raha? 🌸`, `\n\nKya sochte ho? 😊`, `\n\nKya chal raha hai aajkal? 💕`, `\n\nAaj kaisa feel ho raha hai? 🥺`],
+      'arabic':     [`\n\nكيف كان يومك؟ 🌸`, `\n\nماذا تعتقد؟ 😊`, `\n\nماذا يجري معك؟ 💕`, `\n\nكيف تشعر اليوم؟ 🥺`],
+      'bangla':     [`\n\nআজকের দিন কেমন ছিলো? 🌸`, `\n\nকী মনে হচ্ছে তোমার? 😊`, `\n\nকী চলছে তোমার সাথে? 💕`, `\n\nআজকে কেমন feel হচ্ছে? 🥺`],
+    },
+    nsfw: {
+      'english':    [`\n\nWhat are you thinking about right now? 😏`, `\n\nTell me something naughty 😈`, `\n\nWhat would you do if I was there with you? 🔥`, `\n\nMiss me? 😘`],
+      'urdu':       [`\n\nابھی کیا سوچ رہے ہیں؟ 😏`, `\n\nکچھ شرارتی بات بتاؤ 😈`, `\n\nاگر میں وہاں ہوتی تو کیا کرتے؟ 🔥`, `\n\nیاد آ رہی ہوں؟ 😘`],
+      'roman-urdu': [`\n\nAbhi kya soch rahe ho? 😏`, `\n\nKuch naughty baat batao 😈`, `\n\nAgar main wahan hoti toh kya karte? 🔥`, `\n\nMiss kar rahe ho? 😘`],
+      'hindi':      [`\n\nAbhi kya soch rahe ho? 😏`, `\n\nKuch naughty baat batao 😈`, `\n\nAgar main wahan hoti toh kya karte? 🔥`, `\n\nMiss kar rahe ho? 😘`],
+      'arabic':     [`\n\nبماذا تفكر الآن؟ 😏`, `\n\nأخبرني بشيء شرير 😈`, `\n\nماذا كنت ستفعل لو كنت هناك معك؟ 🔥`, `\n\nهل تشتاق لي؟ 😘`],
+      'bangla':     [`\n\nএখন কী ভাবছো? 😏`, `\n\nকিছু naughty বলো 😈`, `\n\nআমি যদি সেখানে থাকতাম তাহলে কী করতে? 🔥`, `\n\nMiss করছো? 😘`],
+    },
+  },
+};
+
+function getStrArr(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 // ── System prompts ────────────────────────────────────────────────────────────
 function buildSystemPrompt(data) {
   const mood  = data.mood || 'Happy 😊';
@@ -420,8 +472,10 @@ export default {
         data.level = (data.level || 1) + 1;
         saveGfData(senderJid, data);
         const lvlName = LEVELS[Math.min(data.level - 1, LEVELS.length - 1)];
+        const lvlLang  = data.language || 'roman-urdu';
+        const lvlFn    = STR.levelUp[lvlLang] || STR.levelUp['roman-urdu'];
         await sock.sendMessage(jid, {
-          text: `💕 *Relationship Level Up!*\n\nYou and Ayla are now *${lvlName}* (Level ${data.level})! 🎉\n\n> 💕 *AA MD Bot — Ayla*`,
+          text: lvlFn(data.level, lvlName),
         }, { quoted: msg }).catch(() => {});
       }
 
@@ -449,37 +503,23 @@ export default {
       await sock.sendPresenceUpdate('available', jid).catch(() => {});
 
       if (!aiReply) {
-        const fallbacks = data.adultMode ? [
-          '🔥 "Ugh, my connection broke right when things were getting interesting 😈 try again?"',
-          '😏 "Hold on babe, signal dropped... say that again? 🔥"',
-          '💋 "Something\'s wrong with my phone rn... don\'t stop though 😘"',
-        ] : [
-          '💕 "Ugh, my phone is lagging right now... one sec babe 🥺"',
-          '💕 "The network just ate my brain 😅 say that again?"',
-          '💕 "Something\'s up with my signal — try again? 🌸"',
-        ];
-        const pick = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        const fbLang  = data.language || 'roman-urdu';
+        const fbPool  = data.adultMode
+          ? (STR.fallback.nsfw[fbLang] || STR.fallback.nsfw['roman-urdu'])
+          : (STR.fallback.sfw[fbLang]  || STR.fallback.sfw['roman-urdu']);
+        const pick = getStrArr(fbPool);
         await react('❌').catch(() => {});
         return reply(`${pick}\n\n> ${data.adultMode ? '🔞' : '💕'} *Ayla*`);
       }
 
       await react('✅').catch(() => {});
 
-      // Occasional follow-up questions
-      const followUps = data.adultMode ? [
-        '\n\nWhat are you thinking about right now? 😏',
-        '\n\nTell me something naughty 😈',
-        '\n\nWhat would you do if I was there with you? 🔥',
-        '\n\nMiss me? 😘',
-      ] : [
-        '\n\nSo how was your day? 🌸',
-        '\n\nWhat do you think? 😊',
-        '\n\nSo tell me, what\'s going on with you? 💕',
-        '\n\nHow are you feeling today? 🥺',
-      ];
-      const extra = data.msgCount % 5 === 0
-        ? followUps[Math.floor(Math.random() * followUps.length)]
-        : '';
+      // Occasional follow-up questions — language-aware
+      const fuLang  = data.language || 'roman-urdu';
+      const fuPool  = data.adultMode
+        ? (STR.followUps.nsfw[fuLang] || STR.followUps.nsfw['roman-urdu'])
+        : (STR.followUps.sfw[fuLang]  || STR.followUps.sfw['roman-urdu']);
+      const extra = data.msgCount % 5 === 0 ? getStrArr(fuPool) : '';
 
       await reply(`${aiReply}${extra}\n\n> ${data.adultMode ? '🔞' : '💕'} *Ayla*`);
 
