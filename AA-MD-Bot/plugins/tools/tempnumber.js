@@ -1,126 +1,47 @@
 // AA MD Bot — Temporary Phone Number
-// Source: sms-receive.net (public free numbers, no auth needed)
+// Source: DavidCyrilTech API (confirmed working)
 // Commands:
-//   .tempnumber          → list available numbers by country
-//   .tempnumber <number> → show latest SMS for that number
+//   .tempnumber          → list available numbers
+//   .tempnumber <number-Country> → show SMS inbox for that number
 //   .tempnumber list     → same as bare command
 import axios from 'axios';
 
-const BASE = 'https://sms-receive.net';
-const UA   = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+const DC  = 'https://apis.davidcyriltech.my.id/tempnumber/receive-sms-online';
+const UA  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-// ── Scrape number list from homepage ─────────────────────────────────────────
+// ── Fetch list of available numbers ──────────────────────────────────────────
+// Response: array of { number, country, flag? } or similar
 async function fetchNumbers() {
-  const { data: html } = await axios.get(BASE + '/', {
-    headers: { 'User-Agent': UA, Accept: 'text/html' },
+  const { data } = await axios.get(`${DC}/numbers`, {
+    headers: { 'User-Agent': UA },
     timeout: 15000,
   });
 
-  // Numbers are in: <div class="text-lg font-black text-gray-900 ...">+447848446595</div>
-  const re = /class="text-lg font-black text-gray-900[^"]*"[^>]*>\s*(\+[\d\s\-]{8,20})\s*<\/div>/g;
-  const nums = new Set();
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    const n = m[1].replace(/\s/g, '').trim();
-    if (n.startsWith('+')) nums.add(n);
-  }
-
-  // Fallback: any +E.164 style number in the HTML
-  if (nums.size === 0) {
-    const fallback = html.match(/\+[1-9][0-9]{7,14}/g) || [];
-    fallback.slice(0, 20).forEach(n => nums.add(n));
-  }
-
-  if (nums.size === 0) throw new Error('Could not parse numbers from site');
-  return [...nums];
+  // Handle both array and { numbers: [...] } shapes
+  const list = Array.isArray(data) ? data : (data?.numbers || data?.data || []);
+  if (!list.length) throw new Error('No numbers returned by API');
+  return list;
 }
 
-// ── Group numbers by country code ─────────────────────────────────────────────
-const COUNTRY_MAP = {
-  '+1':   '🇺🇸 USA/Canada',
-  '+44':  '🇬🇧 UK',
-  '+49':  '🇩🇪 Germany',
-  '+33':  '🇫🇷 France',
-  '+46':  '🇸🇪 Sweden',
-  '+47':  '🇳🇴 Norway',
-  '+45':  '🇩🇰 Denmark',
-  '+358': '🇫🇮 Finland',
-  '+31':  '🇳🇱 Netherlands',
-  '+48':  '🇵🇱 Poland',
-  '+41':  '🇨🇭 Switzerland',
-  '+43':  '🇦🇹 Austria',
-  '+32':  '🇧🇪 Belgium',
-  '+61':  '🇦🇺 Australia',
-  '+64':  '🇳🇿 New Zealand',
-  '+81':  '🇯🇵 Japan',
-  '+82':  '🇰🇷 South Korea',
-  '+86':  '🇨🇳 China',
-  '+91':  '🇮🇳 India',
-  '+92':  '🇵🇰 Pakistan',
-  '+55':  '🇧🇷 Brazil',
-  '+52':  '🇲🇽 Mexico',
-  '+7':   '🇷🇺 Russia',
-};
-
-function getCountryLabel(number) {
-  // Try longest prefix first
-  const sorted = Object.keys(COUNTRY_MAP).sort((a, b) => b.length - a.length);
-  for (const prefix of sorted) {
-    if (number.startsWith(prefix)) return COUNTRY_MAP[prefix];
-  }
-  return '🌍 International';
-}
-
-function groupByCountry(numbers) {
-  const groups = {};
-  for (const n of numbers) {
-    const label = getCountryLabel(n);
-    if (!groups[label]) groups[label] = [];
-    groups[label].push(n);
-  }
-  return groups;
-}
-
-// ── Scrape SMS list for a specific number ─────────────────────────────────────
-async function fetchSms(number) {
-  // Strip + for URL
-  const urlNum = number.startsWith('+') ? number.slice(1) : number;
-  const { data: html } = await axios.get(`${BASE}/${urlNum}`, {
-    headers: { 'User-Agent': UA, Accept: 'text/html' },
+// ── Fetch SMS inbox for a specific number ────────────────────────────────────
+// number param format:  "46731299509-Sweden"  (as returned by the numbers endpoint)
+async function fetchInbox(numberParam) {
+  const { data } = await axios.get(`${DC}/inbox`, {
+    params: { number: numberParam },
+    headers: { 'User-Agent': UA },
     timeout: 15000,
   });
 
-  const messages = [];
-
-  // Try to find SMS content blocks (various possible class patterns)
-  // Pattern 1: Look for sender + message pairs in the page
-  const blocks = html.match(/<div[^>]*class="[^"]*(?:message|sms|inbox|msg)[^"]*"[^>]*>([\s\S]{5,500}?)<\/div>/gi) || [];
-  for (const block of blocks.slice(0, 10)) {
-    const text = block.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (text.length > 5 && text.length < 400) messages.push(text);
-  }
-
-  // Pattern 2: Look for table rows with text content
-  if (messages.length === 0) {
-    const trows = html.match(/<tr[^>]*>([\s\S]{10,500}?)<\/tr>/gi) || [];
-    for (const row of trows.slice(0, 15)) {
-      const cells = (row.match(/<td[^>]*>([\s\S]{2,200}?)<\/td>/gi) || [])
-        .map(c => c.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
-        .filter(c => c.length > 2);
-      if (cells.length >= 2) messages.push(cells.join(' | '));
-    }
-  }
-
-  // Pattern 3: Generic paragraph/div text extraction 
-  if (messages.length === 0) {
-    const paras = html.match(/<p[^>]*>([\s\S]{10,300}?)<\/p>/gi) || [];
-    for (const p of paras.slice(0, 10)) {
-      const text = p.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      if (text.length > 10 && !/copyright|privacy|terms|cookie/i.test(text)) messages.push(text);
-    }
-  }
-
-  return messages.slice(0, 8);
+  // Normalise to an array of message strings
+  const raw = Array.isArray(data) ? data : (data?.messages || data?.sms || data?.inbox || data?.data || []);
+  return raw.map(m => {
+    if (typeof m === 'string') return m;
+    const sender  = m.sender  || m.from    || m.number  || '';
+    const content = m.message || m.content || m.text    || m.body   || '';
+    const time    = m.time    || m.date    || m.received_at || '';
+    return [sender && `From: ${sender}`, time && `🕐 ${time}`, content]
+      .filter(Boolean).join('\n');
+  }).filter(Boolean);
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -133,32 +54,34 @@ export default {
   async execute({ args, text, reply, react, prefix }) {
     const input = (text || '').trim();
 
-    // If argument looks like a phone number → show SMS
-    const isNumber = /^\+?[0-9]{7,15}$/.test(input.replace(/[\s\-]/g, ''));
-    if (isNumber || input.toLowerCase().startsWith('+')) {
-      await react('📲');
-      try {
-        const num = input.startsWith('+') ? input : '+' + input;
-        const smsList = await fetchSms(num);
+    // If argument looks like a number param (digits, may include country suffix)
+    // e.g. "+46731299509", "46731299509", "46731299509-Sweden"
+    const isNumberInput = /^[\+\d][\d\-A-Za-z]{5,}$/.test(input) && input !== 'list';
 
-        if (!smsList.length) {
+    if (isNumberInput) {
+      await react('📲');
+      // Normalise: strip leading + so it matches the API param format
+      const numberParam = input.replace(/^\+/, '');
+      try {
+        const msgs = await fetchInbox(numberParam);
+
+        if (!msgs.length) {
           await react('✅');
           return reply(
-            `📲 *SMS Inbox — ${num}*\n\n` +
-            `📭 No messages found (inbox may be empty).\n\n` +
-            `🔗 Check live: ${BASE}/${num.replace('+', '')}\n\n` +
+            `📲 *SMS Inbox — ${numberParam}*\n\n` +
+            `📭 No messages yet (inbox may be empty).\n\n` +
             `> 📱 *AA MD Bot*`
           );
         }
 
-        let text_ = `📲 *SMS Inbox — ${num}*\n${'─'.repeat(28)}\n\n`;
-        smsList.forEach((msg, i) => {
-          text_ += `*${i + 1}.* ${msg}\n\n`;
+        let out = `📲 *SMS Inbox — ${numberParam}*\n${'─'.repeat(28)}\n\n`;
+        msgs.slice(0, 8).forEach((m, i) => {
+          out += `*${i + 1}.* ${m}\n\n`;
         });
-        text_ += `🔗 Live: ${BASE}/${num.replace('+', '')}\n\n> 📱 *AA MD Bot*`;
+        out += `> 📱 *AA MD Bot*`;
 
         await react('✅');
-        return reply(text_);
+        return reply(out);
       } catch (e) {
         await react('❌');
         return reply(`❌ *Could not fetch SMS*\n\n${e.message}\n\n> 📱 *AA MD Bot*`);
@@ -169,27 +92,52 @@ export default {
     await react('📱');
     try {
       const numbers = await fetchNumbers();
-      const groups  = groupByCountry(numbers);
 
-      let text_ =
+      let out =
         `📱 *Temporary Phone Numbers*\n` +
-        `📡 Source: sms-receive.net\n` +
+        `📡 Source: DavidCyrilTech\n` +
         `${'─'.repeat(28)}\n\n`;
 
-      for (const [country, nums] of Object.entries(groups)) {
-        text_ += `${country}\n`;
-        nums.forEach(n => { text_ += `  • \`${n}\`\n`; });
-        text_ += '\n';
+      // Group by country if country field exists, otherwise flat list
+      const hasCountry = numbers[0]?.country || numbers[0]?.Country;
+
+      if (hasCountry) {
+        const groups = {};
+        for (const n of numbers) {
+          const country = n.country || n.Country || '🌍 Other';
+          if (!groups[country]) groups[country] = [];
+          // Build the inbox param: e.g. "46731299509-Sweden"
+          const numStr = (n.number || n.phone || n.phoneNumber || '').toString().replace(/^\+/, '');
+          const param  = `${numStr}-${country}`;
+          groups[country].push(param);
+        }
+        for (const [country, nums] of Object.entries(groups)) {
+          out += `*${country}*\n`;
+          nums.forEach(p => { out += `  • \`${p}\`\n`; });
+          out += '\n';
+        }
+      } else {
+        numbers.slice(0, 20).forEach(n => {
+          const raw = n.number || n.phone || n.phoneNumber || JSON.stringify(n);
+          out += `  • \`${raw}\`\n`;
+        });
+        out += '\n';
       }
 
-      text_ +=
+      // Example: pick the first number to show usage
+      const firstRaw = numbers[0];
+      const firstNum = (firstRaw?.number || firstRaw?.phone || firstRaw?.phoneNumber || '').toString().replace(/^\+/, '');
+      const firstCountry = firstRaw?.country || firstRaw?.Country || '';
+      const exParam = firstCountry ? `${firstNum}-${firstCountry}` : firstNum;
+
+      out +=
         `💡 *To read SMS:*\n` +
-        `${prefix}tempnumber +447848446595\n\n` +
+        `${prefix}tempnumber ${exParam}\n\n` +
         `⚠️ _These are public numbers — do NOT use for personal verification._\n\n` +
         `> 📱 *AA MD Bot*`;
 
       await react('✅');
-      return reply(text_);
+      return reply(out);
     } catch (e) {
       await react('❌');
       return reply(`❌ *Temp Number Failed*\n\n${e.message}\n\nTry again later.\n\n> 📱 *AA MD Bot*`);

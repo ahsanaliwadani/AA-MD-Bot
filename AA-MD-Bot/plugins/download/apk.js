@@ -1,13 +1,35 @@
 // AA MD Bot - APK Downloader
-// Method 1: Aptoide API v7
-// Method 2: APKPure unofficial search + direct link
-// Method 3: Uptodown search
+// Method 1: DavidCyrilTech API (PRIMARY — confirmed working)
+// Method 2: Aptoide API v7
+// Method 3: APKCombo scrape
+// Method 4: Uptodown search
 import axios from 'axios';
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+const UA  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const api = axios.create({ timeout: 20000, headers: { 'User-Agent': UA } });
+const DC  = 'https://apis.davidcyriltech.my.id';
 
-// ── Method 1: Aptoide ─────────────────────────────────────────────────────────
+// ── Method 1: DavidCyrilTech ──────────────────────────────────────────────────
+async function searchDavidCyril(query) {
+  const { data } = await api.get(`${DC}/download/apk`, { params: { text: query } });
+  // Response shape may vary; handle both { result: {...} } and flat
+  const d = data?.result || data?.data || data;
+  if (!d) throw new Error('no data');
+  const dlUrl = d.download_link || d.download || d.apk_link || d.link || d.url || d.dlUrl || null;
+  if (!dlUrl) throw new Error('no download link');
+  return {
+    name:    d.name    || d.app_name   || query,
+    version: d.version || d.versionName || '?',
+    size:    parseFloat(d.size || 0),
+    pkg:     d.package || d.packageName || d.pkg || '',
+    dlUrl,
+    icon:    d.icon    || d.logo       || null,
+    rating:  d.rating  || 'N/A',
+    source:  'DavidCyrilTech',
+  };
+}
+
+// ── Method 2: Aptoide ─────────────────────────────────────────────────────────
 async function searchAptoide(query) {
   const { data } = await api.get('https://ws75.aptoide.com/api/7/apps/search', {
     params: { query, limit: 5, store_name: 'bazaar' },
@@ -95,9 +117,10 @@ export default {
 
     // Try methods in order
     for (const [name, fn] of [
-      ['Aptoide', () => searchAptoide(text)],
-      ['APKCombo', () => searchApkCombo(text)],
-      ['Uptodown', () => searchUptodown(text)],
+      ['DavidCyrilTech', () => searchDavidCyril(text)],
+      ['Aptoide',        () => searchAptoide(text)],
+      ['APKCombo',       () => searchApkCombo(text)],
+      ['Uptodown',       () => searchUptodown(text)],
     ]) {
       try {
         app = await fn();
