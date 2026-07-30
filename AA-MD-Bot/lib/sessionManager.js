@@ -173,6 +173,10 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     printQRInTerminal: !usePairingCode,
     logger: silentLogger,
     generateHighQualityLinkPreview: true,
+    // When a sender's Signal session is corrupted (Bad MAC), Baileys will
+    // automatically recreate the session so future messages decrypt correctly.
+    // Without this, Bad MAC errors loop forever and msg.message stays null.
+    enableAutoSessionRecreation: true,
     getMessage: async () => ({ conversation: '' }),
     syncFullHistory: false,
     markOnlineOnConnect: false,
