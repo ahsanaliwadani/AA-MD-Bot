@@ -8,6 +8,8 @@
 // that view-once from ANY number auto-forwards
 // to the owner's "You" chat.
 // ============================================
+import { saveNow } from '../../lib/database.js';
+
 export default {
   command: "antiviewonce",
   alias: ["antivo", "aviewonce", "antivv"],
@@ -40,6 +42,9 @@ export default {
     // ── Always set GLOBAL setting ──────────────────────────────────────────
     // This ensures view-once from ANY number (group OR DM) auto-forwards.
     db.settings.setValue("antiViewOnce", enable);
+    // Immediate flush — don't rely on the 2s debounce; persist right now so
+    // a PM2 restart between the command and the next view-once doesn't lose it.
+    saveNow('settings').catch(() => {});
 
     // ── Also set group-level if run inside a group ─────────────────────────
     // Keeps per-group granularity for future per-group disable support.

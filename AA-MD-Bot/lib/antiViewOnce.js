@@ -244,19 +244,25 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     }
 
     // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
-    // NOTE: Use || not ?? — db.groups.get() always returns a group object with
-    // antiviewonce:false as default. false ?? x never falls through since false
-    // is not null/undefined. We need || so the global setting acts as fallback.
+    // Check group-level first, then global settings, then per-session settings
+    // (belt-and-suspenders: some callers may persist in sessionSettings instead)
     const groupAntiVO = inGroup
       ? db.groups.get(sessionId, chatJid)?.antiviewonce
       : undefined;
-    const antiVOActive = groupAntiVO === true
-      ? true
-      : (db.settings.getValue("antiViewOnce") === true);
+    const globalAntiVO = db.settings.getValue("antiViewOnce");
+    const sessAntiVO   = db.sessionSettings.getValue(sessionId, "antiViewOnce");
+    const antiVOActive = !!(groupAntiVO || globalAntiVO || sessAntiVO);
+
+    logger.info(
+      { sessionId, antiVOActive, globalAntiVO, sessAntiVO, groupAntiVO, fromMe: msg.key.fromMe },
+      "👁️ ViewOnce antiVO check",
+    );
 
     if (antiVOActive && !msg.key.fromMe) {
       const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
       const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
+
+      logger.info({ sessionId, selfJid }, "👁️ ViewOnce auto-reveal: sending to self-chat");
 
       if (selfJid) {
         const date = moment().tz(tz).format("DD/MM/YYYY");
@@ -270,26 +276,28 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
           `📍 *Chat:* ${inGroup ? "Group" : "DM"}\n` +
           `\n> 👁️ *AA MD Bot*`;
 
-        if (isAudio) {
-          await sock
-            .sendMessage(selfJid, {
+        try {
+          if (isAudio) {
+            await sock.sendMessage(selfJid, {
               audio: buf,
               mimetype: mime,
               ptt: mediaMsg?.ptt || false,
-            })
-            .catch(() => {});
-          // Send caption as a follow-up text for audio (audio messages don't support caption)
-          await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
-        } else {
-          await sock
-            .sendMessage(
+            });
+            await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+          } else {
+            await sock.sendMessage(
               selfJid,
               isVid
                 ? { video: buf, caption: cap, mimetype: mime }
                 : { image: buf, caption: cap, mimetype: mime },
-            )
-            .catch(() => {});
+            );
+          }
+          logger.info({ sessionId, selfJid }, "✅ ViewOnce auto-reveal sent");
+        } catch (sendErr) {
+          logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal send FAILED");
         }
+      } else {
+        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid is null — sock.user not set yet?");
       }
     }
   } catch (e) {
