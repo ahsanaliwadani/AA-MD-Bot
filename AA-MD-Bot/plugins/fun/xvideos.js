@@ -1,211 +1,141 @@
 // ============================================
-// AA MD Bot - XVideos Search & Download
+// AA MD Bot — XVideos Search & Download 🔞
 // Developer: Ahsan Ali | AA Mods
 //
-// Commands:
-//   .xv <search>    — search & send video
-//   .xvideos <search>
-//   .xvid <search>
-//
-// Note: nsfw mode must be ON in group
+// Search via DC /xxx/xvideos API → download via yt-dlp
+// Commands: .xv  .xvideos  .xvid  .xvideo
 // ============================================
 
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { promisify } from 'util';
+import { YTDLP, YTDLP_FLAGS, getCookiesArgs } from '../../lib/ytdlp.js';
+import { generateId } from '../../lib/helper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TEMP = path.join(__dirname, '../../temp');
+const TEMP      = path.join(__dirname, '../../temp');
+const DC        = 'https://apis.davidcyriltech.my.id';
+const UA        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+const FOOTER    = '\n\n> 🔞 *AA MD Bot*  •  👨‍💻 *Ahsan Ali Wadani*';
+const MAX_BYTES = 45 * 1024 * 1024; // 45 MB
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-const FOOTER = '\n\n> 🔞 *AA MD Bot*  •  👨‍💻 *Ahsan Ali Wadani*';
-
-// ── Search xvideos and return first video page URL ────────────────────────────
-// XV URL format changed: /video.SLUG/title (slug = alphanumeric dot-prefixed)
-// Pattern: /video.abc123/video-title-here
-const XV_VIDEO_RE = /^\/video[./][a-zA-Z0-9_]+/;
-const XV_EXCLUDE  = /videos-i-like|favorites|channel|model|pornstar|tag|category|best-of/i;
-
-async function searchXvideos(query) {
-  const url = `https://www.xvideos.com/?k=${encodeURIComponent(query)}&sort=new`;
-  const { data } = await axios.get(url, {
-    headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', 'Referer': 'https://www.xvideos.com/' },
-    timeout: 20000,
-  });
-
-  const $ = cheerio.load(data);
-  const seen = new Set();
-  let firstHref = null;
-
-  // Walk all anchors, pick first valid unique video URL
-  $('a[href]').each((_, el) => {
-    if (firstHref) return;
-    const href = $(el).attr('href') || '';
-    if (XV_VIDEO_RE.test(href) && !XV_EXCLUDE.test(href) && !seen.has(href)) {
-      seen.add(href);
-      firstHref = href;
-    }
-  });
-
-  if (!firstHref) throw new Error('No results found — try different keywords');
-  return `https://www.xvideos.com${firstHref}`;
-}
-
-// ── Scrape video page for MP4 URL, title, thumb ───────────────────────────────
-async function scrapeVideoPage(videoPageUrl) {
-  const { data: html } = await axios.get(videoPageUrl, {
-    headers: {
-      'User-Agent': UA,
-      'Referer': 'https://www.xvideos.com/',
-      'Accept-Language': 'en-US,en;q=0.9',
-    },
-    timeout: 20000,
-  });
-
-  const highUrl = /html5player\.setVideoUrlHigh\('([^']+)'\)/.exec(html)?.[1];
-  const lowUrl  = /html5player\.setVideoUrlLow\('([^']+)'\)/.exec(html)?.[1];
-  const thumb   = /html5player\.setThumbUrl169\('([^']+)'\)/.exec(html)?.[1]
-               || /html5player\.setThumbUrl\('([^']+)'\)/.exec(html)?.[1];
-  const title   = /html5player\.setVideoTitle\('([^']+)'\)/.exec(html)?.[1]
-               || 'Untitled';
-  const views   = /html5player\.setVideoViews\((\d+)\)/.exec(html)?.[1];
-  const duration = /html5player\.setVideoDuration\((\d+)\)/.exec(html)?.[1];
-
-  const mp4 = highUrl || lowUrl;
-  if (!mp4) throw new Error('No MP4 stream found on this page');
-
-  return { mp4, thumb: thumb || null, title, views, duration, pageUrl: videoPageUrl };
-}
-
-// ── Format duration seconds → mm:ss ──────────────────────────────────────────
-function fmtDur(secs) {
-  if (!secs) return '—';
-  const s = parseInt(secs);
-  const m = Math.floor(s / 60);
-  return `${m}:${String(s % 60).padStart(2, '0')}`;
-}
-
-// ── Plugin ────────────────────────────────────────────────────────────────────
 export default {
-  command: 'xv',
-  alias: ['xvideos', 'xvid', 'xvideo'],
-  description: 'Search & download a video from XVideos 🔞',
-  category: 'fun',
-  usage: '.xv <search term>',
+  command:     'xv',
+  alias:       ['xvideos', 'xvid', 'xvideo'],
+  description: 'Search & send adult video from XVideos 🔞',
+  category:    'fun',
+  usage:       '.xv <search term>',
 
   async execute({ sock, msg, jid, text, react, reply, prefix }) {
     const query = (text || '').trim();
 
-    // ── No query: show usage ──────────────────────────────────────────────────
     if (!query) {
       return reply(
         `🔞 *XVideos Downloader*\n\n` +
-        `_Search & send adult videos directly to chat_\n\n` +
-        `*Usage:*\n` +
-        `▸ *${prefix}xv* <search term>\n\n` +
+        `*Usage:* ${prefix}xv <search>\n` +
         `*Examples:*\n` +
         `▸ ${prefix}xv asian\n` +
-        `▸ ${prefix}xv romantic\n` +
-        `▸ ${prefix}xvideos cute girl\n\n` +
+        `▸ ${prefix}xv cute\n` +
+        `▸ ${prefix}xv romantic\n\n` +
         `⚠️ _Adult content — 18+ only_${FOOTER}`
       );
     }
 
-    if (query.length > 150) {
-      return reply(`❌ Search too long. Keep it under 150 characters.${FOOTER}`);
-    }
-
     await react('🔞');
+    let tmpFile = null;
 
-    let statusMsg;
     try {
-      // Send searching indicator
-      try {
-        statusMsg = await sock.sendMessage(jid, {
-          text: `🔍 *Searching XVideos...*\n\n📝 Query: _${query}_\n\n⏳ _Please wait..._${FOOTER}`,
-        }, { quoted: msg });
-      } catch { /* ignore */ }
+      await reply(`🔍 _Searching XVideos for "${query}"..._`);
 
-      // Step 1: Search
-      const videoPageUrl = await searchXvideos(query);
+      // ── 1. Search via DC API ───────────────────────────────────────────────
+      const { data: apiRes } = await axios.get(`${DC}/xxx/xvideos`, {
+        params:  { q: query },
+        headers: { 'User-Agent': UA },
+        timeout: 20000,
+      });
 
-      try {
-        await sock.sendMessage(jid, {
-          edit: statusMsg?.key,
-          text: `✅ *Found a result!*\n\n📝 Query: _${query}_\n\n🔗 _Fetching video stream..._${FOOTER}`,
-        });
-      } catch { /* ignore */ }
+      const results = apiRes?.data?.results || [];
+      if (!results.length) throw new Error(`No results found for: "${query}"`);
 
-      // Step 2: Scrape video page
-      const { mp4, thumb, title, views, duration, pageUrl } = await scrapeVideoPage(videoPageUrl);
+      // Pick a random result from first 10 for variety
+      const pick        = results[Math.floor(Math.random() * Math.min(results.length, 10))];
+      const videoPageUrl = pick.url;
+      const title        = pick.title    || query;
+      const duration     = pick.duration || '';
+      const views        = pick.views    || '';
+      const thumb        = pick.thumbnail?.cover || null;
 
-      try {
-        await sock.sendMessage(jid, {
-          edit: statusMsg?.key,
-          text: `📥 *Sending video...*\n\n🎬 _${title.slice(0, 60)}_\n\n⌛ _Almost done..._${FOOTER}`,
-        });
-      } catch { /* ignore */ }
+      await reply(`📥 _Downloading: ${title.slice(0, 60)}…_\n_This may take 30–60 seconds._`);
 
-      // Step 3: Send video
-      const cleanTitle = title.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 60).trim() || 'xvideos';
-      const viewsFmt = views ? `${parseInt(views).toLocaleString()} views` : '';
-      const durFmt   = fmtDur(duration);
+      // ── 2. Download via yt-dlp ─────────────────────────────────────────────
+      fs.ensureDirSync(TEMP);
+      const id  = generateId();
+      tmpFile   = path.join(TEMP, `xv_${id}.mp4`);
 
+      const { execFile } = await import('child_process');
+      const execFileAsync = promisify(execFile);
+
+      const ytArgs = [
+        ...YTDLP_FLAGS.split(' ').filter(Boolean),
+        ...getCookiesArgs(),
+        '-f', 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=480]/best',
+        '--merge-output-format', 'mp4',
+        '-o', tmpFile,
+        '--no-playlist',
+        videoPageUrl,
+      ];
+
+      await execFileAsync(YTDLP, ytArgs, { timeout: 120000 });
+
+      if (!fs.existsSync(tmpFile)) throw new Error('Download failed — file not created');
+
+      const stat = fs.statSync(tmpFile);
+      if (stat.size > MAX_BYTES)
+        throw new Error(`Video too large (${Math.round(stat.size / 1024 / 1024)} MB). Try again.`);
+      if (stat.size < 10000)
+        throw new Error('Download failed — file too small (corrupted)');
+
+      const buf = await fs.readFile(tmpFile);
+
+      // ── 3. Send ────────────────────────────────────────────────────────────
       const caption =
         `🔞 *XVideos*\n\n` +
-        `🎬 *${title.slice(0, 100)}*\n\n` +
-        (viewsFmt ? `👁️ ${viewsFmt}   ⏱️ ${durFmt}\n` : '') +
-        `🔗 ${pageUrl}${FOOTER}`;
+        `🎬 *${title.slice(0, 100)}*\n` +
+        (views    ? `👁️ ${views}   ` : '') +
+        (duration ? `⏱️ ${duration}\n` : '\n') +
+        `🔗 ${videoPageUrl}${FOOTER}`;
 
       await sock.sendMessage(jid, {
-        video: { url: mp4 },
+        video:    buf,
         mimetype: 'video/mp4',
-        fileName: `${cleanTitle}.mp4`,
+        fileName: `xvideos_${id}.mp4`,
         caption,
-        contextInfo: thumb ? {
-          externalAdReply: {
-            title: title.length > 80 ? title.substring(0, 77) + '...' : title,
-            body: viewsFmt || 'XVideos',
-            thumbnailUrl: thumb,
-            sourceUrl: pageUrl,
-            mediaType: 2,
-            renderLargerThumbnail: true,
+        ...(thumb ? {
+          contextInfo: {
+            externalAdReply: {
+              title:                title.slice(0, 80),
+              body:                 views ? `${views} views` : 'XVideos',
+              thumbnailUrl:         thumb,
+              sourceUrl:            videoPageUrl,
+              mediaType:            2,
+              renderLargerThumbnail: true,
+            },
           },
-        } : undefined,
+        } : {}),
       }, { quoted: msg });
-
-      // Edit status to success
-      try {
-        await sock.sendMessage(jid, {
-          edit: statusMsg?.key,
-          text: `✅ *Video Sent!*\n\n🎬 _${title.slice(0, 60)}_${FOOTER}`,
-        });
-      } catch { /* ignore */ }
 
       await react('✅');
 
     } catch (err) {
-      console.error('[xv.js] Error:', err.message);
-
-      try {
-        await sock.sendMessage(jid, {
-          edit: statusMsg?.key,
-          text: `❌ *Failed*\n\n_${err.message?.slice(0, 100) || 'Unknown error'}_${FOOTER}`,
-        });
-      } catch { /* ignore */ }
-
       await react('❌');
       await reply(
-        `❌ *XVideos search failed*\n\n` +
-        `📝 Query: _${query}_\n\n` +
-        `💡 *Tips:*\n` +
-        `▸ Try simpler keywords (1-2 words)\n` +
-        `▸ Use English keywords\n` +
-        `▸ Try again in a few seconds\n` +
-        `▸ The site may be temporarily blocked${FOOTER}`
+        `❌ *XVideos Failed*\n\n_${err.message?.slice(0, 120)}_\n\n` +
+        `💡 *Tips:*\n▸ Try simpler keywords\n▸ Try again in a moment${FOOTER}`
       );
+    } finally {
+      if (tmpFile) fs.remove(tmpFile).catch(() => {});
     }
   },
 };

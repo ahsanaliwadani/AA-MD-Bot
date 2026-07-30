@@ -530,6 +530,19 @@ export default {
         menu += `│\n`;
         menu += `│  _Aliases: ${pref}ppcp  ${pref}couplepp  ${pref}animepic_\n`;
         menu += `╰${"─".repeat(32)}\n`;
+
+        menu += `\n╭── 🔞  *ADULT CONTENT  (18+)*\n`;
+        menu += `│\n`;
+        menu += `│  ▸ *${pref}xv* <search>\n`;
+        menu += `│     _Search & download XVideos video_\n`;
+        menu += `│     _Aliases: ${pref}xvideos  ${pref}xvid  ${pref}xvideo_\n`;
+        menu += `│\n`;
+        menu += `│  ▸ *${pref}asian* <keyword>\n`;
+        menu += `│     _Asian content preview clip_\n`;
+        menu += `│     _Aliases: ${pref}asianvideo  ${pref}asiandl_\n`;
+        menu += `│\n`;
+        menu += `│  ⚠️ _Adults only. Use responsibly._\n`;
+        menu += `╰${"─".repeat(32)}\n`;
       }
     }
 

@@ -239,13 +239,17 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     }
 
     // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
-    const antiVOActive = inGroup
-      ? (db.groups.get(sessionId, chatJid)?.antiviewonce ??
-        db.settings.getValue("antiViewOnce") ??
-        false)
-      : (db.settings.getValue("antiViewOnce") ?? false);
+    // NOTE: Use || not ?? — db.groups.get() always returns a group object with
+    // antiviewonce:false as default. false ?? x never falls through since false
+    // is not null/undefined. We need || so the global setting acts as fallback.
+    const groupAntiVO = inGroup
+      ? db.groups.get(sessionId, chatJid)?.antiviewonce
+      : undefined;
+    const antiVOActive = groupAntiVO === true
+      ? true
+      : (db.settings.getValue("antiViewOnce") === true);
 
-    if (antiVOActive) {
+    if (antiVOActive && !msg.key.fromMe) {
       const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
       const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
 
