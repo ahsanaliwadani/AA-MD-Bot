@@ -69,6 +69,23 @@ export default {
 
     let rawBuf = null;
 
+    // Try 0: DavidCyrilTech speechma (PRIMARY — supports voice/pitch/rate)
+    if (!rawBuf) {
+      try {
+        const res = await axios.get(
+          `https://apis.davidcyriltech.my.id/tools/speechma`,
+          {
+            params: { text, voice: 'Andrew', pitch: 2, rate: 1 },
+            responseType: 'arraybuffer',
+            timeout: 15000,
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+          }
+        );
+        const buf = Buffer.from(res.data);
+        if (buf.length > 500) rawBuf = buf;
+      } catch {}
+    }
+
     // Try 1: Google Translate TTS
     if (!rawBuf) {
       try {

@@ -113,24 +113,28 @@ export default {
       );
       if (!buffer?.length) throw new Error('Image download failed');
 
-      // ── Step 1: sharp local enhance (always works, instant) ─────────────────
       await react('✨');
-      let result = await sharpEnhance(buffer);
-      let method = '✨ Enhanced (Local AI)';
+      let result = null;
+      let method = '';
 
-      // ── Step 2: try API-based enhancement in background (better quality) ────
-      // Only if upload works — don't block on upload failures
+      // ── Step 1: Try DavidCyrilTech Remini API (PRIMARY — best quality) ───────
       try {
         const imageUrl = await Promise.race([
           uploadImage(buffer, 'remini_input.jpg'),
-          new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 20000)),
+          new Promise((_, r) => setTimeout(() => r(new Error('upload timeout')), 20000)),
         ]);
-        const apiResult = await enhanceWithApi(imageUrl);
-        if (apiResult) {
-          result = apiResult;
+        const apiBuf = await enhanceWithApi(imageUrl);
+        if (apiBuf) {
+          result = apiBuf;
           method = '✨ Enhanced (Remini AI)';
         }
-      } catch {} // API enhancement is optional — fall through with sharp result
+      } catch {} // API is optional — fall through to sharp
+
+      // ── Step 2: sharp local enhance (guaranteed fallback) ────────────────────
+      if (!result) {
+        result = await sharpEnhance(buffer);
+        method  = '✨ Enhanced (Local AI)';
+      }
 
       await sock.sendMessage(jid, {
         image: result,

@@ -6,6 +6,7 @@
 
 import axios from 'axios';
 
+const DC      = 'https://apis.davidcyriltech.my.id/ssweb';
 const SIPUTZX = 'https://api.siputzx.my.id/api/tools/ssweb';
 const THUM    = 'https://image.thum.io/get/width/1280/crop/800/url';
 
@@ -45,7 +46,21 @@ export default {
         if (buf.length > 5000) imgBuf = buf;
       } catch {}
 
-      // ── Fallback: thum.io ────────────────────────────────────────────────────
+      // ── Fallback 1: DavidCyrilTech ssweb ─────────────────────────────────────
+      if (!imgBuf) {
+        try {
+          const { data } = await axios.get(DC, {
+            params: { url },
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+          });
+          const buf = Buffer.from(data);
+          if (buf.length > 5000) imgBuf = buf;
+        } catch {}
+      }
+
+      // ── Fallback 2: thum.io ───────────────────────────────────────────────────
       if (!imgBuf) {
         const { data } = await axios.get(`${THUM}/${encodeURI(url)}`, {
           responseType: 'arraybuffer',

@@ -298,7 +298,7 @@ export default {
       menu += `│     _Powerful AI chat — multi-model, remembers context_\n`;
       menu += `│\n`;
       menu += `│  ▸ *${pref}aivideo <prompt>*\n`;
-      menu += `│     _Text se AI video banao (free, no key needed)_\n`;
+      menu += `│     _Generate AI videos from text (free, no key needed)_\n`;
       menu += `│\n`;
       menu += `│  ▸ *${pref}chatbot on/off*\n`;
       menu += `│     _Group chatbot — reply when @mentioned (per group)_\n`;
@@ -368,7 +368,10 @@ export default {
     menu += `│  ▸ *${pref}boost*        — Universal view booster (auto-detect)\n`;
     menu += `│  ▸ *${pref}tempnumber*   — Free temporary phone numbers (DC API)\n`;
     menu += `│  ▸ *${pref}livescore*    — Live sports scores\n`;
-    menu += `│  ▸ *${pref}translate*    — Google translate (DC primary)\n`;
+    menu += `│  ▸ *${pref}translate*    — Translate text (DC primary)\n`;
+    menu += `│  ▸ *${pref}aidetect*    — Detect if text is AI or human-written\n`;
+    menu += `│  ▸ *${pref}tts*         — Text to speech (DC speechma primary)\n`;
+    menu += `│  ▸ *${pref}ss*          — Website screenshot (DC fallback added)\n`;
     menu += `│\n`;
     menu += `│  📖 *Islamic*\n`;
     menu += `│  ▸ *${pref}quran*        — Full Quran reader (114 surahs)\n`;
