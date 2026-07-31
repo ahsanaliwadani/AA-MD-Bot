@@ -12,18 +12,24 @@ const DC  = 'https://apis.davidcyriltech.my.id';
 // ── Method 1: DavidCyrilTech ──────────────────────────────────────────────────
 async function searchDavidCyril(query) {
   const { data } = await api.get(`${DC}/download/apk`, { params: { text: query } });
-  // Response shape may vary; handle both { result: {...} } and flat
-  const d = data?.result || data?.data || data;
+
+  if (!data?.status) throw new Error(data?.message || 'API returned status false');
+
+  // Actual response shape: { status, owner, apk: { name, lastUpdated, package, icon, downloadLink } }
+  const d = data.apk || data.result || data.data || data;
   if (!d) throw new Error('no data');
-  const dlUrl = d.download_link || d.download || d.apk_link || d.link || d.url || d.dlUrl || null;
+
+  const dlUrl = d.downloadLink || d.download_link || d.apk_link || d.link || d.url || d.dlUrl || null;
   if (!dlUrl) throw new Error('no download link');
+
   return {
-    name:    d.name    || d.app_name   || query,
-    version: d.version || d.versionName || '?',
+    name:    d.name    || d.app_name    || query,
+    // Note: this API stores the version string under "lastUpdated"
+    version: d.lastUpdated || d.version || d.versionName || '?',
     size:    parseFloat(d.size || 0),
     pkg:     d.package || d.packageName || d.pkg || '',
     dlUrl,
-    icon:    d.icon    || d.logo       || null,
+    icon:    d.icon    || d.logo        || null,
     rating:  d.rating  || 'N/A',
     source:  'DavidCyrilTech',
   };
@@ -49,7 +55,7 @@ async function searchAptoide(query) {
   };
 }
 
-// ── Method 2: APKCombo scrape ─────────────────────────────────────────────────
+// ── Method 3: APKCombo scrape ─────────────────────────────────────────────────
 async function searchApkCombo(query) {
   const { data } = await api.get(
     `https://apkcombo.com/search/?q=${encodeURIComponent(query)}`,
@@ -63,7 +69,6 @@ async function searchApkCombo(query) {
   const slug = nameMatch[1];
   const appName = nameMatch[2].trim();
   const pkg = pkgMatch?.[1] || '';
-  // Get download page
   const { data: dlPage } = await api.get(`https://apkcombo.com${slug}download/apk`, {
     headers: { Referer: `https://apkcombo.com${slug}` }
   });
@@ -77,7 +82,7 @@ async function searchApkCombo(query) {
   };
 }
 
-// ── Method 3: Uptodown search (link-only) ─────────────────────────────────────
+// ── Method 4: Uptodown search (link-only) ─────────────────────────────────────
 async function searchUptodown(query) {
   const { data } = await api.get(
     `https://en.uptodown.com/android/search?q=${encodeURIComponent(query)}`,
@@ -115,7 +120,7 @@ export default {
 
     let app = null;
 
-    // Try methods in order
+    // Try each source in order until one returns a valid download link
     for (const [name, fn] of [
       ['DavidCyrilTech', () => searchDavidCyril(text)],
       ['Aptoide',        () => searchAptoide(text)],
@@ -159,9 +164,29 @@ export default {
       (app.pkg ? `🔖 *Package:* ${app.pkg}\n` : '') +
       `⭐ *Rating:* ${app.rating}\n` +
       `🌐 *Source:* ${app.source}\n\n` +
-      `_Downloading…_`
+      `_Sending…_`
     );
 
+    // Primary approach: pass the URL directly to Baileys so it streams
+    // the file to WhatsApp without buffering the whole APK in memory.
+    try {
+      await sock.sendMessage(jid,
+        {
+          document: { url: app.dlUrl },
+          mimetype: 'application/vnd.android.package-archive',
+          fileName: `${app.name.replace(/[^a-z0-9]/gi, '_')}_v${app.version}.apk`,
+          caption: `📦 *${app.name}* v${app.version}\n\n> 📱 *AA MD Bot*`,
+        },
+        { quoted: msg }
+      );
+      await react('✅');
+      return;
+    } catch (err) {
+      console.warn(`[APK] direct URL send failed: ${err.message}`);
+    }
+
+    // Fallback approach: manually download the APK into a buffer first,
+    // then send it. Used when the host blocks direct hotlink fetching.
     try {
       const { data } = await axios.get(app.dlUrl, {
         responseType: 'arraybuffer',
@@ -181,10 +206,10 @@ export default {
         { quoted: msg }
       );
       await react('✅');
-    } catch (err) {
+    } catch (err2) {
       await react('❌');
       await reply(
-        `❌ *Download failed:* ${err.message}\n\n` +
+        `❌ *Download failed:* ${err2.message}\n\n` +
         `Download manually:\n🔗 ${app.dlUrl}\n\n` +
         `> 📦 *AA MD Bot*`
       );
