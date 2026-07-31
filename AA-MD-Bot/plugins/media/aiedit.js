@@ -9,6 +9,29 @@ import { downloadMediaMessage } from '@whiskeysockets/baileys';
 const DC = 'https://apis.davidcyriltech.my.id';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
+// ---------------------------------------------------------------------------
+// Upload helpers — tried in order: uguu -> catbox -> tmpfiles
+// ---------------------------------------------------------------------------
+
+async function uploadToUguu(buf) {
+  const { default: FormData } = await import('form-data');
+  const form = new FormData();
+  form.append('file', buf, { filename: 'img.jpg', contentType: 'image/jpeg' });
+  const res = await axios.post(`${DC}/uploader/uguu`, form, {
+    headers: form.getHeaders(),
+    timeout: 30000,
+  });
+  const url =
+    res.data?.url ||
+    res.data?.result?.url ||
+    res.data?.data?.url ||
+    (typeof res.data?.result === 'string' ? res.data.result : null);
+  if (!url || !String(url).startsWith('http')) {
+    throw new Error('Uguu upload returned invalid response: ' + JSON.stringify(res.data));
+  }
+  return url;
+}
+
 async function uploadToCatbox(buf) {
   const { default: FormData } = await import('form-data');
   const form = new FormData();
@@ -18,15 +41,12 @@ async function uploadToCatbox(buf) {
     headers: form.getHeaders(),
     timeout: 30000,
   });
-  const url = res.data?.trim();
+  const url = res.data?.trim?.();
   if (!url || !url.startsWith('http')) throw new Error('Catbox upload returned invalid URL');
   return url;
 }
 
-// Some third-party image APIs 412 when the image host doesn't return
-// a proper content-type / is unreachable from their server. This
-// re-hosts to a second provider as a fallback.
-async function uploadFallback(buf) {
+async function uploadToTmpfiles(buf) {
   const { default: FormData } = await import('form-data');
   const form = new FormData();
   form.append('file', buf, { filename: 'img.jpg', contentType: 'image/jpeg' });
@@ -35,19 +55,95 @@ async function uploadFallback(buf) {
     timeout: 30000,
   });
   const url = res.data?.data?.url;
-  if (!url) throw new Error('Fallback upload returned no URL');
-  // tmpfiles gives a viewer link; convert to direct download link
+  if (!url) throw new Error('tmpfiles upload returned no URL');
   return url.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
 }
 
-async function verifyImageReachable(url) {
-  try {
-    const res = await axios.head(url, { timeout: 10000, headers: { 'User-Agent': UA } });
-    const ctype = res.headers['content-type'] || '';
-    return ctype.startsWith('image/');
-  } catch {
-    return false;
+// Try every uploader in order, return first that succeeds.
+async function uploadWithFallbackChain(buf) {
+  const uploaders = [
+    ['uguu', uploadToUguu],
+    ['catbox', uploadToCatbox],
+    ['tmpfiles', uploadToTmpfiles],
+  ];
+  let lastErr;
+  for (const [name, fn] of uploaders) {
+    try {
+      const url = await fn(buf);
+      return url;
+    } catch (err) {
+      lastErr = err;
+      console.error(`[aiedit] ${name} upload failed:`, err.message);
+    }
   }
+  throw lastErr || new Error('All uploaders failed');
+}
+
+// Soft reachability check — NEVER blocks the flow, only logs a warning.
+// Many hosts (WhatsApp CDN, some image hosts) reject HEAD requests even
+// though a normal GET works fine, so treating a failed HEAD as fatal was
+// causing false "not reachable" errors on perfectly valid URLs/prompts.
+async function checkReachableSoft(url) {
+  try {
+    const res = await axios.head(url, { timeout: 8000, headers: { 'User-Agent': UA } });
+    const ctype = res.headers['content-type'] || '';
+    if (!ctype.startsWith('image/')) {
+      console.warn(`[aiedit] HEAD ok but content-type not image/*: ${ctype}`);
+    }
+    return true;
+  } catch (err) {
+    console.warn('[aiedit] HEAD check failed (continuing anyway):', err.message);
+    return false; // informational only — caller does NOT abort on this
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Robust quoted-image extraction.
+// The previous version assumed `quoted.key` existed, which many bot
+// frameworks don't guarantee — `quoted` is often just the extracted
+// quotedMessage content with no `key` at all, so downloadMediaMessage()
+// silently failed and the plugin fell through to the "Usage" screen even
+// when the user replied correctly. We now rebuild `key` from the current
+// message's own contextInfo (stanzaId / participant), which is the
+// reliable source in Baileys-based bots.
+// ---------------------------------------------------------------------------
+function extractQuotedImage(msg, quoted) {
+  const ctx =
+    msg?.message?.extendedTextMessage?.contextInfo ||
+    msg?.message?.imageMessage?.contextInfo ||
+    msg?.message?.videoMessage?.contextInfo ||
+    msg?.message?.conversation?.contextInfo;
+
+  // Preferred path: rebuild from contextInfo on the incoming message itself
+  if (ctx?.quotedMessage?.imageMessage) {
+    return {
+      imageMessage: ctx.quotedMessage.imageMessage,
+      key: {
+        remoteJid: msg.key.remoteJid,
+        id: ctx.stanzaId,
+        participant: ctx.participant || msg.key.participant,
+        fromMe: false,
+      },
+    };
+  }
+
+  // Fallback path: whatever the framework's `quoted` helper gives us
+  const qImg = quoted?.message?.imageMessage || quoted?.imageMessage;
+  if (qImg) {
+    return {
+      imageMessage: qImg,
+      key:
+        quoted.key ||
+        {
+          remoteJid: msg.key.remoteJid,
+          id: quoted.id || quoted.stanzaId,
+          participant: quoted.participant,
+          fromMe: false,
+        },
+    };
+  }
+
+  return null;
 }
 
 export default {
@@ -59,23 +155,29 @@ export default {
     await react('⌛');
     try {
       let imageUrl = null;
-      let prompt   = text || '';
+      let prompt   = (text || '').trim();
       let mediaBuf = null;
 
-      // 1. Quoted image
-      const quotedImg = quoted?.message?.imageMessage || quoted?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
-      if (quotedImg) {
+      // 1. Quoted image (robust extraction)
+      const q = extractQuotedImage(msg, quoted);
+      if (q) {
         mediaBuf = await downloadMediaMessage(
-          { message: { imageMessage: quotedImg }, key: quoted.key },
+          { key: q.key, message: { imageMessage: q.imageMessage } },
           'buffer', {}, { reuploadRequest: sock.updateMediaMessage }
-        ).catch(() => null);
+        ).catch((err) => {
+          console.error('[aiedit] downloadMediaMessage failed:', err?.message);
+          return null;
+        });
 
         if (mediaBuf) {
           try {
-            imageUrl = await uploadToCatbox(mediaBuf);
+            imageUrl = await uploadWithFallbackChain(mediaBuf);
           } catch (err) {
+            console.error('[aiedit] all uploaders failed for quoted image:', err.message);
             imageUrl = null;
           }
+        } else {
+          console.error('[aiedit] quoted image detected but buffer download returned null');
         }
       }
 
@@ -94,26 +196,13 @@ export default {
           `  _${prefix}aiedit make her hair blue_\n\n` +
           `• Or provide URL + prompt:\n` +
           `  _${prefix}aiedit <image-url> make background red_\n\n` +
+          (q && !mediaBuf ? `⚠️ _Couldn't download the replied image — try again or send the image URL directly._\n\n` : '') +
           `> 🤖 *AA MD Bot*`
         );
       }
 
-      // 3. Make sure the API can actually fetch this image.
-      //    If not reachable (common cause of 412), try re-hosting.
-      const reachable = await verifyImageReachable(imageUrl);
-      if (!reachable) {
-        if (mediaBuf) {
-          try {
-            imageUrl = await uploadFallback(mediaBuf);
-          } catch (err) {
-            await react('❌');
-            return reply(`❌ *AI Edit Failed*\n\nCouldn't get a publicly reachable image URL (host unreachable / blocked).\n\n> 🤖 *AA MD Bot*`);
-          }
-        } else {
-          await react('❌');
-          return reply(`❌ *AI Edit Failed*\n\nThe provided image URL isn't publicly reachable. Try a different link or reply to the image directly.\n\n> 🤖 *AA MD Bot*`);
-        }
-      }
+      // 3. Soft reachability check — informational only, never blocks
+      await checkReachableSoft(imageUrl);
 
       await reply(`🎨 _Editing image with AI…_`);
 
@@ -123,15 +212,18 @@ export default {
           params: { url: imageUrl, prompt },
           headers: { 'User-Agent': UA, Accept: 'application/json' },
           timeout: 60000,
-          validateStatus: () => true, // let us inspect non-2xx ourselves
+          validateStatus: () => true,
         });
 
         if (res.status === 412) {
-          // Surface whatever reason the API gave, or retry once with re-hosted image
           const apiMsg = res.data?.message || res.data?.error || JSON.stringify(res.data);
           if (mediaBuf) {
-            const retryUrl = await uploadFallback(mediaBuf).catch(() => null);
-            if (retryUrl) {
+            console.warn('[aiedit] 412 from API, retrying with re-hosted image...');
+            const retryUrl = await uploadWithFallbackChain(mediaBuf).catch((err) => {
+              console.error('[aiedit] retry re-upload failed:', err.message);
+              return null;
+            });
+            if (retryUrl && retryUrl !== imageUrl) {
               const retryRes = await axios.get(`${DC}/nanobanana`, {
                 params: { url: retryUrl, prompt },
                 headers: { 'User-Agent': UA, Accept: 'application/json' },
@@ -156,7 +248,6 @@ export default {
           data = res.data;
         }
       } catch (err) {
-        // Axios/network-level failure — surface response body if present
         const apiMsg = err.response?.data?.message || err.response?.data?.error || err.message;
         throw new Error(apiMsg);
       }
@@ -176,6 +267,7 @@ export default {
       await react('✅');
     } catch (e) {
       await react('❌');
+      console.error('[aiedit] fatal error:', e);
       reply(`❌ *AI Edit Failed*\n\n${e.message}\n\n> 🤖 *AA MD Bot*`);
     }
   },
