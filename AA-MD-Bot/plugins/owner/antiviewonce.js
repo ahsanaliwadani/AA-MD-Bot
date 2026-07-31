@@ -9,18 +9,14 @@
 // to the owner's "You" chat.
 // ============================================
 import { saveNow } from '../../lib/database.js';
-
 export default {
   command: "antiviewonce",
   alias: ["antivo", "aviewonce", "antivv"],
   description: "Toggle auto-reveal of view-once media for ALL chats",
   category: "owner",
   ownerOnly: true,
-
   async execute({ args, reply, db, isGroupMsg, jid }) {
     const input = (args[0] || "").toLowerCase().trim();
-
-    // ── Status: show current state ──────────────────────────────────────────
     if (!input || (input !== "on" && input !== "off")) {
       const globalOn = db.settings.getValue("antiViewOnce") === true;
       return reply(
@@ -36,22 +32,12 @@ export default {
         `> 👁️ *AA MD Bot*`,
       );
     }
-
     const enable = input === "on";
-
-    // ── Always set GLOBAL setting ──────────────────────────────────────────
-    // This ensures view-once from ANY number (group OR DM) auto-forwards.
     db.settings.setValue("antiViewOnce", enable);
-    // Immediate flush — don't rely on the 2s debounce; persist right now so
-    // a PM2 restart between the command and the next view-once doesn't lose it.
     saveNow('settings').catch(() => {});
-
-    // ── Also set group-level if run inside a group ─────────────────────────
-    // Keeps per-group granularity for future per-group disable support.
     if (isGroupMsg) {
-      db.groups.set(jid, { antiviewonce: enable });
+      db.groups.set(jid, { antiviewonce: enable }); // scopedDb injects sessionId internally — correct as-is
     }
-
     return reply(
       `${enable ? "✅" : "❌"} *Anti ViewOnce ${enable ? "Enabled" : "Disabled"}*\n\n` +
       `View-once media from *ALL chats* (groups + DMs)\n` +
