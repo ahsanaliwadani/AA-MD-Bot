@@ -125,11 +125,27 @@ async function downloadFirstWorking(candidates, timeout, minSize) {
 }
 
 // ── Format helpers ─────────────────────────────────────────────────────────────
+// NOTE: this is the ONLY place a views value gets its final "K/M/B views"
+// text form. Every source (play-dl, davidcyriltech, etc.) must hand this
+// function a RAW number (or a plain numeric string) — never a value that's
+// already been abbreviated — otherwise the K/M/B suffix gets stripped when
+// this function tries to parse it back into a number and the display
+// silently degrades to a bare number.
 function formatViews(v) {
   if (v === undefined || v === null || v === "") return "N/A";
+
+  // Defensive: if something upstream already produced an abbreviated string
+  // like "1.2M" or "1.2M views", don't mangle it — just normalize it.
+  if (typeof v === "string") {
+    const already = v.trim().match(/^([\d,.]+)\s*([kKmMbB])\b/);
+    if (already) {
+      return `${already[1]}${already[2].toUpperCase()} views`;
+    }
+  }
+
   let n = v;
   if (typeof n === "string") n = Number(n.toString().replace(/[^0-9.]/g, ""));
-  if (!n || isNaN(n)) return typeof v === "string" ? v : "N/A";
+  if (!n || isNaN(n)) return typeof v === "string" && v.trim() ? v : "N/A";
   if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B views";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M views";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K views";
@@ -163,14 +179,6 @@ function scoreMatch(title, query) {
   return words.filter((w) => t.includes(w)).length / words.length;
 }
 
-function fmtViewsShort(n) {
-  if (!n) return "";
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
-  return String(n);
-}
-
 // ── Search (top 5 via play-dl → best title match, davidcyriltech fallback) ───
 async function searchYT(query) {
   // Primary: play-dl (no external API, fastest, and picks the BEST of 5 matches
@@ -193,7 +201,9 @@ async function searchYT(query) {
         thumbnail: r.thumbnails?.[0]?.url || "",
         duration: r.durationInSec ? `${m}:${s}` : "",
         author: r.channel?.name || "",
-        views: fmtViewsShort(r.views),
+        // Raw numeric view count — formatViews() applies the K/M/B suffix
+        // later. Do NOT pre-abbreviate here, or the suffix gets lost.
+        views: r.views ?? "",
       };
     }
   } catch {}
@@ -223,6 +233,8 @@ async function searchYT(query) {
           r.length ||
           deepFind(r, /duration|length|timestamp/i) ||
           "",
+        // Raw view count (number or numeric string) — same rule as above,
+        // formatViews() is the single place that adds K/M/B.
         views:
           r.views ||
           r.viewCount ||
