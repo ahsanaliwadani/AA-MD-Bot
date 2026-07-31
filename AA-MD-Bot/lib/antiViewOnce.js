@@ -246,28 +246,33 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
     // Check group-level first, then global settings, then per-session settings
     // (belt-and-suspenders: some callers may persist in sessionSettings instead)
+    // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
+    // Applies to BOTH groups and DMs — global flag covers all chats.
     const groupAntiVO = inGroup
       ? db.groups.get(sessionId, chatJid)?.antiviewonce
       : undefined;
     const globalAntiVO = db.settings.getValue("antiViewOnce");
     const sessAntiVO   = db.sessionSettings.getValue(sessionId, "antiViewOnce");
-    const antiVOActive = !!(groupAntiVO || globalAntiVO || sessAntiVO);
+    const antiVOActive = !!(groupAntiVO || globalAntiVO === true || sessAntiVO);
 
     logger.info(
-      { sessionId, antiVOActive, globalAntiVO, sessAntiVO, groupAntiVO, fromMe: msg.key.fromMe },
+      { sessionId, antiVOActive, globalAntiVO, globalAntiVO_type: typeof globalAntiVO, sessAntiVO, groupAntiVO, fromMe: msg.key.fromMe },
       "👁️ ViewOnce antiVO check",
     );
 
     if (antiVOActive && !msg.key.fromMe) {
       const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
-      const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
+      // FIX: fallback to the botJid saved in settings at connect time —
+      // sock.user can be momentarily null/undefined right after a reconnect,
+      // which silently killed auto-reveal even when antiVOActive was true.
+      const savedBotJid = db.settings.getValue("botJid");
+      const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : (savedBotJid || null);
 
-      logger.info({ sessionId, selfJid }, "👁️ ViewOnce auto-reveal: sending to self-chat");
+      logger.info({ sessionId, selfJid, usedFallback: !selfNum && !!savedBotJid }, "👁️ ViewOnce auto-reveal: sending to self-chat");
 
       if (selfJid) {
         const date = moment().tz(tz).format("DD/MM/YYYY");
         const timeStr = moment().tz(tz).format("HH:mm:ss");
-
         const cap =
           `🔓 *View-Once Auto-Saved*\n\n` +
           `👤 *From:* ${formatPhone(num)}\n` +
@@ -275,7 +280,6 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
           `📅 *Date:* ${date}\n` +
           `📍 *Chat:* ${inGroup ? "Group" : "DM"}\n` +
           `\n> 👁️ *AA MD Bot*`;
-
         try {
           if (isAudio) {
             await sock.sendMessage(selfJid, {
@@ -297,7 +301,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
           logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal send FAILED");
         }
       } else {
-        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid is null — sock.user not set yet?");
+        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid is null — sock.user AND botJid setting both unavailable");
       }
     }
   } catch (e) {
