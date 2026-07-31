@@ -7,15 +7,15 @@
 //   .spot / .spoti / .spt / .spdl
 //
 // Download chain (fastest → most reliable):
-//   1. YouTube search → race davidcyriltech + eliteprotech  (PRIMARY)
-//   2. YouTube search → yt-dlp SoundCloud search fallback   (SECONDARY)
+//   1. YouTube search (yt-dlp, duration-checked) → race davidcyriltech + eliteprotech  (PRIMARY)
+//   2. YouTube search → yt-dlp SoundCloud search fallback                              (SECONDARY)
 // ============================================
 
 import axios             from 'axios';
 import { execFile }      from 'child_process';
 import { promisify }     from 'util';
 import fs                from 'fs-extra';
-import path              from 'path';
+import path               from 'path';
 import { fileURLToPath } from 'url';
 
 const execFileP = promisify(execFile);
@@ -60,7 +60,6 @@ async function getAudioFromYT(ytUrl) {
   const p1 = tryDavidCyril(ytUrl).catch(() => null);
   const p2 = tryEliteProtech(ytUrl).catch(() => null);
 
-  // Resolve as soon as first success arrives
   return new Promise(resolve => {
     let settled = 0;
     const check = v => {
@@ -72,8 +71,45 @@ async function getAudioFromYT(ytUrl) {
   });
 }
 
-// ── Method 3: YouTube search via HTML ────────────────────────────────────────
-async function searchYouTube(query) {
+// ── Method 3 (PRIMARY search): yt-dlp search with duration filtering ─────────
+// The old approach scraped the raw YouTube search HTML and grabbed the very
+// first "videoId" match — that's very often a Shorts clip or a short teaser,
+// NOT the full song, which is why downloads were coming back short. yt-dlp's
+// own search extractor gives us duration per result, so we can specifically
+// pick a full-length track (roughly 45s–20min) instead of blindly taking
+// result #1.
+async function searchYouTubeYtdlp(query, count = 5) {
+  const { stdout } = await execFileP(YTDLP, [
+    '--flat-playlist',
+    '--no-warnings',
+    '--print', '%(id)s|||%(duration)s|||%(title)s',
+    `ytsearch${count}:${query} audio`,
+  ], { timeout: 25000 });
+
+  const lines = stdout.trim().split('\n').filter(Boolean);
+  const results = lines.map(line => {
+    const [id, durStr, title] = line.split('|||');
+    const duration = durStr && durStr !== 'NA' && durStr !== 'None' ? parseInt(durStr, 10) : null;
+    return { id, duration, title };
+  }).filter(r => r.id);
+
+  if (!results.length) throw new Error('yt-dlp search returned no results');
+
+  // Prefer a result with a known, "full track"-length duration
+  const good = results.find(r => r.duration && r.duration >= 45 && r.duration <= 1200);
+  const pick = good || results[0];
+
+  return {
+    ytUrl:    `https://www.youtube.com/watch?v=${pick.id}`,
+    videoId:  pick.id,
+    duration: pick.duration,
+    title:    pick.title,
+  };
+}
+
+// ── Method 3b (fallback search): raw HTML scrape ──────────────────────────────
+// Only used if the yt-dlp search above fails outright (e.g. yt-dlp broken/blocked).
+async function searchYouTubeHtml(query) {
   const { data: html } = await api.get(
     `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' audio')}`,
     { headers: { 'Accept-Language': 'en-US,en;q=0.9' }, timeout: 20000 }
@@ -86,6 +122,15 @@ async function searchYouTube(query) {
     }
   }
   throw new Error('No YouTube results found');
+}
+
+async function searchYouTube(query) {
+  try {
+    return await searchYouTubeYtdlp(query);
+  } catch (e) {
+    console.error('[spotify] yt-dlp search failed, falling back to HTML scrape:', e.message);
+    return await searchYouTubeHtml(query);
+  }
 }
 
 // ── Method 4: Spotify og: metadata ───────────────────────────────────────────
@@ -190,10 +235,13 @@ export default {
       } catch { /* use URL as query */ }
     }
 
-    // ── Step 2: YouTube search ─────────────────────────────────────────────
+    // ── Step 2: YouTube search (duration-checked, full track preferred) ────
     let ytResult = null;
     try {
       ytResult = await searchYouTube(searchQuery);
+      if (ytResult.duration) {
+        console.log(`[spotify] picked video ${ytResult.videoId} (${ytResult.duration}s): ${ytResult.title}`);
+      }
       await editStatus(
         `🎵 *Spotify Downloader*\n\n✅ _Found on YouTube_\n📥 _Getting audio..._\n\n⏳ _Please wait..._${FOOTER}`
       );
@@ -219,28 +267,14 @@ export default {
       try {
         const sc = await tryYtdlpSoundCloud(searchQuery);
         if (sc?.buf) {
-          // Send buffer directly
           const cleanName = (displayTitle || searchQuery).replace(/[<>:"/\\|?*]/g, '_').slice(0, 60);
-          const cap =
-            `╭━━━━━━━━━━━━━━━━━━━━\n` +
-            `┃  🎵 *SPOTIFY*\n` +
-            `┣━━━━━━━━━━━━━━━━━━━━\n` +
-            `┃ 🎶 *${(displayTitle || searchQuery).slice(0, 60)}*\n` +
-            (displayArtist ? `┃ 👤 ${displayArtist}\n` : '') +
-            `┃ 🔊 SoundCloud\n` +
-            `╰━━━━━━━━━━━━━━━━━━━━${FOOTER}`;
 
+          // Playable audio only — no separate .mp3 document.
           await sock.sendMessage(jid, {
             audio:    sc.buf,
             mimetype: 'audio/mpeg',
             fileName: `${cleanName}.mp3`,
-          }, { quoted: msg });
-
-          await sock.sendMessage(jid, {
-            document: sc.buf,
-            mimetype: 'audio/mpeg',
-            fileName: `${cleanName}.mp3`,
-            caption:  cap,
+            ptt:      false,
           }, { quoted: msg });
 
           await editStatus(`✅ *Done!*\n\n🎵 _${(displayTitle || searchQuery).slice(0, 50)}_${FOOTER}`);
@@ -264,7 +298,7 @@ export default {
       );
     }
 
-    // ── Step 4: Send audio (URL-based) ────────────────────────────────────
+    // ── Step 4: Send audio (URL-based) — playable audio only ──────────────
     const cleanTitle = (displayTitle || searchQuery).slice(0, 60);
     const cleanName  = cleanTitle.replace(/[<>:"/\\|?*]/g, '_');
 
@@ -272,11 +306,11 @@ export default {
       `✅ *Found!*\n\n🎵 _${cleanTitle}_${displayArtist ? '\n👤 _' + displayArtist + '_' : ''}\n\n📤 _Sending..._${FOOTER}`
     );
 
-    // Audio playback message
     await sock.sendMessage(jid, {
       audio:    { url: audioResult.url },
       mimetype: 'audio/mpeg',
       fileName: `${cleanName}.mp3`,
+      ptt:      false,
       contextInfo: coverImage ? {
         externalAdReply: {
           title:                cleanTitle.substring(0, 30),
@@ -288,23 +322,6 @@ export default {
         },
       } : undefined,
     }, { quoted: msg });
-
-    // Document (direct save)
-    try {
-      await sock.sendMessage(jid, {
-        document: { url: audioResult.url },
-        mimetype: 'audio/mpeg',
-        fileName: `${cleanName}.mp3`,
-        caption:
-          `╭━━━━━━━━━━━━━━━━━━━━\n` +
-          `┃  🎵 *SPOTIFY*\n` +
-          `┣━━━━━━━━━━━━━━━━━━━━\n` +
-          `┃ 🎶 *${cleanTitle}*\n` +
-          (displayArtist ? `┃ 👤 ${displayArtist}\n` : '') +
-          `┃ 🔊 ${audioResult.source}\n` +
-          `╰━━━━━━━━━━━━━━━━━━━━${FOOTER}`,
-      }, { quoted: msg });
-    } catch { /* ignore — audio already sent */ }
 
     await editStatus(`✅ *Done!*\n\n🎵 _${cleanTitle}_${displayArtist ? '\n👤 _' + displayArtist + '_' : ''}${FOOTER}`);
     await react('✅');
