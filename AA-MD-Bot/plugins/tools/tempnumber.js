@@ -2,29 +2,30 @@
 // Source: DavidCyrilTech API (confirmed working)
 // Commands:
 //   .tempnumber          → list available numbers
-//   .tempnumber <number-Country> → show SMS inbox for that number
-//   .tempnumber list     → same as bare command
+//   .tempnumber <slug>   → show SMS inbox for that number (e.g. 46731299509-Sweden)
 import axios from 'axios';
 
 const DC  = 'https://apis.davidcyriltech.my.id/tempnumber/receive-sms-online';
 const UA  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
 // ── Fetch list of available numbers ──────────────────────────────────────────
-// Response: array of { number, country, flag? } or similar
+// Actual response shape:
+// { creator, success, source, result: { numbers: [ { number, country, slug, url }, ... ] } }
 async function fetchNumbers() {
   const { data } = await axios.get(`${DC}/numbers`, {
     headers: { 'User-Agent': UA },
     timeout: 15000,
   });
 
-  // Handle both array and { numbers: [...] } shapes
-  const list = Array.isArray(data) ? data : (data?.numbers || data?.data || []);
+  if (data?.success === false) throw new Error(data?.message || 'API returned success:false');
+
+  const list = data?.result?.numbers || data?.numbers || data?.data || (Array.isArray(data) ? data : []);
   if (!list.length) throw new Error('No numbers returned by API');
   return list;
 }
 
 // ── Fetch SMS inbox for a specific number ────────────────────────────────────
-// number param format:  "46731299509-Sweden"  (as returned by the numbers endpoint)
+// number param format: "46731299509-Sweden" (the "slug" field from the numbers endpoint)
 async function fetchInbox(numberParam) {
   const { data } = await axios.get(`${DC}/inbox`, {
     params: { number: numberParam },
@@ -32,12 +33,19 @@ async function fetchInbox(numberParam) {
     timeout: 15000,
   });
 
-  // Normalise to an array of message strings
-  const raw = Array.isArray(data) ? data : (data?.messages || data?.sms || data?.inbox || data?.data || []);
+  if (data?.success === false) throw new Error(data?.message || 'API returned success:false');
+
+  // Normalise to an array of message objects/strings — handle nested result too
+  const raw =
+    data?.result?.messages || data?.result?.sms || data?.result?.inbox ||
+    data?.messages || data?.sms || data?.inbox || data?.data ||
+    (Array.isArray(data) ? data : []) ||
+    (Array.isArray(data?.result) ? data.result : []);
+
   return raw.map(m => {
     if (typeof m === 'string') return m;
-    const sender  = m.sender  || m.from    || m.number  || '';
-    const content = m.message || m.content || m.text    || m.body   || '';
+    const sender  = m.sender  || m.from    || m.number      || '';
+    const content = m.message || m.content || m.text        || m.body || '';
     const time    = m.time    || m.date    || m.received_at || '';
     return [sender && `From: ${sender}`, time && `🕐 ${time}`, content]
       .filter(Boolean).join('\n');
@@ -54,13 +62,12 @@ export default {
   async execute({ args, text, reply, react, prefix }) {
     const input = (text || '').trim();
 
-    // If argument looks like a number param (digits, may include country suffix)
+    // If argument looks like a slug/number param (digits, may include -Country suffix)
     // e.g. "+46731299509", "46731299509", "46731299509-Sweden"
-    const isNumberInput = /^[\+\d][\d\-A-Za-z]{5,}$/.test(input) && input !== 'list';
+    const isNumberInput = /^[\+\d][\d\-A-Za-z]{5,}$/.test(input) && input.toLowerCase() !== 'list';
 
     if (isNumberInput) {
       await react('📲');
-      // Normalise: strip leading + so it matches the API param format
       const numberParam = input.replace(/^\+/, '');
       try {
         const msgs = await fetchInbox(numberParam);
@@ -98,37 +105,24 @@ export default {
         `📡 Source: DavidCyrilTech\n` +
         `${'─'.repeat(28)}\n\n`;
 
-      // Group by country if country field exists, otherwise flat list
-      const hasCountry = numbers[0]?.country || numbers[0]?.Country;
+      // Group by country
+      const groups = {};
+      for (const n of numbers) {
+        const country = n.country || n.Country || '🌍 Other';
+        const slug     = n.slug || `${(n.number || '').toString().replace(/^\+/, '')}-${country}`;
+        if (!groups[country]) groups[country] = [];
+        groups[country].push({ display: n.number || slug, slug });
+      }
 
-      if (hasCountry) {
-        const groups = {};
-        for (const n of numbers) {
-          const country = n.country || n.Country || '🌍 Other';
-          if (!groups[country]) groups[country] = [];
-          // Build the inbox param: e.g. "46731299509-Sweden"
-          const numStr = (n.number || n.phone || n.phoneNumber || '').toString().replace(/^\+/, '');
-          const param  = `${numStr}-${country}`;
-          groups[country].push(param);
-        }
-        for (const [country, nums] of Object.entries(groups)) {
-          out += `*${country}*\n`;
-          nums.forEach(p => { out += `  • \`${p}\`\n`; });
-          out += '\n';
-        }
-      } else {
-        numbers.slice(0, 20).forEach(n => {
-          const raw = n.number || n.phone || n.phoneNumber || JSON.stringify(n);
-          out += `  • \`${raw}\`\n`;
-        });
+      for (const [country, nums] of Object.entries(groups)) {
+        out += `*${country}*\n`;
+        nums.slice(0, 10).forEach(n => { out += `  • \`${n.slug}\`\n`; });
         out += '\n';
       }
 
-      // Example: pick the first number to show usage
-      const firstRaw = numbers[0];
-      const firstNum = (firstRaw?.number || firstRaw?.phone || firstRaw?.phoneNumber || '').toString().replace(/^\+/, '');
-      const firstCountry = firstRaw?.country || firstRaw?.Country || '';
-      const exParam = firstCountry ? `${firstNum}-${firstCountry}` : firstNum;
+      // Example usage from the first number
+      const first = numbers[0];
+      const exParam = first.slug || `${(first.number || '').toString().replace(/^\+/, '')}-${first.country || ''}`;
 
       out +=
         `💡 *To read SMS:*\n` +
