@@ -204,14 +204,14 @@ export default {
       // 3. Soft reachability check — informational only, never blocks
       await checkReachableSoft(imageUrl);
 
-      await reply(`🎨 _Editing image with AI…_`);
+      await reply(`🎨 _Editing image with AI… (takes 1–2 min, please wait)_`);
 
       let data;
       try {
         const res = await axios.get(`${DC}/nanobanana`, {
           params: { url: imageUrl, prompt },
           headers: { 'User-Agent': UA, Accept: 'application/json' },
-          timeout: 60000,
+          timeout: 120000,
           validateStatus: () => true,
         });
 
