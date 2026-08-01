@@ -233,11 +233,10 @@ export default {
         const sc = await tryYtdlpSoundCloud(searchQuery);
         if (sc?.buf) {
           const cleanName = (displayTitle || searchQuery).replace(/[<>:"/\\|?*]/g, '_').slice(0, 60);
-          // Clean audio only — no contextInfo card
+          // Playable audio — no fileName so WhatsApp shows the audio player
           await sock.sendMessage(jid, {
             audio:    sc.buf,
             mimetype: 'audio/mpeg',
-            fileName: `${cleanName}.mp3`,
             ptt:      false,
           }, { quoted: msg });
 
@@ -269,11 +268,10 @@ export default {
       `✅ *Downloaded!*\n\n🎵 _${cleanTitle}_${displayArtist ? '\n👤 _' + displayArtist + '_' : ''}\n\n📤 _Sending..._${FOOTER}`
     );
 
-    // Pure audio message — no contextInfo, no externalAdReply
+    // Playable audio — no fileName so WhatsApp shows the audio player, not a document
     await sock.sendMessage(jid, {
       audio:    { url: audioResult.url },
       mimetype: 'audio/mpeg',
-      fileName: `${cleanName}.mp3`,
       ptt:      false,
     }, { quoted: msg });
 
