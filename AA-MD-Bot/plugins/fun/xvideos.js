@@ -2,8 +2,9 @@
 // AA MD Bot — XVideos Search & Download 🔞
 // Developer: Ahsan Ali | AA Mods
 //
+// SELF-CHAT ONLY — works only in owner's "You" chat
 // Search via DC /xxx/xvideos API
-// Download via direct HTML scraping (no yt-dlp — blocked from Replit IP)
+// Download via direct HTML scraping (proven working from Replit)
 // Commands: .xv  .xvideos  .xvid  .xvideo
 // ============================================
 
@@ -21,9 +22,7 @@ const FOOTER    = '\n\n> 🔞 *AA MD Bot* •  👨‍💻 *Ahsan Ali Wadani*';
 const MAX_BYTES = 45 * 1024 * 1024; // 45 MB
 
 // ── Extract direct MP4 URL from XVideos page HTML ──────────────────────────
-// XVideos embeds the video URL in JavaScript on the page:
-//   html5player.setVideoUrlHigh('https://cdn.../video_360p.mp4?secure=...')
-//   html5player.setVideoUrl720p('https://cdn.../video_720p.mp4?secure=...')
+// XVideos embeds the video URL in JavaScript on the page.
 async function getDirectVideoUrl(pageUrl) {
   const html = await axios.get(pageUrl, {
     headers: {
@@ -60,7 +59,10 @@ export default {
   category:    'fun',
   usage:       '.xv <search term>',
 
-  async execute({ sock, msg, jid, text, react, reply, prefix }) {
+  async execute({ sock, msg, jid, text, react, reply, prefix, fromMe }) {
+    // ── Self-chat only ────────────────────────────────────────────────────────
+    if (!fromMe) return;   // silently ignore — only works in owner's "You" chat
+
     const query = (text || '').trim();
 
     if (!query) {
@@ -82,26 +84,48 @@ export default {
       await reply(`🔍 _Searching XVideos for "${query}"..._`);
 
       // ── 1. Search via DC API ────────────────────────────────────────────────
-      let results = [];
-      const { data: apiRes } = await axios.get(`${DC}/xxx/xvideos`, {
-        params:  { q: query },
-        headers: { 'User-Agent': UA },
-        timeout: 20000,
-      }).catch(async () => {
-        // fallback API
-        return axios.get(`https://api.guru/xxx/xvideos`, {
-          params: { q: query },
+      let list = [];
+      try {
+        const { data: apiRes } = await axios.get(`${DC}/xxx/xvideos`, {
+          params:  { q: query },
           headers: { 'User-Agent': UA },
           timeout: 20000,
-        }).catch(() => ({ data: null }));
-      });
+        });
+        const results = apiRes?.data?.results || apiRes?.results || apiRes?.data || [];
+        list = Array.isArray(results) ? results : [];
+      } catch (e) {
+        console.error('[xv] DC API failed:', e.message);
+      }
 
-      results = apiRes?.data?.results || apiRes?.results || apiRes?.data || [];
-      const list = Array.isArray(results) ? results : [];
       if (!list.length) throw new Error(`No results found for: "${query}"`);
 
-      // Pick a random result from top 10
-      const pick         = list[Math.floor(Math.random() * Math.min(list.length, 10))];
+      // ── 2. Pick a result + extract MP4 URL (retry up to 3 candidates) ───────
+      const candidates = list.slice(0, Math.min(list.length, 10));
+      // Shuffle a bit — pick from random positions but ensure we have retry candidates
+      const startIdx = Math.floor(Math.random() * Math.max(1, candidates.length - 2));
+      const tryOrder = [
+        candidates[startIdx],
+        candidates[(startIdx + 1) % candidates.length],
+        candidates[(startIdx + 2) % candidates.length],
+      ].filter(Boolean);
+
+      let directUrl = null;
+      let pick      = null;
+
+      for (const candidate of tryOrder) {
+        const pageUrl = candidate.url || candidate.link;
+        if (!pageUrl) continue;
+        try {
+          directUrl = await getDirectVideoUrl(pageUrl);
+          pick      = candidate;
+          break;
+        } catch (e) {
+          console.error(`[xv] URL extraction failed for ${pageUrl}:`, e.message);
+        }
+      }
+
+      if (!directUrl || !pick) throw new Error('Could not extract video URL — try a different search term');
+
       const videoPageUrl = pick.url || pick.link;
       const title        = pick.title || query;
       const duration     = pick.duration || '';
@@ -110,12 +134,7 @@ export default {
         ? (pick.thumbnail?.cover || pick.thumbnail?.preview)
         : (pick.thumbnail || null);
 
-      if (!videoPageUrl) throw new Error('Video URL not found in API response.');
-
       await reply(`📥 _Downloading: ${title.slice(0, 60)}…_\n_Please wait 30–60 seconds._`);
-
-      // ── 2. Extract direct MP4 URL from page HTML ────────────────────────────
-      const directUrl = await getDirectVideoUrl(videoPageUrl);
 
       // ── 3. Download video buffer ────────────────────────────────────────────
       fs.ensureDirSync(TEMP);
@@ -180,9 +199,9 @@ export default {
 
     } catch (err) {
       await react('❌');
-      const msg2 = (err.message || 'Unknown error').slice(0, 150);
+      const errMsg = (err.message || 'Unknown error').slice(0, 150);
       await reply(
-        `❌ *XVideos Failed*\n\n_${msg2}_\n\n` +
+        `❌ *XVideos Failed*\n\n_${errMsg}_\n\n` +
         `💡 *Tips:*\n▸ Try simpler keywords\n▸ Try again in a moment${FOOTER}`
       );
     } finally {
