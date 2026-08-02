@@ -1,0 +1,215 @@
+Create a complete "Menu Theme Engine" for AA MD Bot (Baileys WhatsApp Bot) with a modern, modular architecture.
+
+Requirements:
+
+🎨 Theme System
+- Support unlimited menu themes.
+- Each theme should be stored in its own file inside:
+  /themes/
+- Example:
+  default.js
+  neon.js
+  cyberpunk.js
+  hacker.js
+  minimal.js
+  premium.js
+  anime.js
+  galaxy.js
+  matrix.js
+  gold.js
+  royal.js
+  glass.js
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+⚡ Theme Command
+
+.theme
+→ Shows all available themes.
+
+.theme list
+→ List themes with preview.
+
+.theme set <theme>
+
+Example:
+.theme set cyberpunk
+
+.theme current
+→ Shows current theme.
+
+.theme random
+→ Select random theme.
+
+.theme reset
+→ Restore default theme.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+👤 User Theme
+
+Each user can have their own menu theme.
+
+Store in database:
+
+{
+  jid: "...",
+  menuTheme: "cyberpunk"
+}
+
+Changing one user's theme must NOT affect others.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+📦 Theme Structure
+
+Each theme exports:
+
+name
+author
+version
+emojiSet
+header()
+category()
+footer()
+divider()
+colors (for future web dashboard)
+icons
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+📋 Menu Design
+
+Create clean premium menus.
+
+Example:
+
+╭━━━━━━━━━━━━━━━━━━━━━━╮
+      🤖 AA MD BOT
+━━━━━━━━━━━━━━━━━━━━━━
+👤 User
+⭐ Premium
+💎 XP
+📅 Date
+🕒 Time
+⚡ Speed
+🌐 Ping
+╰━━━━━━━━━━━━━━━━━━━━━━╯
+
+📥 Downloads
+🎨 AI
+👥 Group
+⚙ Tools
+🎮 Games
+👑 Owner
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Use beautiful Unicode borders.
+
+NO ugly ASCII.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Themes must look completely different.
+
+Example:
+
+1. Cyberpunk
+🟣 Neon borders
+
+2. Hacker
+Green terminal style
+
+3. Royal
+Luxury box drawing
+
+4. Gold
+Gold icons
+
+5. Anime
+Cute decorations
+
+6. Matrix
+Green matrix look
+
+7. Minimal
+Simple clean
+
+8. Glass
+Modern transparent style
+
+9. Galaxy
+Stars and planets
+
+10. Premium
+Luxury interface
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Theme Preview
+
+.theme list
+
+Should display
+
+🌌 Galaxy
+Preview:
+╭━━🌌━━╮
+
+⚡ Cyberpunk
+Preview:
+╔═⚡═╗
+
+👑 Royal
+Preview:
+╭👑━━━━╮
+
+etc.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Developer API
+
+const theme = getTheme(user.menuTheme);
+
+theme.header();
+theme.footer();
+theme.category("AI");
+theme.divider();
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Performance
+
+Themes must load dynamically.
+
+Do NOT reload all themes every command.
+
+Cache theme files.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Future Ready
+
+Allow plugin developers to register their own themes.
+
+Example:
+
+registerTheme(themeObject)
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Code Quality
+
+Use ES Modules.
+
+Write clean reusable code.
+
+No duplicated code.
+
+Add comments.
+
+Easy to extend.
+
+The final result should feel like a premium WhatsApp bot with visually stunning menus that users can customize independently.

@@ -1,18 +1,23 @@
 // ============================================
 // AA MD Bot - Main Menu
 // Clean, role-aware, duplicate-free
+// Theme Engine integrated — each user picks their own visual style
 // SuperOwner commands → .smenu only
 // Owner commands → visible to owner only
 // ============================================
 
-import { plugins } from "../../lib/pluginLoader.js";
-import config from "../../config.js";
-import { db } from "../../lib/database.js";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { plugins }                  from "../../lib/pluginLoader.js";
+import config                        from "../../config.js";
+import { db }                        from "../../lib/database.js";
+import { getTheme, initThemes }      from "../../lib/themeEngine.js";
+import fs                            from "fs";
+import path                          from "path";
+import { fileURLToPath }             from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Pre-load themes at module init time (cached — no reload per-command)
+await initThemes();
 
 // ── Banner ────────────────────────────────────────────────────────────────────
 function getBanner() {
@@ -20,9 +25,7 @@ function getBanner() {
     path.join(__dirname, "../../banner.jpeg"),
     path.join(__dirname, "../../banner.jpg"),
   ]) {
-    try {
-      if (fs.existsSync(p)) return fs.readFileSync(p);
-    } catch {}
+    try { if (fs.existsSync(p)) return fs.readFileSync(p); } catch {}
   }
   return null;
 }
@@ -32,11 +35,10 @@ function getCtx() {
   const jid = global._AA_NEWSLETTER_JID;
   if (!jid) return null;
   return {
-    forwardingScore: 999,
-    isForwarded: true,
+    forwardingScore: 999, isForwarded: true,
     forwardedNewsletterMessageInfo: {
-      newsletterJid: jid,
-      newsletterName: global._AA_NEWSLETTER_NAME || "AA MD Bot",
+      newsletterJid:   jid,
+      newsletterName:  global._AA_NEWSLETTER_NAME || "AA MD Bot",
       serverMessageId: Math.floor(Math.random() * 99999) + 1,
     },
   };
@@ -46,83 +48,34 @@ const FOOTER = `\n> 🤖 *AA MD Bot*  •  👨‍💻 *Ahsan Ali Wadani*`;
 
 // ── Category display config ───────────────────────────────────────────────────
 const CAT_CFG = {
-  download: { e: "⬇️", n: "DOWNLOADS", max: 20 },
-  search: { e: "🔍", n: "SEARCH & AI", max: 30 },
-  media: { e: "🎨", n: "MEDIA TOOLS", max: 30 },
-  fun: { e: "🎮", n: "FUN & GAMES", max: 25 },
-  group: { e: "👥", n: "GROUP", max: 18 },
-  admin: { e: "🛡️", n: "GROUP ADMIN", max: 20 },
-  tools: { e: "🔧", n: "TOOLS", max: 35 },
-  utility: { e: "🛠️", n: "UTILITY", max: 20 },
-  gb: { e: "📱", n: "GB FEATURES", max: 8 },
-  islamic: { e: "☪️", n: "ISLAMIC", max: 0 },
+  download: { e: "⬇️",  n: "DOWNLOADS",    max: 20 },
+  search:   { e: "🔍",  n: "SEARCH & AI",  max: 30 },
+  media:    { e: "🎨",  n: "MEDIA TOOLS",  max: 30 },
+  fun:      { e: "🎮",  n: "FUN & GAMES",  max: 25 },
+  group:    { e: "👥",  n: "GROUP",         max: 18 },
+  admin:    { e: "🛡️",  n: "GROUP ADMIN",  max: 20 },
+  tools:    { e: "🔧",  n: "TOOLS",         max: 35 },
+  utility:  { e: "🛠️",  n: "UTILITY",      max: 20 },
+  gb:       { e: "📱",  n: "GB FEATURES",  max:  8 },
+  islamic:  { e: "☪️",  n: "ISLAMIC",      max:  0 },
 };
-const CAT_ORDER = [
-  "download",
-  "search",
-  "media",
-  "fun",
-  "group",
-  "admin",
-  "tools",
-  "utility",
-  "gb",
-  "islamic",
-];
+const CAT_ORDER = ["download","search","media","fun","group","admin","tools","utility","gb","islamic"];
 
-// Owner-control commands shown only to owners (in Owner Quick-Access section)
 const OWNER_GB_CMDS = new Set([
-  "afk",
-  "alwaysonline",
-  "autoread",
-  "autoreply",
-  "flood",
-  "ghost",
-  "onlinealert",
-  "typing",
-  "autoreact",
-  "anticall",
-  "antispam",
+  "afk","alwaysonline","autoread","autoreply","flood","ghost","onlinealert","typing",
+  "autoreact","anticall","antispam",
 ]);
 const OWNER_TOOLS_CMDS = new Set([
-  "backup",
-  "dbstats",
-  "logs",
-  "reload",
-  "speedtest",
-  "system",
-  "memory",
+  "backup","dbstats","logs","reload","speedtest","system","memory",
 ]);
-// SuperOwner-only commands — never in .menu (only in .smenu)
 const SUPER_CMDS = new Set([
-  "eval",
-  "shell",
-  "broadcast",
-  "maintenance",
-  "setnewsletter",
-  "followchannel",
-  "adddevice",
-  "deldevice",
-  "devices",
-  "addowner",
-  "delowner",
-  "setowner",
-  "banuser",
-  "smenu",
-  "supermenu",
-  "devmenu",
-  "adminpanel",
-  "backup",
-  "database",
-  "logs",
-  "reload",
-  "system",
+  "eval","shell","broadcast","maintenance","setnewsletter","followchannel",
+  "adddevice","deldevice","devices","addowner","delowner","setowner","banuser",
+  "smenu","supermenu","devmenu","adminpanel","backup","database","logs","reload","system",
 ]);
 
-// Greeting helper
 function greet() {
   const h = new Date().getUTCHours() + 5;
-  if (h < 6 || h >= 20) return "🌙 Assalamualaikum";
   if (h < 12) return "🌅 Assalamualaikum";
   if (h < 17) return "☀️ Assalamualaikum";
   return "🌆 Assalamualaikum";
@@ -132,57 +85,34 @@ function greet() {
 function buildCategoryMap(isOwner) {
   const seen = new Set();
   const catMap = {};
-
   for (const plugin of plugins.values()) {
-    const mainCmd = Array.isArray(plugin.command)
-      ? plugin.command[0]
-      : plugin.command;
+    const mainCmd = Array.isArray(plugin.command) ? plugin.command[0] : plugin.command;
     if (!mainCmd || seen.has(mainCmd)) continue;
     seen.add(mainCmd);
-
     const cat = (plugin.category || "general").toLowerCase();
-
-    // Always skip owner category from public menus
     if (cat === "owner") continue;
-
-    // Never show superOwner-only commands in .menu
     if (plugin.superOwnerOnly) continue;
     if (SUPER_CMDS.has(mainCmd)) continue;
-
-    // Non-owners: skip ownerOnly commands and owner-specific GB/tools commands
     if (!isOwner) {
       if (plugin.ownerOnly) continue;
-      if (cat === "gb" && OWNER_GB_CMDS.has(mainCmd)) continue;
+      if (cat === "gb"    && OWNER_GB_CMDS.has(mainCmd))    continue;
       if (cat === "tools" && OWNER_TOOLS_CMDS.has(mainCmd)) continue;
     }
-
     if (!catMap[cat]) catMap[cat] = [];
-    catMap[cat].push({
-      cmd: mainCmd,
-      desc: (plugin.description || "").slice(0, 42),
-      ownerOnly: !!plugin.ownerOnly,
-    });
+    catMap[cat].push({ cmd: mainCmd, desc: (plugin.description || "").slice(0, 42), ownerOnly: !!plugin.ownerOnly });
   }
-
   return catMap;
 }
 
-// ── Render a category box ─────────────────────────────────────────────────────
-// catKey = the actual category key (e.g. 'admin', 'download') for deep-link accuracy
-function renderCat(emoji, label, cmds, pref, max, catKey) {
+// ── Render a category box using the active theme ──────────────────────────────
+function renderCat(emoji, label, cmds, pref, max, catKey, theme) {
   const shown = max > 0 ? cmds.slice(0, max) : cmds;
-  const more = cmds.length - shown.length;
+  const more  = cmds.length - shown.length;
 
-  let box = `\n╭── ${emoji}  *${label}*  (${cmds.length})\n│\n`;
-  for (const { cmd, desc } of shown) {
-    const d = desc ? `\n│     _${desc}_` : "";
-    box += `│  ▸ *${pref}${cmd}*${d}\n│\n`;
-  }
-  if (more > 0) {
-    box += `│  _…+${more} more → *${pref}menu ${catKey}*_\n│\n`;
-  }
-  box += `╰${"─".repeat(32)}\n`;
-  return box;
+  const lines = shown.map(({ cmd, desc }) => theme.cmdRow(pref, cmd, desc));
+  if (more > 0) lines.push(theme.infoRow(`_…+${more} more → *${pref}menu ${catKey}*_`));
+
+  return theme.sectionBox(emoji, label, cmds.length, lines);
 }
 
 // ── Single-category detail view ───────────────────────────────────────────────
@@ -200,52 +130,193 @@ function renderCatDetail(cat, cmds, pref) {
   return text;
 }
 
+// ── Build owner controls section using theme ──────────────────────────────────
+function buildOwnerSection(pref, isSuperOwnerUser, theme) {
+  const L = (text) => theme.infoRow(text);
+  const C = (cmd, desc) => theme.cmdRow(pref, cmd, desc);
+
+  const lines = [
+    L("🔒 *Privacy & Stealth*"),
+    C("ghost on/off",          "Appear offline to everyone"),
+    C("alwaysonline on/off",   "Always show online status"),
+    C("privacy",               "Last seen, DP, blue ticks settings"),
+    C("fls 8:30pm / 20:30",    "Set custom last seen time (daily)"),
+    L("_fls off — disable fake last seen_"),
+    C("anticall on/off",       "Block incoming calls"),
+    C("autoreact on/off",      "Auto emoji react to messages"),
+    L(""),
+    L("👁️ *View-Once Reveal*"),
+    C("antiviewonce on/off",   "Auto-reveal all view-once to (You) chat"),
+    C("vv",                    "Reply to view-once — reveal to (You) chat"),
+    C("avv",                   "Same as .vv (alternate command)"),
+    C("good",                  "Silent reveal, no reply to sender"),
+    C("nice",                  "Silent reveal, no reply to sender"),
+    L(""),
+    L("🧹 *Message Tools*"),
+    C("stripfwd",              "Re-send without 'Forwarded' & Channel tags"),
+    L(""),
+    L("🗑️ *Deleted Messages*"),
+    C("antidelete on/off",     "Recover deleted msgs → (You) chat"),
+    L(""),
+    L("🤖 *Auto Features*"),
+    C("autoread on/off",       "Silent read all messages"),
+    C("autoreply <msg>",       "Auto reply when busy"),
+    C("afk <reason>",          "Set AFK status with reason"),
+    C("onlinealert <num>",     "Alert when contact comes online"),
+    L(""),
+    L("⚙️ *Bot Settings*"),
+    C("bs",                    "Full settings panel"),
+    C("mode public/private",   "Change bot access mode"),
+    C("setprefix <char>",      "Change command prefix"),
+    C("antispam on/off",       "Anti-spam message filter"),
+    L(""),
+    L("🤖 *AI & Chatbot*"),
+    C("ai <question>",         "Powerful AI chat — multi-model"),
+    C("aivideo <prompt>",      "Generate AI videos from text"),
+    C("chatbot on/off",        "Group chatbot — reply when @mentioned"),
+    C("autoreply <msg>",       "Static auto reply when busy"),
+    L(""),
+    L("📱 *Telegram*"),
+    L("Admin Bot: /start → /pair <phone>"),
+    L("Features Bot: /help"),
+    ...(isSuperOwnerUser ? [C("smenu", "Super Owner control panel")] : []),
+  ];
+
+  return theme.sectionBox("⚙️", "OWNER CONTROLS", lines.length, lines);
+}
+
+// ── Build NEW & UPDATED section using theme ───────────────────────────────────
+function buildNewSection(pref, theme) {
+  const L = (text) => theme.infoRow(text);
+  const C = (cmd, desc) => theme.cmdRow(pref, cmd, desc);
+
+  const lines = [
+    L("🤖 *AI Models*"),
+    C("gpt55",       "GPT-5.5"),
+    C("claude",      "Claude Sonnet 4.6"),
+    C("deepseek",    "DeepSeek v4 Pro"),
+    C("gemini",      "Gemini 3 Pro"),
+    C("gpt5",        "GPT-5"),
+    C("grok",        "Grok 4.1 Fast"),
+    C("mistral",     "Mistral AI"),
+    C("llama",       "Llama AI"),
+    L(""),
+    L("🎨 *Media / Canvas*"),
+    C("jail",        "Jail bars overlay on image"),
+    C("aiedit",      "AI image editor"),
+    L(""),
+    L("🔍 *Search / Stalk*"),
+    C("telestalk",   "Telegram profile lookup"),
+    C("igstalk",     "Instagram profile lookup"),
+    C("wachannel",   "WhatsApp channel stalk"),
+    L(""),
+    L("⬇️ *Downloads*"),
+    C("moviedl",     "Movie download"),
+    C("apk",         "APK downloader"),
+    C("fb",          "Facebook video"),
+    L(""),
+    L("🔧 *Tools*"),
+    C("igboost",     "Instagram view booster"),
+    C("tiktokboost", "TikTok view booster"),
+    C("ytboost",     "YouTube view booster"),
+    C("boost",       "Universal view booster (auto-detect)"),
+    C("livescore",   "Live sports scores"),
+    C("translate",   "Translate text"),
+    C("aidetect",    "Detect if text is AI or human-written"),
+    C("tts",         "Text to speech"),
+    C("ss",          "Website screenshot"),
+  ];
+
+  return theme.sectionBox("🆕", "NEW & UPDATED COMMANDS", lines.length, lines);
+}
+
+// ── Fun sub-sections (GF, BF, AnimeDP, Adult) ────────────────────────────────
+function buildFunExtras(pref, theme) {
+  const L = (text) => theme.infoRow(text);
+  const C = (cmd, desc) => theme.cmdRow(pref, cmd, desc);
+  let out = "";
+
+  // AI Girlfriend
+  out += theme.sectionBox("💕", "AI GIRLFRIEND — AYLA", 8, [
+    C("gf <message>",    "Chat with Ayla — she remembers your convo"),
+    C("gf mood",         "Ayla's current mood"),
+    C("gf level",        "Your relationship level"),
+    C("gf gift",         "Send her a virtual gift 🎁"),
+    C("gf mode adult",   "Enable Adult Mood of GF"),
+    C("gf mode normal",  "Reset to normal chat mode"),
+    C("gf reset",        "Start fresh"),
+    L("_💡 Relationship grows with every message!_"),
+  ]);
+
+  // AI Boyfriend
+  out += theme.sectionBox("💙", "AI BOYFRIEND — ZAYAN", 6, [
+    C("bf <message>",  "Chat with Zayan"),
+    C("bf mood",       "See his current mood"),
+    C("bf level",      "Your relationship level"),
+    C("bf gift",       "Send him a virtual gift"),
+    C("bf lang",       "Change language"),
+    C("bf reset",      "Start over fresh"),
+  ]);
+
+  // Anime DPs
+  out += theme.sectionBox("🌸", "ANIME PROFILE PICTURES", 3, [
+    C("ppcouple",  "Random anime couple — boy + girl PP"),
+    C("ppboy",     "Random anime boy PP"),
+    C("ppgirl",    "Random anime girl PP"),
+    L(`_Aliases: ${pref}ppcp  ${pref}couplepp  ${pref}animepic_`),
+  ]);
+
+  // Adult
+  out += theme.sectionBox("🔞", "ADULT CONTENT  (18+)", 2, [
+    C("xv <search>",     "Search & download XVideos video"),
+    C("asian <keyword>", "Asian content preview clip"),
+    L("_⚠️ Adults only. Use responsibly._"),
+  ]);
+
+  return out;
+}
+
 export default {
   command: "menu",
-  alias: ["help", "commands", "cmds"],
+  alias:   ["help", "commands", "cmds"],
   description: "Show all available commands",
   category: "utility",
-  usage: ".menu | .menu <category>",
+  usage:    ".menu | .menu <category>",
 
   async execute({ sock, jid, msg, isOwner, args, senderJid }) {
     const settings = db.settings.get();
     const pushName = msg.pushName || "User";
-    const pref = config.prefix?.[0] ?? ".";
-    const mode = (settings.botMode ?? config.botMode ?? "public").toUpperCase();
+    const pref     = config.prefix?.[0] ?? ".";
+    const mode     = (settings.botMode ?? config.botMode ?? "public").toUpperCase();
     const isSuperOwnerUser =
       senderJid?.split("@")[0]?.split(":")[0] === String(config.superOwner);
-    const role = isSuperOwnerUser
-      ? "👑 Super Owner"
-      : isOwner
-        ? "🔑 Owner"
-        : "👤 User";
+    const role = isSuperOwnerUser ? "👑 Super Owner" : isOwner ? "🔑 Owner" : "👤 User";
 
-    const upSec = Math.floor(process.uptime());
-    const upH = Math.floor(upSec / 3600);
-    const upM = Math.floor((upSec % 3600) / 60);
+    const upSec  = Math.floor(process.uptime());
+    const upH    = Math.floor(upSec / 3600);
+    const upM    = Math.floor((upSec % 3600) / 60);
     const uptime = upH > 0 ? `${upH}h ${upM}m` : `${upM}m ${upSec % 60}s`;
-    const usedMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+    const memMB  = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
-    const catMap = buildCategoryMap(isOwner);
+    const catMap   = buildCategoryMap(isOwner);
     const totalCmds = Object.values(catMap).reduce((s, a) => s + a.length, 0);
-    const ctx = getCtx();
+    const ctx      = getCtx();
+
+    // ── Get user's theme ────────────────────────────────────────────────────
+    const themeName = db.settings.getValue("userTheme_" + senderJid) || "default";
+    const theme     = getTheme(themeName);
 
     // ── Single-category detail view ─────────────────────────────────────────
     if (args[0]) {
-      const key = args[0].toLowerCase();
+      const key     = args[0].toLowerCase();
       const matched = CAT_ORDER.find((c) => c.startsWith(key)) || key;
-      const cmds = catMap[matched];
+      const cmds    = catMap[matched];
 
       if (!cmds?.length) {
         const list = CAT_ORDER.filter((c) => catMap[c]?.length)
-          .map(
-            (c) =>
-              `  ${(CAT_CFG[c] || {}).e || "📌"} *${c}*  (${catMap[c].length})`,
-          )
+          .map((c) => `  ${(CAT_CFG[c] || {}).e || "📌"} *${c}*  (${catMap[c].length})`)
           .join("\n");
-        const payload = {
-          text: `❌ Category *"${key}"* not found.\n\n📦 *Available:*\n${list}${FOOTER}`,
-        };
+        const payload = { text: `❌ Category *"${key}"* not found.\n\n📦 *Available:*\n${list}${FOOTER}` };
         if (ctx) payload.contextInfo = ctx;
         return sock.sendMessage(jid, payload, { quoted: msg });
       }
@@ -265,210 +336,38 @@ export default {
 
     let menu = "";
 
-    // Header
-    menu += `╭─────────────────────────────╮\n`;
-    menu += `   🤖 *A A   M D   B O T*\n`;
-    menu += `   👨‍💻 Ahsan Ali Wadani \n`;
-    menu += `╰─────────────────────────────╯\n\n`;
+    // Header (themed)
+    menu += theme.header("A A   M D   B O T", "Ahsan Ali Wadani") + "\n\n";
     menu += `${greeting}\n`;
 
-    // Status bar
-    menu += `\n╭── 📊  *STATUS*\n`;
-    menu += `│  🟢 Online  •  ⏱️ ${uptime}  •  💾 ${usedMB}MB\n`;
-    menu += `│  Prefix: *${pref}*   Mode: *${mode}*   Role: ${role}\n`;
-    menu += `│  📦 *${totalCmds}* commands loaded\n`;
-    menu += `╰${"─".repeat(32)}\n`;
+    // Status bar (themed)
+    menu += theme.statusBar({ uptime, memMB, mode, prefix: pref, role, totalCmds }) + "\n";
 
-    // ── Owner Controls first (at the top) ──────────────────────────────────
+    // Owner controls (themed)
     if (isOwner) {
-      menu += `\n╭── ⚙️  *OWNER CONTROLS*\n`;
-      menu += `│\n`;
-      menu += `│  🔒 *Privacy & Stealth*\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}ghost on/off*\n`;
-      menu += `│     _Appear offline to everyone_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}alwaysonline on/off*\n`;
-      menu += `│     _Always show online status_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}privacy*\n`;
-      menu += `│     _Last seen, DP, blue ticks settings_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}fls 8:30pm / 20:30*\n`;
-      menu += `│     _Set custom last seen time (daily)_\n`;
-      menu += `│  ▸ *${pref}fls off* — disable fake last seen\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}anticall on/off*\n`;
-      menu += `│     _Block incoming calls_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}autoreact on/off*\n`;
-      menu += `│     _Auto emoji react to messages_\n`;
-      menu += `│\n`;
-      menu += `│  👁️ *View-Once Reveal*\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}antiviewonce on/off*\n`;
-      menu += `│     _Auto-reveal all view-once to (You) chat_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}vv* — reply to view-once\n`;
-      menu += `│     _Silently reveal → sent to (You) chat_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}avv* — reply to view-once\n`;
-      menu += `│     _Same as .vv (alternate command)_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}good* — reply to view-once\n`;
-      menu += `│     _Silent reveal, no reply to sender_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}nice* — reply to view-once\n`;
-      menu += `│     _Silent reveal, no reply to sender_\n`;
-      menu += `│\n`;
-      menu += `│  🧹 *Message Tools*\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}stripfwd* — reply to any message\n`;
-      menu += `│     _Re-send without "View Channel" & "Forwarded" tags_\n`;
-      menu += `│\n`;
-      menu += `│  🗑️ *Deleted Messages*\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}antidelete on/off*\n`;
-      menu += `│     _Recover deleted msgs → (You) chat_\n`;
-      menu += `│\n`;
-      menu += `│  🤖 *Auto Features*\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}autoread on/off*\n`;
-      menu += `│     _Silent read all messages_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}autoreply <msg>*\n`;
-      menu += `│     _Auto reply when busy_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}afk <reason>*\n`;
-      menu += `│     _Set AFK status with reason_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}onlinealert <num>*\n`;
-      menu += `│     _Alert when contact comes online_\n`;
-      menu += `│\n`;
-      menu += `│  ⚙️ *Bot Settings*\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}bs*\n`;
-      menu += `│     _Full settings panel_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}mode public/private*\n`;
-      menu += `│     _Change bot access mode_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}setprefix <char>*\n`;
-      menu += `│     _Change command prefix_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}antispam on/off*\n`;
-      menu += `│     _Anti-spam message filter_\n`;
-      menu += `│\n`;
-      menu += `│  🤖 *AI & Chatbot*\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}ai <question>*\n`;
-      menu += `│     _Powerful AI chat — multi-model, remembers context_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}aivideo <prompt>*\n`;
-      menu += `│     _Generate AI videos from text (free, no key needed)_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}chatbot on/off*\n`;
-      menu += `│     _Group chatbot — reply when @mentioned (per group)_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ *${pref}autoreply <msg>*\n`;
-      menu += `│     _Static auto reply when busy_\n`;
-      menu += `│\n`;
-      menu += `│  📱 *Telegram*\n`;
-      menu += `│\n`;
-      menu += `│  ▸ Admin Bot: /start → /pair <phone>\n`;
-      menu += `│     _Get WhatsApp pairing code on Telegram_\n`;
-      menu += `│\n`;
-      menu += `│  ▸ Features Bot: /help\n`;
-      menu += `│     _YT • TikTok • FB • Weather • AI • more_\n`;
-      menu += `│\n`;
-      if (isSuperOwnerUser) {
-        menu += `│  👑 *${pref}smenu*\n`;
-        menu += `│     _Super Owner control panel_\n`;
-        menu += `│\n`;
-      }
-      menu += `╰${"─".repeat(32)}\n`;
+      menu += "\n" + buildOwnerSection(pref, isSuperOwnerUser, theme);
 
-      // ── Islamic quick-access (after owner controls) ───────────────────────
-      menu += `\n╭── ☪️  *ISLAMIC PANEL*  (${catMap["islamic"]?.length || 61})\n`;
-      menu += `│  ▸ *${pref}islamicmenu* — Full Islamic command panel\n`;
-      menu += `│  _Duas • Zikr • Hadith • Kalimas • Adhkar • Salah_\n`;
-      menu += `╰${"─".repeat(32)}\n`;
+      // Islamic quick-access
+      menu += theme.sectionBox("☪️", "ISLAMIC PANEL", catMap["islamic"]?.length || 61, [
+        theme.cmdRow(pref, "islamicmenu", "Full Islamic command panel"),
+        theme.infoRow("_Duas • Zikr • Hadith • Kalimas • Adhkar • Salah_"),
+      ]);
 
-      // ── GB features quick-access ──────────────────────────────────────────
-      menu += `\n╭── 📱  *GB FEATURES*\n`;
-      menu += `│  ▸ *${pref}gbmenu* — Full GB WhatsApp-like features\n`;
-      menu += `│  _Ghost • Privacy • AutoRead • ViewOnce • OnlineAlert_\n`;
-      menu += `╰${"─".repeat(32)}\n`;
+      // GB quick-access
+      menu += theme.sectionBox("📱", "GB FEATURES", 5, [
+        theme.cmdRow(pref, "gbmenu", "Full GB WhatsApp-like features"),
+        theme.infoRow("_Ghost • Privacy • AutoRead • ViewOnce • OnlineAlert_"),
+      ]);
     }
 
-    // ── 🆕 New & Updated Commands ──────────────────────────────────────────
-    menu += `\n╭── 🆕  *NEW & UPDATED COMMANDS*\n`;
-    menu += `│\n`;
-    menu += `│  🤖 *AI Models*\n`;
-    menu += `│  ▸ *${pref}gpt55*        — GPT-5.5\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}claude*       — Claude Sonnet 4.6\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}deepseek*     — DeepSeek v4 Pro\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}gemini*       — Gemini 3 Pro\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}gpt5*         — GPT-5\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}grok*         — Grok 4.1 Fast\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}mistral*      — Mistral AI\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}llama*        — Llama AI\n`;
-    menu += `│\n`;
-    menu += `│  🎨 *Media / Canvas*\n`;
-    menu += `│  ▸ *${pref}jail*         — Jail bars overlay on image\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}aiedit*       — AI image editor\n`;
-    menu += `│\n`;
-    menu += `│  🔍 *Search / Stalk*\n`;
-    menu += `│  ▸ *${pref}telestalk*    — Telegram profile lookup\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}igstalk*      — Instagram profile lookup\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}wachannel*    — WhatsApp channel stalk\n`;
-    menu += `│\n`;
-    menu += `│  ⬇️ *Downloads*\n`;
-    menu += `│  ▸ *${pref}moviedl*      — Movie download\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}apk*          — APK downloader\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}fb*           — Facebook video\n`;
-    menu += `│\n`;
-    menu += `│  🔧 *Tools*\n`;
-    menu += `│  ▸ *${pref}igboost*      — Instagram view booster\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}tiktokboost*  — TikTok view booster\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}ytboost*      — YouTube view booster\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}boost*        — Universal view booster (auto-detect)\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}livescore*    — Live sports scores\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}translate*    — Translate text\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}aidetect*    — Detect if text is AI or human-written\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}tts*         — Text to speech\n`;
-    menu += `│\n`;
-    menu += `│  ▸ *${pref}ss*          — Website screenshot\n`;
-    menu += `╰${"─".repeat(32)}\n`;
+    // New & Updated section (themed)
+    menu += "\n" + buildNewSection(pref, theme);
 
-    // ── Public categories ───────────────────────────────────────────────────
-    // Skip 'islamic' and 'gb' — already shown above for owners; summary below for users
+    // Public categories
     const SKIP_FOR_OWNER = isOwner ? new Set(["islamic", "gb"]) : new Set();
-
     const orderedCats = [
       ...CAT_ORDER.filter((c) => catMap[c]?.length),
-      ...Object.keys(catMap).filter(
-        (c) => !CAT_ORDER.includes(c) && catMap[c]?.length,
-      ),
+      ...Object.keys(catMap).filter((c) => !CAT_ORDER.includes(c) && catMap[c]?.length),
     ];
 
     for (const cat of orderedCats) {
@@ -478,83 +377,28 @@ export default {
       const cfg = CAT_CFG[cat] || { e: "📌", n: cat.toUpperCase(), max: 8 };
 
       if (cat === "islamic") {
-        // For non-owners, show islamic summary at the bottom
-        menu += `\n╭── ☪️  *ISLAMIC*  (${cmds.length})\n`;
-        menu += `│  ▸ *${pref}islamicmenu* — Full Islamic command panel\n`;
-        menu += `│  _Duas • Zikr • Hadith • Kalimas • Adhkar • Salah_\n`;
-        menu += `╰${"─".repeat(32)}\n`;
+        menu += theme.sectionBox("☪️", "ISLAMIC", cmds.length, [
+          theme.cmdRow(pref, "islamicmenu", "Full Islamic command panel"),
+          theme.infoRow("_Duas • Zikr • Hadith • Kalimas • Adhkar • Salah_"),
+        ]);
         continue;
       }
 
-      menu += renderCat(cfg.e, cfg.n, cmds, pref, cfg.max || 8, cat);
+      menu += renderCat(cfg.e, cfg.n, cmds, pref, cfg.max || 8, cat, theme);
 
-      // After fun category — show .gf, .bf and .ppcouple subcommands detail
-      if (cat === "fun") {
-        menu += `\n╭── 💕  *AI GIRLFRIEND — AYLA*\n`;
-        menu += `│\n`;
-        menu += `│  ▸ *${pref}gf* <message>\n`;
-        menu += `│     _Chat with Ayla — she remembers your convo_\n`;
-        menu += `│\n`;
-        menu += `│  ▸ *${pref}gf mood* — Ayla's current mood\n`;
-        menu += `│  ▸ *${pref}gf level* — your relationship level\n`;
-        menu += `│  ▸ *${pref}gf gift* — send her a virtual gift 🎁\n`;
-        menu += `│  ▸ *${pref}gf mode adult* — Enable Adult Mood of GF\n`;
-        menu += `│  ▸ *${pref}gf mode normal* — reset to normal chat mode\n`;
-        menu += `│  ▸ *${pref}gf reset* — start fresh\n`;
-        menu += `│  ▸ *${pref}gf help* — full command list\n`;
-        menu += `│\n`;
-        menu += `│  _💡 Relationship grows with every message!_\n`;
-        menu += `╰${"─".repeat(32)}\n`;
-
-        menu += `\n╭── 💙  *AI BOYFRIEND — ZAYAN*\n`;
-        menu += `│\n`;
-        menu += `│  ▸ *${pref}bf* <message>\n`;
-        menu += `│     _Chat with Zayan_\n`;
-        menu += `│\n`;
-        menu += `│  ▸ *${pref}bf mood* — see his current mood\n`;
-        menu += `│  ▸ *${pref}bf level* — your relationship level\n`;
-        menu += `│  ▸ *${pref}bf gift* — send him a virtual gift\n`;
-        menu += `│  ▸ *${pref}bf lang* — change language\n`;
-        menu += `│  ▸ *${pref}bf reset* — start over fresh\n`;
-        menu += `│  ▸ *${pref}bf help* — this menu\n`;
-        menu += `│\n`;
-        menu += `╰${"─".repeat(32)}\n`;
-
-        menu += `\n╭── 🌸  *ANIME PROFILE PICTURES*\n`;
-        menu += `│\n`;
-        menu += `│  ▸ *${pref}ppcouple*\n`;
-        menu += `│     _Random anime couple — boy + girl PP_\n`;
-        menu += `│\n`;
-        menu += `│  ▸ *${pref}ppboy* — random anime boy PP\n`;
-        menu += `│  ▸ *${pref}ppgirl* — random anime girl PP\n`;
-        menu += `│\n`;
-        menu += `│  _Aliases: ${pref}ppcp  ${pref}couplepp  ${pref}animepic_\n`;
-        menu += `╰${"─".repeat(32)}\n`;
-
-        menu += `\n╭── 🔞  *ADULT CONTENT  (18+)*\n`;
-        menu += `│\n`;
-        menu += `│  ▸ *${pref}xv* <search>\n`;
-        menu += `│     _Search & download XVideos video_\n`;
-        menu += `│     _Aliases: ${pref}xvideos  ${pref}xvid  ${pref}xvideo_\n`;
-        menu += `│\n`;
-        menu += `│  ▸ *${pref}asian* <keyword>\n`;
-        menu += `│     _Asian content preview clip_\n`;
-        menu += `│     _Aliases: ${pref}asianvideo  ${pref}asiandl_\n`;
-        menu += `│\n`;
-        menu += `│  ⚠️ _Adults only. Use responsibly._\n`;
-        menu += `╰${"─".repeat(32)}\n`;
-      }
+      // After fun category — add GF / BF / AnimeDP / Adult extras
+      if (cat === "fun") menu += buildFunExtras(pref, theme);
     }
 
-    // Footer tips
-    menu += `\n╭── 💡  *TIPS*\n`;
-    menu += `│  ▸ *${pref}menu download* — all download commands\n`;
-    menu += `│  ▸ *${pref}menu search*   — all AI & search commands\n`;
-    menu += `│  ▸ *${pref}menu fun*      — all fun & games\n`;
-    if (!isOwner) {
-      menu += `│  ▸ *${pref}islamicmenu* — full Islamic panel\n`;
-    }
-    menu += `╰${"─".repeat(32)}\n`;
+    // Footer tips (themed)
+    menu += theme.footer([
+      `*${pref}menu download* — all download commands`,
+      `*${pref}menu search*   — all AI & search commands`,
+      `*${pref}menu fun*      — all fun & games`,
+      ...(!isOwner ? [`*${pref}islamicmenu* — full Islamic panel`] : []),
+      `*${pref}theme*         — change menu theme (${themeName})`,
+    ]);
+
     menu += FOOTER;
 
     const banner = getBanner();
