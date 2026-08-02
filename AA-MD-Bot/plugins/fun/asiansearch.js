@@ -2,25 +2,38 @@
 // AA MD Bot — Asian Content Search 🔞
 // Developer: Ahsan Ali | AA Mods
 //
-// Uses DC /xxx/xvideos API (42k+ asian results)
-// Downloads preview.mp4 clip as buffer (CDN URLs blocked by Baileys)
+// SELF-CHAT ONLY — works only in owner's "You" chat
+// Search via DC /xxx/xvideos API
+// Downloads preview.mp4 from CDN (accessible from Replit)
+// Falls back to yt-dlp if CDN preview unavailable
 // ============================================
 
-import axios from 'axios';
+import axios      from 'axios';
+import fs         from 'fs-extra';
+import path       from 'path';
+import { execFile }      from 'child_process';
+import { promisify }     from 'util';
+import { fileURLToPath } from 'url';
+import { generateId }    from '../../lib/helper.js';
 
-const DC     = 'https://apis.davidcyriltech.my.id';
-const UA     = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+const execFileAsync = promisify(execFile);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TEMP  = path.join(__dirname, '../../temp');
+const YTDLP = '/home/runner/.local/bin/yt-dlp';
+const DC    = 'https://apis.davidcyriltech.my.id';
+const UA    = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const FOOTER = '\n\n> 🔞 *AA MD Bot*  •  👨‍💻 *Ahsan Ali Wadani*';
-const MAX_VID = 15 * 1024 * 1024; // 15 MB cap for preview clips
 
 export default {
   command:     'asian',
-  alias:       ['asiansearch', 'asianvideo', 'asiandl', 'asiantolick'],
+  alias:       ['asiansearch', 'asianvideo'],
   description: 'Search & send Asian content preview 🔞',
   category:    'fun',
+  usage:       '.asian [search term]',
 
-  async execute({ sock, msg, jid, text, react, reply, prefix }) {
-    const userQuery = (text || '').trim();
+  async execute({ sock, msg, jid, text, react, reply, prefix, fromMe }) {
+    // ── Self-chat only ────────────────────────────────────────────────────────
+    if (!fromMe) return;
 
     if (text === undefined || text === null) {
       return reply(
@@ -34,11 +47,16 @@ export default {
       );
     }
 
-    const query = userQuery ? `asian ${userQuery}` : 'asian';
+    const userQuery = (text || '').trim();
+    const query     = userQuery ? `asian ${userQuery}` : 'asian';
 
     await react('🔞');
+    let tmpFile = null;
 
     try {
+      await reply(`🔍 _Searching for "${query}"..._`);
+
+      // ── 1. Search via DC API ────────────────────────────────────────────────
       const { data: apiRes } = await axios.get(`${DC}/xxx/xvideos`, {
         params:  { q: query },
         headers: { 'User-Agent': UA },
@@ -48,14 +66,13 @@ export default {
       const results = apiRes?.data?.results || apiRes?.results || [];
       if (!results.length) throw new Error(`No results found for: "${query}"`);
 
+      // ── 2. Pick a random result ─────────────────────────────────────────────
       const pick     = results[Math.floor(Math.random() * Math.min(results.length, 10))];
       const title    = pick.title    || query;
       const duration = pick.duration || '';
       const views    = pick.views    || '';
-
-      // Both thumbnail fields
-      const previewUrl = pick.thumbnail?.preview || null; // short mp4 clip
-      const coverUrl   = pick.thumbnail?.cover   || null; // still image
+      const previewUrl = pick.thumbnail?.preview || null; // short ~15s CDN clip
+      const coverUrl   = pick.thumbnail?.cover   || null; // static image
       const pageUrl    = pick.url || '';
 
       const caption =
@@ -64,33 +81,23 @@ export default {
         (duration ? `⏱️ ${duration}\n` : '\n') +
         `🔗 ${pageUrl}${FOOTER}`;
 
-      const ctxInfo = coverUrl ? {
-        contextInfo: {
-          externalAdReply: {
-            title:                title.slice(0, 80),
-            body:                 views ? `${views} views` : 'Asian Content',
-            thumbnailUrl:         coverUrl,
-            sourceUrl:            pageUrl,
-            mediaType:            2,
-            renderLargerThumbnail: true,
-          },
-        },
-      } : {};
-
+      // ── 3a. Try CDN preview.mp4 (small clip, fast) ─────────────────────────
       if (previewUrl) {
-        // Download the preview clip as a buffer — XVideos CDN blocks Baileys fetch
         await react('📥');
         let videoBuf = null;
         try {
           const res = await axios.get(previewUrl, {
             responseType: 'arraybuffer',
-            headers: { 'User-Agent': UA, 'Referer': 'https://www.xvideos.com/' },
+            headers: {
+              'User-Agent': UA,
+              'Referer':    'https://www.xvideos.com/',
+            },
             timeout: 30000,
-            maxContentLength: MAX_VID,
+            maxContentLength: 20 * 1024 * 1024,
           });
           videoBuf = Buffer.from(res.data);
-        } catch (dlErr) {
-          console.warn('[asian] preview download failed:', dlErr.message);
+        } catch (e) {
+          console.warn('[asian] CDN preview download failed:', e.message);
         }
 
         if (videoBuf && videoBuf.length > 5000) {
@@ -98,31 +105,65 @@ export default {
             video:    videoBuf,
             mimetype: 'video/mp4',
             caption,
-            ...ctxInfo,
           }, { quoted: msg });
-        } else if (coverUrl) {
-          // Preview failed — fallback to cover image
+          await react('✅');
+          return;
+        }
+      }
+
+      // ── 3b. Try static cover image as buffer ───────────────────────────────
+      if (coverUrl) {
+        let imgBuf = null;
+        try {
+          const res = await axios.get(coverUrl, {
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': UA, 'Referer': 'https://www.xvideos.com/' },
+            timeout: 15000,
+          });
+          imgBuf = Buffer.from(res.data);
+        } catch {}
+
+        if (imgBuf && imgBuf.length > 1000) {
           await sock.sendMessage(jid, {
-            image:   { url: coverUrl },
+            image:   imgBuf,
             caption,
           }, { quoted: msg });
-        } else {
-          throw new Error('Could not download media from CDN');
+          await react('✅');
+          return;
         }
-        await react('✅');
-      } else if (coverUrl) {
-        await sock.sendMessage(jid, {
-          image:   { url: coverUrl },
-          caption,
-        }, { quoted: msg });
-        await react('✅');
-      } else {
-        throw new Error('No media URL found in result');
       }
+
+      // ── 3c. Full video download with yt-dlp ────────────────────────────────
+      if (!pageUrl) throw new Error('No media URL found in result');
+
+      await reply(`📥 _Downloading full video (may take 1–2 min)..._`);
+      fs.ensureDirSync(TEMP);
+      const id = generateId();
+      tmpFile  = path.join(TEMP, `asian_${id}.mp4`);
+
+      await execFileAsync(YTDLP, [
+        '-f', 'b[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+        '--merge-output-format', 'mp4',
+        '-o', tmpFile,
+        '--no-playlist',
+        '--max-filesize', '45m',
+        '--no-warnings',
+        '-N', '4',
+        pageUrl,
+      ], { timeout: 180_000 });
+
+      if (!fs.existsSync(tmpFile) || fs.statSync(tmpFile).size < 10000)
+        throw new Error('Download failed — try different keywords');
+
+      const buf = await fs.readFile(tmpFile);
+      await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption }, { quoted: msg });
+      await react('✅');
 
     } catch (e) {
       await react('❌');
       await reply(`❌ *Search failed*\n\n${e.message}\n\nTry different keywords.${FOOTER}`);
+    } finally {
+      if (tmpFile) fs.remove(tmpFile).catch(() => {});
     }
   },
 };

@@ -4,53 +4,26 @@
 //
 // SELF-CHAT ONLY — works only in owner's "You" chat
 // Search via DC /xxx/xvideos API
-// Download via direct HTML scraping (proven working from Replit)
+// Download via yt-dlp (handles HLS→mp4 natively)
 // Commands: .xv  .xvideos  .xvid  .xvideo
 // ============================================
 
-import axios from 'axios';
-import fs from 'fs-extra';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { generateId } from '../../lib/helper.js';
+import axios      from 'axios';
+import fs         from 'fs-extra';
+import path       from 'path';
+import { execFile }        from 'child_process';
+import { promisify }       from 'util';
+import { fileURLToPath }   from 'url';
+import { generateId }      from '../../lib/helper.js';
 
+const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMP      = path.join(__dirname, '../../temp');
+const YTDLP     = '/home/runner/.local/bin/yt-dlp';
 const DC        = 'https://apis.davidcyriltech.my.id';
 const UA        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const FOOTER    = '\n\n> 🔞 *AA MD Bot* •  👨‍💻 *Ahsan Ali Wadani*';
 const MAX_BYTES = 45 * 1024 * 1024; // 45 MB
-
-// ── Extract direct MP4 URL from XVideos page HTML ──────────────────────────
-// XVideos embeds the video URL in JavaScript on the page.
-async function getDirectVideoUrl(pageUrl) {
-  const html = await axios.get(pageUrl, {
-    headers: {
-      'User-Agent': UA,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': 'https://www.xvideos.com/',
-    },
-    timeout: 25000,
-  }).then(r => r.data);
-
-  // Try highest quality first, then fall to lower
-  const patterns = [
-    /html5player\.setVideoUrl1080p\('([^']+)'\)/,
-    /html5player\.setVideoUrl720p\('([^']+)'\)/,
-    /html5player\.setVideoUrlHigh\('([^']+)'\)/,
-    /html5player\.setVideoUrlLow\('([^']+)'\)/,
-    /html5player\.setVideoUrl\('([^']+)'\)/,
-    /"videoUrl":"([^"]+\.mp4[^"]*)"/,
-    /setVideoHLS_cdn\('([^']+)'\)/,
-  ];
-
-  for (const re of patterns) {
-    const m = html.match(re);
-    if (m && m[1] && m[1].startsWith('http')) return m[1];
-  }
-  throw new Error('Could not extract video URL from page');
-}
 
 export default {
   command:     'xv',
@@ -61,10 +34,9 @@ export default {
 
   async execute({ sock, msg, jid, text, react, reply, prefix, fromMe }) {
     // ── Self-chat only ────────────────────────────────────────────────────────
-    if (!fromMe) return;   // silently ignore — only works in owner's "You" chat
+    if (!fromMe) return;
 
     const query = (text || '').trim();
-
     if (!query) {
       return reply(
         `🔞 *XVideos Downloader*\n\n` +
@@ -84,87 +56,55 @@ export default {
       await reply(`🔍 _Searching XVideos for "${query}"..._`);
 
       // ── 1. Search via DC API ────────────────────────────────────────────────
-      let list = [];
-      try {
-        const { data: apiRes } = await axios.get(`${DC}/xxx/xvideos`, {
-          params:  { q: query },
-          headers: { 'User-Agent': UA },
-          timeout: 20000,
-        });
-        const results = apiRes?.data?.results || apiRes?.results || apiRes?.data || [];
-        list = Array.isArray(results) ? results : [];
-      } catch (e) {
-        console.error('[xv] DC API failed:', e.message);
-      }
+      const { data: apiRes } = await axios.get(`${DC}/xxx/xvideos`, {
+        params:  { q: query },
+        headers: { 'User-Agent': UA },
+        timeout: 20000,
+      });
 
-      if (!list.length) throw new Error(`No results found for: "${query}"`);
+      const results = apiRes?.data?.results || apiRes?.results || apiRes?.data || [];
+      if (!Array.isArray(results) || !results.length)
+        throw new Error(`No results found for: "${query}"`);
 
-      // ── 2. Pick a result + extract MP4 URL (retry up to 3 candidates) ───────
-      const candidates = list.slice(0, Math.min(list.length, 10));
-      // Shuffle a bit — pick from random positions but ensure we have retry candidates
-      const startIdx = Math.floor(Math.random() * Math.max(1, candidates.length - 2));
-      const tryOrder = [
-        candidates[startIdx],
-        candidates[(startIdx + 1) % candidates.length],
-        candidates[(startIdx + 2) % candidates.length],
-      ].filter(Boolean);
+      // ── 2. Pick a random result from top 10 ────────────────────────────────
+      const pool = results.slice(0, Math.min(results.length, 10));
+      const pick = pool[Math.floor(Math.random() * pool.length)];
 
-      let directUrl = null;
-      let pick      = null;
+      const pageUrl  = pick.url || pick.link;
+      if (!pageUrl)  throw new Error('No video page URL in result');
 
-      for (const candidate of tryOrder) {
-        const pageUrl = candidate.url || candidate.link;
-        if (!pageUrl) continue;
-        try {
-          directUrl = await getDirectVideoUrl(pageUrl);
-          pick      = candidate;
-          break;
-        } catch (e) {
-          console.error(`[xv] URL extraction failed for ${pageUrl}:`, e.message);
-        }
-      }
-
-      if (!directUrl || !pick) throw new Error('Could not extract video URL — try a different search term');
-
-      const videoPageUrl = pick.url || pick.link;
-      const title        = pick.title || query;
-      const duration     = pick.duration || '';
-      const views        = pick.views || '';
-      const thumb = typeof pick.thumbnail === 'object'
+      const title    = pick.title    || query;
+      const duration = pick.duration || '';
+      const views    = pick.views    || '';
+      const thumb    = typeof pick.thumbnail === 'object'
         ? (pick.thumbnail?.cover || pick.thumbnail?.preview)
         : (pick.thumbnail || null);
 
-      await reply(`📥 _Downloading: ${title.slice(0, 60)}…_\n_Please wait 30–60 seconds._`);
+      await reply(`📥 _Downloading: ${title.slice(0, 60)}…_\n_Please wait 30–90 seconds._`);
 
-      // ── 3. Download video buffer ────────────────────────────────────────────
+      // ── 3. Download with yt-dlp ─────────────────────────────────────────────
       fs.ensureDirSync(TEMP);
-      const id = generateId();
-      tmpFile  = path.join(TEMP, `xv_${id}.mp4`);
+      const id    = generateId();
+      tmpFile     = path.join(TEMP, `xv_${id}.mp4`);
 
-      const videoRes = await axios.get(directUrl, {
-        responseType: 'stream',
-        headers: {
-          'User-Agent': UA,
-          'Referer': 'https://www.xvideos.com/',
-        },
-        timeout: 120000,
-        maxContentLength: MAX_BYTES + 1,
-      });
+      await execFileAsync(YTDLP, [
+        '-f', 'b[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+        '--merge-output-format', 'mp4',
+        '-o', tmpFile,
+        '--no-playlist',
+        '--max-filesize', '45m',
+        '--no-warnings',
+        '--socket-timeout', '30',
+        '-N', '4',              // 4 parallel fragments for speed
+        pageUrl,
+      ], { timeout: 180_000 });
 
-      const writer = fs.createWriteStream(tmpFile);
-      await new Promise((resolve, reject) => {
-        videoRes.data.pipe(writer);
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-        videoRes.data.on('error', reject);
-      });
-
-      if (!fs.existsSync(tmpFile)) throw new Error('Download failed — file not created');
+      if (!fs.existsSync(tmpFile)) throw new Error('Download failed — yt-dlp produced no file');
       const stat = fs.statSync(tmpFile);
       if (stat.size > MAX_BYTES)
-        throw new Error(`Video too large (${Math.round(stat.size / 1024 / 1024)} MB). Try another search.`);
+        throw new Error(`File too large (${Math.round(stat.size / 1048576)}MB). Try another search.`);
       if (stat.size < 10000)
-        throw new Error('Download failed — file too small (corrupted)');
+        throw new Error('File too small / corrupted. Try another search.');
 
       const buf = await fs.readFile(tmpFile);
 
@@ -174,12 +114,11 @@ export default {
         `🎬 *${title.slice(0, 100)}*\n` +
         (views    ? `👁️ ${views}   ` : '') +
         (duration ? `⏱️ ${duration}\n` : '\n') +
-        `🔗 ${videoPageUrl}${FOOTER}`;
+        `🔗 ${pageUrl}${FOOTER}`;
 
       await sock.sendMessage(jid, {
         video:    buf,
         mimetype: 'video/mp4',
-        fileName: `xvideos_${id}.mp4`,
         caption,
         ...(thumb ? {
           contextInfo: {
@@ -187,7 +126,7 @@ export default {
               title:                 title.slice(0, 80),
               body:                  views ? `${views} views` : 'XVideos',
               thumbnailUrl:          thumb,
-              sourceUrl:             videoPageUrl,
+              sourceUrl:             pageUrl,
               mediaType:             2,
               renderLargerThumbnail: true,
             },
@@ -199,7 +138,7 @@ export default {
 
     } catch (err) {
       await react('❌');
-      const errMsg = (err.message || 'Unknown error').slice(0, 150);
+      const errMsg = (err.message || 'Unknown error').slice(0, 200);
       await reply(
         `❌ *XVideos Failed*\n\n_${errMsg}_\n\n` +
         `💡 *Tips:*\n▸ Try simpler keywords\n▸ Try again in a moment${FOOTER}`

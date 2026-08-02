@@ -486,6 +486,33 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
           const deletedId = deletedKey?.id;
           const isGroup   = chatJid?.endsWith('@g.us');
           const settings  = db.settings.get();
+
+          const selfNum3 = sock.user?.id?.split('@')[0]?.split(':')[0];
+          const selfJid3 = selfNum3 ? `${selfNum3}@s.whatsapp.net` : null;
+
+          // ── Anti-Delete STATUS: catch deleted WhatsApp statuses ─────────────
+          const isStatusDel = chatJid === 'status@broadcast' || deletedKey?.remoteJid === 'status@broadcast';
+          if (isStatusDel && selfJid3) {
+            const adStatusEnabled =
+              db.sessionSettings.getValue(sessionId, 'antiDeleteStatus') ??
+              settings.antiDeleteStatus ?? false;
+            if (adStatusEnabled) {
+              // Look in status cache
+              const statusCache = _msgCache.get('status@broadcast');
+              const original    = statusCache?.get(deletedId);
+              if (original && !original.key.fromMe) {
+                const statusSender = original.key.participant || deletedKey?.participant || 'unknown';
+                const senderNum    = statusSender.split('@')[0].split(':')[0];
+                const now          = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
+                await sock.sendMessage(selfJid3, {
+                  text: `🗑️ *Status Deleted!*\n\n👤 From: +${senderNum}\n🕐 ${now}`,
+                }).catch(() => {});
+                await sock.sendMessage(selfJid3, { forward: original, force: true }).catch(() => {});
+              }
+            }
+            return; // status deletion processed
+          }
+
           const adEnabled = isGroup
             ? (db.groups.get(sessionId, chatJid)?.antidelete ?? settings.antidelete ?? false)
             : (settings.antidelete ?? false);
@@ -533,6 +560,57 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         return; // stop processing this message (it's a deletion event, not a real message)
       }
 
+      // ── Anti-Edit: detect editedMessage ──────────────────────────────────────
+      const editWrapper = msg.message?.editedMessage;
+      if (editWrapper) {
+        try {
+          const chatJid   = msg.key.remoteJid;
+          const isGroup   = chatJid?.endsWith('@g.us');
+          const settings  = db.settings.get();
+          const aeEnabled = isGroup
+            ? (db.groups.get(sessionId, chatJid)?.antiedit ?? settings.antiedit ?? false)
+            : (settings.antiedit ?? false);
+
+          if (aeEnabled) {
+            const proto2      = editWrapper.message?.protocolMessage;
+            const editedBody  = proto2?.editedMessage;
+            const originalId  = proto2?.key?.id;
+            const newText     = editedBody?.conversation
+                             || editedBody?.extendedTextMessage?.text
+                             || '[non-text edit]';
+
+            const editorJid = msg.key.participant || msg.key.remoteJid;
+            const editorNum = editorJid?.split('@')[0]?.split(':')[0] || '?';
+            const now       = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
+
+            const selfNum4 = sock.user?.id?.split('@')[0]?.split(':')[0];
+            const selfJid4 = selfNum4 ? `${selfNum4}@s.whatsapp.net` : null;
+
+            if (selfJid4) {
+              const original = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
+              const whereAE  = isGroup ? 'Group' : 'DM';
+
+              await sock.sendMessage(selfJid4, {
+                text:
+                  `✏️ *Message Edited*\n\n` +
+                  `👤 By: +${editorNum}\n` +
+                  `📍 Where: ${whereAE}\n` +
+                  `🕐 Time: ${now}\n` +
+                  `📝 New Text: ${newText.slice(0, 300)}`,
+              }).catch(() => {});
+
+              // Forward original if cached
+              if (original) {
+                await sock.sendMessage(selfJid4, {
+                  forward: original, force: true,
+                }).catch(() => {});
+              }
+            }
+          }
+        } catch {}
+        // Don't return — editedMessage could still have a command text, let handler process it
+      }
+
       // Cache this message for potential anti-delete recovery
       const cJid = msg.key.remoteJid;
       const cId  = msg.key.id;
@@ -555,6 +633,15 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
 
       // ── Auto-Status handling (status@broadcast) ──────────────
       if (msg.key.remoteJid === 'status@broadcast') {
+        // Cache status messages so anti-delete-status can recover them
+        const sJid = 'status@broadcast';
+        const sId  = msg.key.id;
+        if (sId && !msg.key.fromMe) {
+          if (!_msgCache.has(sJid)) _msgCache.set(sJid, new Map());
+          const sCache = _msgCache.get(sJid);
+          sCache.set(sId, msg);
+          if (sCache.size > _CACHE_MAX) sCache.delete(sCache.keys().next().value);
+        }
         await handleStatusMessage(sock, msg, sessionId).catch(() => {});
         return; // status messages handled, not a command
       }

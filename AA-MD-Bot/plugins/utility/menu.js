@@ -160,6 +160,8 @@ function buildOwnerSection(pref, isSuperOwnerUser, theme) {
     L(""),
     L("🗑️ *Deleted Messages*"),
     C("antidelete on/off",     "Recover deleted msgs → (You) chat"),
+    C("antiedit on/off",       "Catch edited messages → (You) chat"),
+    C("antideletestatus on/off", "Save deleted statuses → (You) chat"),
     L(""),
     L("🤖 *Auto Features*"),
     C("autoread on/off",       "Silent read all messages"),
@@ -170,7 +172,6 @@ function buildOwnerSection(pref, isSuperOwnerUser, theme) {
     L("⚙️ *Bot Settings*"),
     C("bs",                    "Full settings panel"),
     C("mode public/private",   "Change bot access mode"),
-    C("setprefix <char>",      "Change command prefix"),
     C("antispam on/off",       "Anti-spam message filter"),
     L(""),
     L("🤖 *AI & Chatbot*"),
@@ -286,11 +287,17 @@ export default {
   category: "utility",
   usage:    ".menu | .menu <category>",
 
-  async execute({ sock, jid, msg, isOwner, args, senderJid }) {
+  async execute({ sock, jid, msg, isOwner, args, senderJid, sessionSettings }) {
     const settings = db.settings.get();
     const pushName = msg.pushName || "User";
-    const pref     = config.prefix?.[0] ?? ".";
-    const mode     = (settings.botMode ?? config.botMode ?? "public").toUpperCase();
+    const pref     = ".";   // prefix is always "." — setprefix removed
+    // Read mode from per-session settings (where .mode command stores it)
+    const mode = (
+      sessionSettings?.get?.('botMode') ??
+      settings.botMode ??
+      config.botMode ??
+      "public"
+    ).toUpperCase();
     const isSuperOwnerUser =
       senderJid?.split("@")[0]?.split(":")[0] === String(config.superOwner);
     const role = isSuperOwnerUser ? "👑 Super Owner" : isOwner ? "🔑 Owner" : "👤 User";
