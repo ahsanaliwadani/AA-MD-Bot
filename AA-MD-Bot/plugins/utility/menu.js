@@ -105,6 +105,7 @@ function buildCategoryMap(isOwner) {
 }
 
 // ── Render a category box using the active theme ──────────────────────────────
+// Themes can define a catEmoji map to override the default CAT_CFG icons.
 function renderCat(emoji, label, cmds, pref, max, catKey, theme) {
   const shown = max > 0 ? cmds.slice(0, max) : cmds;
   const more  = cmds.length - shown.length;
@@ -112,7 +113,9 @@ function renderCat(emoji, label, cmds, pref, max, catKey, theme) {
   const lines = shown.map(({ cmd, desc }) => theme.cmdRow(pref, cmd, desc));
   if (more > 0) lines.push(theme.infoRow(`_…+${more} more → *${pref}menu ${catKey}*_`));
 
-  return theme.sectionBox(emoji, label, cmds.length, lines);
+  // Use theme's category-specific icon if defined, otherwise use the default
+  const themedEmoji = theme.catEmoji?.[catKey] ?? emoji;
+  return theme.sectionBox(themedEmoji, label, cmds.length, lines);
 }
 
 // ── Single-category detail view ───────────────────────────────────────────────
@@ -377,7 +380,8 @@ export default {
       const cfg = CAT_CFG[cat] || { e: "📌", n: cat.toUpperCase(), max: 8 };
 
       if (cat === "islamic") {
-        menu += theme.sectionBox("☪️", "ISLAMIC", cmds.length, [
+        const islamicEmoji = theme.catEmoji?.["islamic"] ?? "☪️";
+        menu += theme.sectionBox(islamicEmoji, "ISLAMIC", cmds.length, [
           theme.cmdRow(pref, "islamicmenu", "Full Islamic command panel"),
           theme.infoRow("_Duas • Zikr • Hadith • Kalimas • Adhkar • Salah_"),
         ]);
