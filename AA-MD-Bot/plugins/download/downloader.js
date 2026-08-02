@@ -10,18 +10,17 @@ import { promisify } from 'util';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { YTDLP, YTDLP_FLAGS, getCookiesFlag } from '../../lib/ytdlp.js';
+import { YTDLP, YTDLP_ARGS, getCookiesFlag } from '../../lib/ytdlp.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMP = path.join(__dirname, '../../temp');
 
-// Build yt-dlp base args (binary + flags split, no shell interpolation)
+// Build yt-dlp base args (use YTDLP_ARGS array — no shell quoting issues)
 function ytdlpBaseArgs() {
-  const flags = YTDLP_FLAGS.split(/\s+/).filter(Boolean);
   const ck = getCookiesFlag();
   const ckParts = ck ? ck.trim().split(/\s+/) : [];
-  return { flags, ckParts };
+  return { flags: [...YTDLP_ARGS], ckParts };
 }
 
 // URL detectors

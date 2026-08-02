@@ -39,12 +39,19 @@ function resolveDeno() {
 const _denoPath = resolveDeno();
 
 // ── Common yt-dlp flags ───────────────────────────────────────────────────────
-// --js-runtimes          → Deno for YouTube n-challenge (nsig) — required
-// --no-check-certificate → skip SSL issues in sandboxed/proxy environments
-// --socket-timeout 30    → don't hang forever on blocked connections
-// --retries 2            → retry transient network errors, then fall to next source
-// --fragment-retries 2   → retry failed fragments in DASH streams
-// --no-warnings          → suppress non-error output (logged by bot separately)
+// YTDLP_ARGS (array) — use with execFile() — no shell quoting needed
+// YTDLP_FLAGS (string) — use with exec() shell commands only
+// Note: when using execFile, always spread YTDLP_ARGS, never split YTDLP_FLAGS
+export const YTDLP_ARGS = [
+  '--js-runtimes', `deno:${_denoPath}`,
+  '--no-check-certificate',
+  '--socket-timeout', '30',
+  '--retries', '2',
+  '--fragment-retries', '2',
+  '--no-warnings',
+];
+
+// Shell-safe string for exec() usage (quotes needed for shell parsing)
 export const YTDLP_FLAGS = [
   `--js-runtimes "deno:${_denoPath}"`,
   '--no-check-certificate',

@@ -1,7 +1,7 @@
 // ============================================
 // AA MD Bot - ATTP (Animated Text Sticker)
-// Local generation: SVG frames → GIF → WebP sticker
-// No external API dependency
+// Local generation: SVG frames → GIF → WebP sticker via sharp + ffmpeg
+// External APIs tried first (faster), local is bulletproof fallback
 // ============================================
 
 import { exec } from 'child_process';
@@ -16,10 +16,9 @@ const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMP = path.join(__dirname, '../../temp');
 
-// ── Try external APIs first (fast when online) ────────────────────────────────
+// ── External API chain (fast when live) ──────────────────────────────────────
 const ATTP_APIS = [
   (t) => `https://apis-keith.vercel.app/maker/attp?text=${encodeURIComponent(t)}`,
-  (t) => `https://api.nexray.web.id/maker/attp?text=${encodeURIComponent(t)}`,
   (t) => `https://api-faa.my.id/faa/attp?text=${encodeURIComponent(t)}`,
 ];
 
@@ -29,26 +28,21 @@ async function tryExternalApi(text) {
     try {
       const resp = await axios.get(makeUrl(text), {
         responseType: 'arraybuffer',
-        timeout: 10000,
+        timeout: 8000,
+        maxRedirects: 3,
       });
-      const ct = resp.headers['content-type'] || '';
+      const ct  = resp.headers['content-type'] || '';
       const buf = Buffer.from(resp.data);
-      // Accept only real image buffers (not HTML/JSON error pages)
       if (buf.length > 5000 && (ct.includes('gif') || ct.includes('webp') || ct.includes('image'))) {
-        // Verify magic bytes: GIF87a, GIF89a, RIFF (WebP), or PNG
         const sig = buf.slice(0, 6).toString('ascii');
-        if (sig.startsWith('GIF') || sig.startsWith('RIFF') || buf[0] === 0x89) {
-          return buf;
-        }
+        if (sig.startsWith('GIF') || sig.startsWith('RIFF') || buf[0] === 0x89) return buf;
       }
     } catch {}
   }
   return null;
 }
 
-// ── Local animated sticker generation ─────────────────────────────────────────
-// Renders SVG frames with cycling neon colors → combines into animated GIF.
-
+// ── Local animated sticker generation ────────────────────────────────────────
 function makeSvgFrame(text, hue, frameW, frameH, fontSize) {
   const safeText = text
     .replace(/&/g, '&amp;')
@@ -56,19 +50,15 @@ function makeSvgFrame(text, hue, frameW, frameH, fontSize) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-  const h2  = (hue + 60) % 360;  // shadow hue offset
-  const l   = 55 + 10 * Math.sin((hue / 360) * 2 * Math.PI); // brightness 45-65
+  const h2 = (hue + 60) % 360;
+  const l  = 55 + 10 * Math.sin((hue / 360) * 2 * Math.PI);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${frameW}" height="${frameH}">
   <rect width="${frameW}" height="${frameH}" fill="#09090f"/>
   <defs>
     <filter id="g" x="-40%" y="-40%" width="180%" height="180%">
       <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
   <text
@@ -85,28 +75,29 @@ function makeSvgFrame(text, hue, frameW, frameH, fontSize) {
 }
 
 async function generateLocalAttp(text) {
-  const { default: sharp } = await import('sharp');
+  // sharp is confirmed working on this platform (x64 Linux)
+  const sharpMod = await import('sharp').catch(e => { throw new Error(`sharp unavailable: ${e.message}`); });
+  const sharp = sharpMod.default;
+
   await fs.ensureDir(TEMP);
 
   const id    = Date.now();
   const W     = 512;
   const H     = 200;
   const FPS   = 12;
-  const TOTAL = 24; // 2-second loop
+  const TOTAL = 24;
   const fsize = text.length > 22 ? 52 : text.length > 14 ? 64 : 76;
 
   const framePaths = [];
   try {
-    // Render each SVG frame as PNG
     for (let i = 0; i < TOTAL; i++) {
-      const hue  = Math.round((i / TOTAL) * 360);
-      const svg  = makeSvgFrame(text, hue, W, H, fsize);
-      const fp   = path.join(TEMP, `attp_${id}_${String(i).padStart(3, '0')}.png`);
+      const hue = Math.round((i / TOTAL) * 360);
+      const svg = makeSvgFrame(text, hue, W, H, fsize);
+      const fp  = path.join(TEMP, `attp_${id}_${String(i).padStart(3, '0')}.png`);
       await sharp(Buffer.from(svg)).png().toFile(fp);
       framePaths.push(fp);
     }
 
-    // Combine PNGs → animated GIF with palette optimisation
     const gifPath = path.join(TEMP, `attp_${id}.gif`);
     const pattern = path.join(TEMP, `attp_${id}_%03d.png`);
     await execAsync(
@@ -125,7 +116,7 @@ async function generateLocalAttp(text) {
   }
 }
 
-// ── Plugin ─────────────────────────────────────────────────────────────────────
+// ── Plugin ────────────────────────────────────────────────────────────────────
 export default {
   command: 'attp',
   alias: ['animatedtext', 'textsticker', 'ats'],
@@ -145,9 +136,12 @@ export default {
     await react('⏳');
 
     try {
-      // Try fast external APIs first; fall back to local generation
+      // Try fast external APIs first; fall back to reliable local generation
       let gifBuf = await tryExternalApi(text);
-      if (!gifBuf) gifBuf = await generateLocalAttp(text);
+      if (!gifBuf) {
+        await react('🎨');
+        gifBuf = await generateLocalAttp(text);
+      }
 
       if (!gifBuf?.length) {
         await react('❌');

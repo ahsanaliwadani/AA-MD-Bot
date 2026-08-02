@@ -9,7 +9,7 @@ import { promisify } from 'util';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { YTDLP, YTDLP_FLAGS, getCookiesFlag } from '../../lib/ytdlp.js';
+import { YTDLP, YTDLP_ARGS, getCookiesFlag } from '../../lib/ytdlp.js';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,7 @@ async function ytdlpIG(url) {
 
   const args = [
     YTDLP,
-    ...YTDLP_FLAGS.split(' ').filter(Boolean),
+    ...YTDLP_ARGS,
     url,
     '-f', 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
     '--merge-output-format', 'mp4',

@@ -5,7 +5,7 @@ import { promisify } from 'util';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { YTDLP, YTDLP_FLAGS, getCookiesFlag } from '../../lib/ytdlp.js';
+import { YTDLP, YTDLP_ARGS, getCookiesFlag } from '../../lib/ytdlp.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,7 +15,7 @@ const TH_RX = /https?:\/\/(www\.)?threads\.(net|com)\/[^\s]+/i;
 async function ytdlpVideo(url) {
   await fs.ensureDir(TEMP);
   const out = path.join(TEMP, `th_${Date.now()}.mp4`);
-  const flags = YTDLP_FLAGS.split(/\s+/).filter(Boolean);
+  const flags = [...YTDLP_ARGS];
   const ck = getCookiesFlag(); const ckParts = ck ? ck.trim().split(/\s+/) : [];
   try {
     await execFileAsync(YTDLP, [
