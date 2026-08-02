@@ -8,8 +8,35 @@
 // ============================================
 
 import axios from 'axios';
+import config from '../../config.js';
 
 const FOOTER = '\n\n> 🇵🇰 *AA MD Bot* • 👨‍💻 *Ahsan Ali Wadani*';
+
+// ── Daily rate limit: owner = 2/day, superOwner = unlimited ──────────────────
+const OWNER_DAILY_LIMIT = 2;
+const _rlMap = new Map(); // senderJid → { date: 'YYYY-MM-DD', count: N }
+
+function isSuperOwnerJid(senderJid) {
+  const num = (senderJid || '').split('@')[0].split(':')[0];
+  return String(config.superOwner || '') !== '' && num === String(config.superOwner);
+}
+
+function checkLimit(senderJid) {
+  if (isSuperOwnerJid(senderJid)) return { allowed: true, unlimited: true };
+
+  const today = new Date().toISOString().slice(0, 10);
+  const rec   = _rlMap.get(senderJid);
+
+  if (!rec || rec.date !== today) {
+    _rlMap.set(senderJid, { date: today, count: 1 });
+    return { allowed: true, remaining: OWNER_DAILY_LIMIT - 1 };
+  }
+  if (rec.count >= OWNER_DAILY_LIMIT) {
+    return { allowed: false, remaining: 0 };
+  }
+  rec.count += 1;
+  return { allowed: true, remaining: OWNER_DAILY_LIMIT - rec.count };
+}
 
 // RapidAPI key — env secret or hardcoded fallback
 function getApiKey() {
@@ -87,8 +114,20 @@ export default {
   ownerOnly:   true,
   usage:       '.simowner <number>',
 
-  async execute({ text, reply, react, prefix, sock, jid, msg }) {
+  async execute({ text, reply, react, prefix, sock, jid, msg, senderJid }) {
     const input = (text || '').trim();
+
+    // ── Rate limit ────────────────────────────────────────────────────────────
+    const rl = checkLimit(senderJid);
+    if (!rl.allowed) {
+      return reply(
+        `⏳ *Daily Limit Reached*\n\n` +
+        `You have used all *${OWNER_DAILY_LIMIT}* SIM owner lookups for today.\n` +
+        `Limit resets at midnight.\n\n` +
+        `_SuperOwner has no daily limit._` +
+        FOOTER
+      );
+    }
 
     if (!input) {
       return reply(
