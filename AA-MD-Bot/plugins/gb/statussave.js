@@ -1,113 +1,215 @@
 // ============================================
-// AA MD Bot - Status Saver (GB WhatsApp Feature)
-// Save any WhatsApp status (photo/video/text)
+// AA MD Bot — Status Saver
+// Developer: Ahsan Ali | AA Mods
+//
+// How it works:
+//  1. Owner enables with .statussave on
+//  2. Bot auto-downloads every contact's status as it arrives
+//  3. Owner uses .statussave list  → numbered list of saved statuses
+//  4. Owner uses .statussave <N>   → sends that status to owner DM
+//  5. Owner uses .statussave all   → sends all saved statuses
+//
+// NOTE: WhatsApp does NOT allow forwarding/quoting statuses through the
+// bot — they must be downloaded in real-time when they arrive.
 // ============================================
 
+import {
+  getStatusCollection,
+  clearStatusCollection,
+} from '../../lib/sessionManager.js';
+
+const FOOTER = '\n\n> 💾 *AA MD Bot* • 📲 *Status Saver*';
+
+function fmt(ms) {
+  const d = new Date(ms);
+  return d.toLocaleString('en-PK', { timeZone: 'Asia/Karachi',
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export default {
-  command: 'statussave',
-  alias: ['savestatus', 'statusdl', 'svs', 'dlstatus'],
-  category: 'gb',
-  description: 'Save a WhatsApp status — reply to a forwarded status',
-  usage: '.statussave (reply to a forwarded status)',
+  command:     'statussave',
+  alias:       ['savestatus', 'statusdl', 'svs', 'dlstatus', 'statusview'],
+  description: 'Auto-save contact statuses as they arrive',
+  category:    'gb',
 
-  async execute({ reply, react, sock, jid, msg, quoted }) {
-    // Must reply to a message that contains media
-    const q = quoted?.message || msg?.message;
+  async execute({ reply, react, sock, jid, msg, args, isOwner, sessionId, db, sessionSettings }) {
+    const sub = (args[0] || '').toLowerCase();
 
-    // Find the media content from quoted message
-    const mediaTypes = [
-      'imageMessage',
-      'videoMessage',
-      'audioMessage',
-      'documentMessage',
-      'stickerMessage',
-    ];
+    // ── STATUS / NO ARG ───────────────────────────────────────────────────────
+    if (!sub || sub === 'status' || sub === 'info') {
+      const isOn = sessionSettings.get('statusSave') ?? db.settings.getValue('statusSave') ?? false;
+      const coll = getStatusCollection(sessionId);
 
-    let mediaType = null;
-    let mediaMsg  = null;
-
-    for (const type of mediaTypes) {
-      if (q?.[type]) {
-        mediaType = type;
-        mediaMsg  = q[type];
-        break;
-      }
-    }
-
-    // Text status
-    const textMsg = q?.conversation || q?.extendedTextMessage?.text;
-
-    if (!mediaType && !textMsg) {
       return reply(
         `💾 *Status Saver*\n\n` +
-        `*GB WhatsApp Feature* — Save any contact's status\n\n` +
-        `━━━━━━━━━━━━━━━━\n` +
-        `📌 *How to use:*\n` +
-        `1. Forward a status to this bot chat\n` +
-        `2. Reply to that forwarded message with *.statussave*\n\n` +
-        `Or: Open the status, forward to bot, then reply.\n\n` +
-        `Supports: 📷 Photos • 🎬 Videos • 🎵 Audio • 📄 Docs\n\n` +
-        `> 🤖 *Powered by AA MD Bot*`
+        `Status: *${isOn ? 'ON ✅' : 'OFF ❌'}*\n` +
+        `Saved: *${coll.size}* status(es) in memory\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `*Commands:*\n` +
+        `▸ *.statussave on*    — Enable auto-save\n` +
+        `▸ *.statussave off*   — Disable auto-save\n` +
+        `▸ *.statussave list*  — List saved statuses\n` +
+        `▸ *.statussave <N>*   — Get status number N\n` +
+        `▸ *.statussave all*   — Send all saved statuses\n` +
+        `▸ *.statussave clear* — Clear saved statuses\n\n` +
+        `📌 *How it works:*\n` +
+        `When enabled, bot automatically downloads every contact's status (photo/video/text) when it arrives. WhatsApp doesn't allow sharing statuses directly — the bot captures them in real-time.\n\n` +
+        `⚡ Statuses are stored in *memory* (cleared on bot restart).${FOOTER}`
       );
     }
 
-    if (textMsg) {
+    // ── ON ────────────────────────────────────────────────────────────────────
+    if (sub === 'on' || sub === 'enable') {
+      if (!isOwner) return reply('❌ Only the bot owner can enable Status Saver.');
+      if (sessionSettings.get('statusSave')) return reply('✅ Status Saver is already *ON*.');
+      sessionSettings.set('statusSave', true);
+      await react('✅');
       return reply(
-        `📝 *Status Text Saved!*\n\n` +
-        `"${textMsg}"\n\n` +
-        `> 💾 *Saved via AA MD Bot*`
+        `✅ *Status Saver ENABLED!*\n\n` +
+        `Bot will now automatically download every contact's status as it arrives.\n\n` +
+        `Use *.statussave list* to see saved statuses.\n\n` +
+        `⚡ Note: Statuses already posted before enabling won't be saved.${FOOTER}`
       );
     }
 
-    await react('⏳');
+    // ── OFF ───────────────────────────────────────────────────────────────────
+    if (sub === 'off' || sub === 'disable') {
+      if (!isOwner) return reply('❌ Only the bot owner can toggle Status Saver.');
+      sessionSettings.set('statusSave', false);
+      await react('✅');
+      return reply(`❌ *Status Saver DISABLED.*${FOOTER}`);
+    }
 
-    try {
-      // Download the media from the quoted message
-      const { downloadMediaMessage } = await import('@whiskeysockets/baileys');
+    // ── CLEAR ─────────────────────────────────────────────────────────────────
+    if (sub === 'clear') {
+      if (!isOwner) return reply('❌ Only the bot owner can clear statuses.');
+      clearStatusCollection(sessionId);
+      await react('✅');
+      return reply(`🗑️ *Status collection cleared.*${FOOTER}`);
+    }
 
-      // Build a fake message object for downloadMediaMessage
-      const fakeMsg = {
-        key: quoted?.key || msg?.key,
-        message: q,
-      };
-
-      const buffer = await downloadMediaMessage(fakeMsg, 'buffer', {});
-
-      if (!buffer || !buffer.length) {
-        await react('❌');
-        return reply(`❌ Could not download media. Try forwarding the status again.`);
+    // ── LIST ──────────────────────────────────────────────────────────────────
+    if (sub === 'list' || sub === 'show' || sub === 'ls') {
+      const coll = getStatusCollection(sessionId);
+      if (!coll.size) {
+        return reply(
+          `📭 *No saved statuses yet.*\n\n` +
+          `Make sure *.statussave on* is enabled.\n` +
+          `Statuses will be saved as contacts post them.${FOOTER}`
+        );
       }
 
-      const mimetype = mediaMsg?.mimetype || 'image/jpeg';
-      const isVideo  = mediaType === 'videoMessage';
-      const isAudio  = mediaType === 'audioMessage';
-      const isImage  = mediaType === 'imageMessage';
-      const isDoc    = mediaType === 'documentMessage';
+      const entries = [...coll.entries()].reverse(); // newest first
+      const lines   = entries.slice(0, 30).map(([id, e], i) => {
+        const num    = i + 1;
+        const name   = e.pushName ? `*${e.pushName}*` : `+${e.senderNum}`;
+        const type   = e.isVideo ? '🎬 Video' : e.isAudio ? '🎵 Audio' : e.text ? '📝 Text' : '🖼️ Photo';
+        const status = e.buffer ? '✅' : e.text ? '📝' : '⚠️ no buffer';
+        return `${num}. ${name} — ${type} ${status} — ${fmt(e.time)}`;
+      });
 
-      const caption = `💾 *Status Saved!*\n\n> 📲 *Saved via AA MD Bot*`;
+      return reply(
+        `💾 *Saved Statuses (${coll.size} total)*\n\n` +
+        lines.join('\n') +
+        `\n\n_Use *.statussave <number>* to get a status_\n` +
+        `_Use *.statussave all* to send all_${FOOTER}`
+      );
+    }
 
-      if (isImage) {
-        await sock.sendMessage(jid, { image: buffer, caption, mimetype });
-      } else if (isVideo) {
-        await sock.sendMessage(jid, { video: buffer, caption, mimetype });
-      } else if (isAudio) {
-        await sock.sendMessage(jid, { audio: buffer, mimetype, ptt: false });
-      } else if (isDoc) {
-        await sock.sendMessage(jid, {
-          document: buffer,
-          caption,
-          mimetype,
-          fileName: mediaMsg?.fileName || 'status_file',
-        });
-      } else {
-        await sock.sendMessage(jid, { document: buffer, caption, mimetype, fileName: 'status' });
+    // ── ALL ───────────────────────────────────────────────────────────────────
+    if (sub === 'all') {
+      if (!isOwner) return reply('❌ Only the bot owner can use this.');
+      const coll = getStatusCollection(sessionId);
+      if (!coll.size) {
+        return reply(`📭 *No saved statuses yet.* Enable with *.statussave on*${FOOTER}`);
+      }
+
+      const entries = [...coll.entries()].reverse();
+      const limit   = Math.min(entries.length, 15); // max 15 at once
+      await react('📤');
+      await reply(`📤 _Sending ${limit} saved statuses..._`);
+
+      let sent = 0, failed = 0;
+      for (let i = 0; i < limit; i++) {
+        const [, e] = entries[i];
+        try {
+          await sendStatusEntry(sock, jid, msg, e);
+          sent++;
+          await new Promise(r => setTimeout(r, 500)); // small delay between sends
+        } catch { failed++; }
       }
 
       await react('✅');
-
-    } catch (err) {
-      await react('❌');
-      reply(`❌ Failed to save status: ${err.message?.slice(0, 80) || 'Unknown error'}`);
+      return reply(
+        `✅ *Sent ${sent}/${limit} statuses*${failed ? ` (${failed} failed)` : ''}${FOOTER}`
+      );
     }
+
+    // ── NUMBER (get specific status) ──────────────────────────────────────────
+    const num = parseInt(sub, 10);
+    if (!isNaN(num) && num >= 1) {
+      const coll    = getStatusCollection(sessionId);
+      const entries = [...coll.entries()].reverse(); // newest first
+      if (num > entries.length) {
+        return reply(
+          `❌ Only *${entries.length}* statuses saved. Use *.statussave list* to see them.${FOOTER}`
+        );
+      }
+      const [, entry] = entries[num - 1];
+      await react('📤');
+      try {
+        await sendStatusEntry(sock, jid, msg, entry);
+        await react('✅');
+      } catch (err) {
+        await react('❌');
+        reply(`❌ Failed to send status: ${err.message?.slice(0, 80)}${FOOTER}`);
+      }
+      return;
+    }
+
+    // ── UNKNOWN ───────────────────────────────────────────────────────────────
+    return reply(`❓ Unknown option. Use: *.statussave on/off/list/all/clear/<number>*${FOOTER}`);
   },
 };
+
+// ── Helper: send one status entry to a chat ───────────────────────────────────
+async function sendStatusEntry(sock, jid, quotedMsg, entry) {
+  const name = entry.pushName ? `*${entry.pushName}*` : `+${entry.senderNum}`;
+  const time = fmt(entry.time);
+
+  if (entry.text) {
+    await sock.sendMessage(jid, {
+      text: `💾 *Status from ${name}*\n🕐 ${time}\n\n📝 ${entry.text}`,
+    }, { quoted: quotedMsg });
+    return;
+  }
+
+  if (!entry.buffer || !entry.buffer.length) {
+    await sock.sendMessage(jid, {
+      text: `⚠️ *Status from ${name}* (${time})\n\n_Media buffer not available_\n_(Status may have expired)_`,
+    }, { quoted: quotedMsg });
+    return;
+  }
+
+  const caption = `💾 *Status from ${name}*\n🕐 ${time}`;
+
+  if (entry.isVideo) {
+    await sock.sendMessage(jid, {
+      video:   entry.buffer,
+      mimetype: entry.mimetype || 'video/mp4',
+      caption,
+    }, { quoted: quotedMsg });
+  } else if (entry.isAudio) {
+    await sock.sendMessage(jid, {
+      audio:    entry.buffer,
+      mimetype: entry.mimetype || 'audio/ogg; codecs=opus',
+      ptt:      false,
+    }, { quoted: quotedMsg });
+  } else {
+    await sock.sendMessage(jid, {
+      image:   entry.buffer,
+      mimetype: entry.mimetype || 'image/jpeg',
+      caption,
+    }, { quoted: quotedMsg });
+  }
+}

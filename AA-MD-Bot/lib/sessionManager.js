@@ -77,6 +77,22 @@ export const sessionStatus = new Map();
 // Persist last-known session info so dashboard stays stable during reconnects
 export const sessionInfo = new Map();
 
+// ── Status Collection — per session status saver ──────────────────────────────
+// statusCollections: Map<sessionId, Map<msgId, StatusEntry>>
+// StatusEntry: { id, senderJid, senderNum, pushName, buffer, mimetype,
+//               text, isVideo, isAudio, time, msgKey }
+export const statusCollections = new Map();
+const STATUS_COLL_MAX = 100; // keep last 100 statuses per session
+
+export function getStatusCollection(sessionId = 'default') {
+  if (!statusCollections.has(sessionId)) statusCollections.set(sessionId, new Map());
+  return statusCollections.get(sessionId);
+}
+
+export function clearStatusCollection(sessionId = 'default') {
+  statusCollections.set(sessionId, new Map());
+}
+
 // Track reconnect attempts per session for exponential backoff
 const reconnectAttempts = new Map();
 // Track when each session last became stably connected (>30s = stable, reset counter)
@@ -121,59 +137,71 @@ async function handleStatusMessage(sock, msg, sessionId, statusMediaMap) {
       }).catch(() => {});
     }
 
-    // 3) Eagerly buffer status media for antideletestatus
-    //    Download now while the CDN URL is fresh; store buffer in statusMediaMap.
-    if (statusMediaMap && msg.key.id && !msg.key.fromMe) {
+    // 3) Eagerly download & buffer status media
+    //    a) Into statusMediaMap for antideletestatus (only if that feature is on)
+    //    b) Into statusCollections ALWAYS when statusSave is on (for .statussave command)
+    if (msg.key.id && !msg.key.fromMe) {
+      const m          = msg.message;
+      const hasMedia   = !!(m?.imageMessage || m?.videoMessage || m?.audioMessage);
+      const statusText = m?.conversation || m?.extendedTextMessage?.text || null;
+      const senderNum  = senderJid.split('@')[0].split(':')[0];
+      const pushName   = msg.pushName || '';
+
+      // ── a) antideletestatus buffer ─────────────────────────────────────
       const adStatusEnabled =
         db.sessionSettings.getValue(sessionId, 'antiDeleteStatus') ??
         db.settings.getValue('antiDeleteStatus') ?? false;
 
-      if (adStatusEnabled) {
-        const m = msg.message;
-        const hasMedia = m?.imageMessage || m?.videoMessage || m?.audioMessage;
-        if (hasMedia) {
-          try {
-            const buf = await downloadMediaMessage(msg, 'buffer', {},
-              { reuploadRequest: sock.updateMediaMessage });
-            if (buf && buf.length > 1000) {
-              const mimeType = m?.imageMessage?.mimetype
-                || m?.videoMessage?.mimetype
-                || m?.audioMessage?.mimetype
-                || 'image/jpeg';
-              const entry = {
-                buffer:    buf,
-                mimetype:  mimeType,
-                senderNum: senderJid.split('@')[0].split(':')[0],
-                pushName:  msg.pushName || '',
-                isVideo:   !!m?.videoMessage,
-                isAudio:   !!m?.audioMessage,
-                time:      Date.now(),
-              };
-              statusMediaMap.set(msg.key.id, entry);
-              // Evict oldest if over limit
-              if (statusMediaMap.size > 60) {
-                statusMediaMap.delete(statusMediaMap.keys().next().value);
-              }
-            }
-          } catch {}
-        }
+      // ── b) statussave collection ───────────────────────────────────────
+      const statusSaveEnabled =
+        db.sessionSettings.getValue(sessionId, 'statusSave') ??
+        db.settings.getValue('statusSave') ?? false;
 
-        // Also buffer text statuses
-        const text = m?.conversation || m?.extendedTextMessage?.text;
-        if (text && !hasMedia) {
-          statusMediaMap.set(msg.key.id, {
-            buffer:    null,
-            text,
-            senderNum: senderJid.split('@')[0].split(':')[0],
-            pushName:  msg.pushName || '',
-            isVideo:   false,
-            isAudio:   false,
-            time:      Date.now(),
-          });
-          if (statusMediaMap.size > 60) {
-            statusMediaMap.delete(statusMediaMap.keys().next().value);
+      const needsBuffer = (adStatusEnabled || statusSaveEnabled) && hasMedia;
+
+      let mediaBuf   = null;
+      let mimeType   = null;
+      let isVideo    = !!m?.videoMessage;
+      let isAudio    = !!m?.audioMessage;
+
+      if (needsBuffer) {
+        try {
+          mediaBuf = await downloadMediaMessage(msg, 'buffer', {},
+            { reuploadRequest: sock.updateMediaMessage });
+          if (!mediaBuf || mediaBuf.length < 500) mediaBuf = null;
+          else {
+            mimeType = m?.imageMessage?.mimetype
+              || m?.videoMessage?.mimetype
+              || m?.audioMessage?.mimetype
+              || 'image/jpeg';
           }
-        }
+        } catch {}
+      }
+
+      const baseEntry = {
+        buffer:    mediaBuf,
+        mimetype:  mimeType,
+        text:      hasMedia ? null : statusText,
+        senderNum,
+        senderJid,
+        pushName,
+        isVideo,
+        isAudio,
+        msgKey:    msg.key,
+        time:      Date.now(),
+      };
+
+      // Store in antideletestatus map
+      if (statusMediaMap && adStatusEnabled && (mediaBuf || statusText)) {
+        statusMediaMap.set(msg.key.id, baseEntry);
+        if (statusMediaMap.size > 60) statusMediaMap.delete(statusMediaMap.keys().next().value);
+      }
+
+      // Store in statussave collection (always when feature enabled)
+      if (statusSaveEnabled && (mediaBuf || statusText || hasMedia)) {
+        const coll = getStatusCollection(sessionId);
+        coll.set(msg.key.id, baseEntry);
+        if (coll.size > STATUS_COLL_MAX) coll.delete(coll.keys().next().value);
       }
     }
 
