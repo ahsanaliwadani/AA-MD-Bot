@@ -250,6 +250,7 @@ function buildNewSection(pref, theme) {
     C("github",      "GitHub repo zip download"),
     L(""),
     L("🔧 *Tools*"),
+    C("ac",          "🆕 Check if a number is on WhatsApp"),
     C("boost",       "Universal view booster (auto-detect)"),
     C("igboost",     "Instagram view booster"),
     C("tiktokboost", "TikTok view booster"),

@@ -8,8 +8,42 @@
 // ============================================
 
 import axios from 'axios';
+import config from '../../config.js';
 
 const FOOTER = '\n\n> 🇵🇰 *AA MD Bot* • 👨‍💻 *Ahsan Ali Wadani*';
+
+// ── Per-user daily rate limit (2 requests/day for regular users) ──────────────
+const DAILY_LIMIT = 2;
+const _rateLimitMap = new Map(); // key: senderJid → { date: 'YYYY-MM-DD', count: N }
+
+function getToday() {
+  return new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+}
+
+/** Returns true if allowed, false if limit hit */
+function checkRateLimit(senderJid, isOwner) {
+  // Owner and SuperOwner → always allowed
+  if (isOwner) return { allowed: true };
+  const superOwnerNum = String(config.superOwner || '');
+  const senderNum = (senderJid || '').split('@')[0].split(':')[0];
+  if (superOwnerNum && senderNum === superOwnerNum) return { allowed: true };
+
+  const today = getToday();
+  const entry = _rateLimitMap.get(senderJid);
+
+  if (!entry || entry.date !== today) {
+    // Fresh day — reset
+    _rateLimitMap.set(senderJid, { date: today, count: 1 });
+    return { allowed: true, remaining: DAILY_LIMIT - 1 };
+  }
+
+  if (entry.count >= DAILY_LIMIT) {
+    return { allowed: false, remaining: 0 };
+  }
+
+  entry.count += 1;
+  return { allowed: true, remaining: DAILY_LIMIT - entry.count };
+}
 
 // RapidAPI key — env secret ya hardcoded fallback
 function getApiKey() {
@@ -86,8 +120,20 @@ export default {
   category:    'search',
   usage:       '.simowner <number>',
 
-  async execute({ text, reply, react, prefix, sock, jid, msg }) {
+  async execute({ text, reply, react, prefix, sock, jid, msg, senderJid, isOwner }) {
     const input = (text || '').trim();
+
+    // ── Rate limit check ─────────────────────────────────────────────────────
+    const rl = checkRateLimit(senderJid, isOwner);
+    if (!rl.allowed) {
+      return reply(
+        `⏳ *Daily Limit Reached*\n\n` +
+        `📵 Aap ne aaj *${DAILY_LIMIT}* simowner lookups use kar liye hain.\n` +
+        `🕛 Kal subah reset ho jayega.\n\n` +
+        `_Owner/SuperOwner ko koi limit nahi hoti._` +
+        FOOTER
+      );
+    }
 
     if (!input) {
       return reply(
