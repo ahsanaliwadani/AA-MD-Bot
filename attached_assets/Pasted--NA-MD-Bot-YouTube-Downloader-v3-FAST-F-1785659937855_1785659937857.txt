@@ -1,5 +1,5 @@
 // ============================================
-// AA MD Bot - YouTube Downloader (v3 - FAST)
+// NA MD Bot - YouTube Downloader (v3 - FAST)
 // Flow: command → INSTANT info card (thumbnail+title+channel+duration+views)
 //       → races ALL provider links in parallel, first that actually downloads wins
 //       → sends plain audio/video (no ad-card / no attached link)
@@ -512,7 +512,7 @@ export default {
     prefix,
     config,
   }) => {
-    const botName = config?.botName || "AA MD Bot";
+    const botName = config?.botName || "NA MD Bot";
     let query = text?.trim();
 
     if (!query) {
