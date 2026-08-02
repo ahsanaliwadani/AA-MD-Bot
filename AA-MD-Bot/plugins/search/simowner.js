@@ -2,279 +2,247 @@
 // AA MD Bot — Pakistan SIM Owner Lookup 🇵🇰
 // Developer: Ahsan Ali | AA Mods
 //
-// Uses Truecaller unofficial API (search confirmed working)
-// Token setup: .simowner setup  →  step-by-step instructions
-// Commands: .simowner  .callerid  .truecaller  .simname
+// Source: Truecaller via RapidAPI (truecaller4.p.rapidapi.com)
+// No token setup needed — RapidAPI key se directly kaam karta hai
+// Commands: .simowner .callerid .truecaller .simname .siminfo
 // ============================================
 
 import axios from 'axios';
-import { db, saveNow } from '../../lib/database.js';
 
 const FOOTER = '\n\n> 🇵🇰 *AA MD Bot* • 👨‍💻 *Ahsan Ali Wadani*';
 
-// Truecaller API constants (reverse-engineered, widely documented)
-const TC_SEARCH  = 'https://search5-noneu.truecaller.com/v2/search';
-const TC_HEADERS = {
-  'clientId':     'phone-truecaller-android-7',
-  'clientSecret': 'lvc22mp3l1sfv6ujg83rd17btt',
-  'User-Agent':   'Truecaller/11.75.5 (Android;10)',
+// RapidAPI key — env secret ya hardcoded fallback
+function getApiKey() {
+  return process.env.RAPIDAPI_TRUECALLER_KEY
+    || process.env.RAPIDAPI_KEY
+    || '8eb4831202mshebcbbd8b96ccd71p129820jsn9b7b3f11c188';
+}
+
+// ── Pakistan prefix → operator map (PTA official series) ────────────────────
+const OPERATORS = {
+  '030': 'Jazz (Mobilink)', '031': 'Zong (China Mobile)',
+  '032': 'Jazz (Warid)',    '033': 'Ufone (PTCL)',
+  '034': 'Telenor',        '045': 'SCO (SCOM)',
+};
+const OP_COLORS = {
+  'Jazz (Mobilink)': '🟠', 'Jazz (Warid)': '🟠',
+  'Zong (China Mobile)': '🔵', 'Ufone (PTCL)': '🟢',
+  'Telenor': '🔴', 'SCO (SCOM)': '🟣',
 };
 
-// ── Get stored token (env secret takes priority over db) ────────────────────
-function getToken() {
-  return process.env.TRUECALLER_TOKEN || db.settings.getValue('truecallerToken') || null;
-}
-
-// ── Normalise number to +92... E.164 ────────────────────────────────────────
-function toE164(raw) {
+// ── Normalise number ─────────────────────────────────────────────────────────
+function normalise(raw) {
   let n = raw.replace(/[\s\-.()+]/g, '');
   if (n.startsWith('0092')) n = '92' + n.slice(4);
-  else if (n.startsWith('92') && n.length === 12) { /* already good */ }
   else if (n.startsWith('0') && n.length === 11) n = '92' + n.slice(1);
-  return '+' + n.replace(/^\+/, '');
+  else if (n.startsWith('+')) n = n.slice(1);
+  // should be 12 digits: 923XXXXXXXXX
+  return n;
 }
 
-function isValidPakNum(e164) {
-  return /^\+923[0-9]{9}$/.test(e164) || /^\+9245[5-8][0-9]{7}$/.test(e164);
+function toDisplay(norm) {
+  // 923346741532 → 0334-6741532
+  if (norm.startsWith('92') && norm.length === 12) {
+    const local = '0' + norm.slice(2); // 03346741532
+    return local.slice(0, 4) + '-' + local.slice(4);
+  }
+  return norm;
 }
 
-// ── Truecaller search ────────────────────────────────────────────────────────
-async function truecallerSearch(e164, token) {
-  const { data } = await axios.get(TC_SEARCH, {
-    params: {
-      q:           e164,
-      countryCode: 'PK',
-      type:        4,
-      locAddr:     '',
-      encoding:    'json',
-    },
+function getOperator(norm) {
+  if (!norm.startsWith('92')) return null;
+  const local = '0' + norm.slice(2); // 03346741532
+  const prefix3 = local.slice(0, 3); // 033
+  return OPERATORS[prefix3] || null;
+}
+
+// ── Spam bar ─────────────────────────────────────────────────────────────────
+function spamBar(score) {
+  // score is negative in API (e.g. -59 = heavy spam)
+  const abs = Math.abs(score || 0);
+  const level = Math.min(5, Math.ceil(abs / 20));
+  return '🔴'.repeat(level) + '⚪'.repeat(5 - level);
+}
+
+// ── Main API call ────────────────────────────────────────────────────────────
+async function tcLookup(phone, countryCode = 'PK') {
+  const key = getApiKey();
+  const { data } = await axios.get('https://truecaller4.p.rapidapi.com/api/v1/getDetails', {
+    params: { phone, countryCode },
     headers: {
-      ...TC_HEADERS,
-      'Authorization': `Bearer ${token}`,
+      'x-rapidapi-host': 'truecaller4.p.rapidapi.com',
+      'x-rapidapi-key':  key,
+      'Content-Type':    'application/json',
     },
     timeout: 12000,
   });
   return data;
 }
 
-// ── Setup instructions text ──────────────────────────────────────────────────
-function setupText(prefix) {
-  return (
-    `🔑 *Truecaller Token Setup*\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `*Step 1* — Oracle server par ye Python script chalao:\n\n` +
-    `\`\`\`\npip3 install requests\n\`\`\`\n\n` +
-    `\`\`\`python\nimport requests, uuid, json\n\n` +
-    `INSTALL_ID = str(uuid.uuid4())\n` +
-    `HDR = {\n` +
-    `  "clientId": "phone-truecaller-android-7",\n` +
-    `  "clientSecret": "lvc22mp3l1sfv6ujg83rd17btt",\n` +
-    `  "Content-Type": "application/json"\n` +
-    `}\n\n` +
-    `phone = input("Phone (+92...): ")\n` +
-    `r1 = requests.post(\n` +
-    `  "https://account-asia-south1.truecaller.com/v2/sendOnboardingOtp",\n` +
-    `  headers=HDR,\n` +
-    `  json={"phoneNumber": phone, "countryCode": "PK"}\n` +
-    `)\n` +
-    `print("OTP sent:", r1.json())\n\n` +
-    `otp = input("OTP: ")\n` +
-    `r2 = requests.post(\n` +
-    `  "https://account-asia-south1.truecaller.com/v2/verifyOnboardingOtp",\n` +
-    `  headers=HDR,\n` +
-    `  json={"phoneNumber": phone, "otp": otp,\n` +
-    `        "installationId": INSTALL_ID}\n` +
-    `)\n` +
-    `d = r2.json()\n` +
-    `print("TOKEN:", d.get("tokenV2") or d.get("token") or json.dumps(d))\n` +
-    `\`\`\`\n\n` +
-    `*Step 2* — Token milne ke baad:\n` +
-    `▸ Replit mein *TRUECALLER_TOKEN* secret set karo\n` +
-    `▸ *Ya* WhatsApp mein yeh command chalaao:\n` +
-    `  \`${prefix}simtoken <paste_token_here>\`\n\n` +
-    `*Step 3* — Token save hone ke baad:\n` +
-    `  \`${prefix}simowner 03001234567\`\n\n` +
-    `⚠️ _Sirf apne number par OTP lo. Token 6+ months chalta hai._` +
-    FOOTER
-  );
-}
-
 export default {
   command:     'simowner',
-  alias:       ['callerid', 'truecaller', 'simname', 'tcall', 'ownersim', 'simtoken'],
-  description: 'Pakistan SIM owner name via Truecaller 🇵🇰',
+  alias:       ['callerid', 'truecaller', 'simname', 'siminfo', 'tcall', 'ownersim', 'pkowner'],
+  description: 'Pakistan SIM owner info via Truecaller 🇵🇰',
   category:    'search',
   usage:       '.simowner <number>',
 
-  async execute({ text, reply, react, prefix, fromMe, msg, jid, sock }) {
+  async execute({ text, reply, react, prefix, sock, jid, msg }) {
     const input = (text || '').trim();
 
-    // ── .simowner setup ──────────────────────────────────────────────────────
-    if (!input || input.toLowerCase() === 'setup' || input.toLowerCase() === 'help') {
-      const token = getToken();
-      if (!input && !token) {
-        return reply(
-          `🇵🇰 *Pakistan SIM Owner Lookup*\n\n` +
-          `❌ *Token not set!*\n\n` +
-          `Truecaller token ek baar set karna hoga.\n` +
-          `Setup instructions ke liye:\n` +
-          `▸ \`${prefix}simowner setup\`\n\n` +
-          `*Usage (after setup):*\n` +
-          `▸ \`${prefix}simowner 03001234567\`\n` +
-          `▸ \`${prefix}simowner +923001234567\`\n` +
-          `▸ \`${prefix}callerid 03451234567\`` +
-          FOOTER
-        );
-      }
-      if (input.toLowerCase() === 'setup' || !token) {
-        return reply(setupText(prefix));
-      }
-    }
-
-    // ── .simtoken <token> — save token to db ─────────────────────────────────
-    if (input.toLowerCase().startsWith('token ') || input.toLowerCase().startsWith('settoken ')) {
-      if (!fromMe) return;
-      const tok = input.split(' ').slice(1).join('').trim();
-      if (!tok || tok.length < 20) {
-        return reply(`❌ Invalid token. Token kam se kam 20 characters ka hona chahiye.${FOOTER}`);
-      }
-      db.settings.setValue('truecallerToken', tok);
-      await saveNow('settings');
-      await react('✅');
+    if (!input) {
       return reply(
-        `✅ *Truecaller Token Saved!*\n\n` +
-        `Token: \`${tok.slice(0, 8)}...${tok.slice(-4)}\`\n\n` +
-        `Ab lookup karo:\n▸ \`${prefix}simowner 03001234567\`` +
-        FOOTER
-      );
-    }
-
-    // ── Main lookup ──────────────────────────────────────────────────────────
-    const token = getToken();
-    if (!token) {
-      return reply(
-        `❌ *Token not configured!*\n\n` +
-        `Setup ke liye: \`${prefix}simowner setup\`` +
+        `🇵🇰 *Pakistan SIM Owner Lookup*\n\n` +
+        `*Usage:* ${prefix}simowner <number>\n\n` +
+        `*Supported formats:*\n` +
+        `▸ \`03001234567\`\n` +
+        `▸ \`0300-1234567\`\n` +
+        `▸ \`+923001234567\`\n` +
+        `▸ \`923001234567\`\n\n` +
+        `*Examples:*\n` +
+        `▸ \`${prefix}simowner 03346741532\`\n` +
+        `▸ \`${prefix}callerid 03001234567\`\n` +
+        `▸ \`${prefix}truecaller +923451234567\`` +
         FOOTER
       );
     }
 
     await react('🔍');
 
-    let e164;
-    try {
-      e164 = toE164(input);
-      if (!e164.startsWith('+')) throw new Error('bad');
-    } catch {
+    // ── Normalise ────────────────────────────────────────────────────────────
+    const norm = normalise(input);
+
+    // Validate — must be 12 digits starting with 92
+    if (!/^92[3][0-9]{9}$/.test(norm)) {
       await react('❌');
       return reply(
-        `❌ *Invalid number format*\n\n` +
-        `Pakistan mobile number format:\n` +
-        `▸ \`03001234567\`\n` +
-        `▸ \`+923001234567\`` +
+        `❌ *Invalid Number*\n\n` +
+        `_"${input}"_ valid Pakistan mobile number nahi hai.\n\n` +
+        `Pakistan mobile numbers 03XXXXXXXXX (11 digits) hote hain.\n` +
+        `Example: \`03001234567\`` +
         FOOTER
       );
     }
 
-    try {
-      const data = await truecallerSearch(e164, token);
+    const display  = toDisplay(norm);
+    const e164     = '+' + norm;
+    const operator = getOperator(norm);
+    const opColor  = operator ? (OP_COLORS[operator] || '📱') : '📱';
 
-      // ── Parse response ─────────────────────────────────────────────────────
-      const results = data?.data || [];
-      if (!results.length) {
+    try {
+      // Phone param without country code (API wants just the local digits)
+      const phoneParam = norm.slice(2); // 3346741532
+      const apiRes = await tcLookup(phoneParam, 'PK');
+
+      if (!apiRes?.status || !apiRes?.data?.length) {
         await react('⚠️');
         return reply(
-          `⚠️ *No Info Found*\n\n` +
-          `📱 *Number:* ${e164}\n\n` +
-          `_This number has no Truecaller record. The person may not have Truecaller installed or their number is private._` +
+          `⚠️ *No Record Found*\n\n` +
+          `📱 *Number:* ${display}\n` +
+          `🌐 *E.164:* ${e164}\n` +
+          `${opColor} *Operator:* ${operator || 'Unknown'}\n\n` +
+          `_This number has no Truecaller record._` +
           FOOTER
         );
       }
 
-      const r = results[0];
+      const r = apiRes.data[0];
 
-      // Name
-      const firstName = r.name?.first || '';
-      const lastName  = r.name?.last  || '';
-      const fullName  = r.name || (firstName + ' ' + lastName).trim() || 'Unknown';
-      const name      = typeof fullName === 'string' ? fullName : (fullName.first + ' ' + (fullName.last || '')).trim();
+      // ── Extract fields ──────────────────────────────────────────────────────
+      const name     = r.name || 'Unknown';
+      const score    = parseFloat(r.score || 0).toFixed(2);
 
-      // Phone details
-      const phones    = r.phones || [];
-      const phone0    = phones[0] || {};
-      const carrier   = phone0.carrier     || phone0.network    || '';
-      const numType   = phone0.numberType  || phone0.type       || '';
-      const spamScore = r.spamInfo?.score  || r.score?.spamScore || 0;
-      const spamType  = r.spamInfo?.spamType || '';
+      const ph       = r.phones?.[0] || {};
+      const carrier  = ph.carrier    || operator || '';
+      const numType  = ph.numberType || 'MOBILE';
 
-      // Address
-      const addrs  = r.addresses || [];
-      const addr0  = addrs[0] || {};
-      const city   = addr0.city         || '';
-      const region = addr0.countryCode  || 'PK';
+      const addr     = r.addresses?.[0] || {};
+      const city     = addr.address !== 'PK' ? addr.address : '';
 
-      // Email / social
-      const emails  = r.internetAddresses || [];
-      const email0  = emails[0]?.id || '';
+      const emails   = r.internetAddresses || [];
+      const email    = emails[0]?.id || '';
 
-      // Tags / label
-      const tags = (r.tags || []).join(', ');
+      const badges   = (r.badges || []).join(', ');
 
-      // About / bio
-      const about = r.about || '';
+      // Spam info — can be in phones[0] or top-level spamScore
+      const spamData   = r.spamScore || {};
+      const spamSc     = spamData.spamScore ?? ph.spamScore ?? 0;
+      const spamType   = spamData.spamType  || ph.spamType  || '';
+      const isSpam     = spamSc < -10;
 
-      // Build response
-      let msg =
+      // ── Build result ────────────────────────────────────────────────────────
+      let out =
         `🇵🇰 *SIM Owner Info*\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `📱 *Number:* ${e164}\n` +
-        `👤 *Name:* ${name || 'Unknown'}\n`;
+        `📱 *Number:*   ${display}\n` +
+        `🌐 *E.164:*    ${e164}\n` +
+        `👤 *Name:*     *${name}*\n`;
 
-      if (carrier)  msg += `📡 *Carrier:* ${carrier}\n`;
-      if (numType)  msg += `📋 *Type:* ${numType}\n`;
-      if (city)     msg += `📍 *City:* ${city}\n`;
-      if (email0)   msg += `📧 *Email:* ${email0}\n`;
-      if (about)    msg += `💬 *Bio:* ${about.slice(0, 80)}\n`;
-      if (tags)     msg += `🏷️ *Tags:* ${tags}\n`;
+      if (carrier || operator) out += `${opColor} *Operator:* ${carrier || operator}\n`;
+      if (numType)             out += `📋 *Type:*     ${numType}\n`;
+      if (city)                out += `📍 *City:*     ${city}\n`;
+      if (email)               out += `📧 *Email:*    ${email}\n`;
+      if (badges)              out += `🏅 *Badges:*   ${badges}\n`;
 
-      // Spam warning
-      if (spamScore > 0) {
-        const bar = '🔴'.repeat(Math.min(5, Math.ceil(spamScore / 2)));
-        msg += `\n⚠️ *Spam Score:* ${bar} (${spamScore}/10)`;
-        if (spamType) msg += ` — ${spamType}`;
-        msg += '\n';
+      out += `⭐ *Score:*    ${score}/1.0\n\n`;
+
+      // Spam section
+      if (isSpam) {
+        out +=
+          `⚠️ *SPAM ALERT!*\n` +
+          `${spamBar(spamSc)} (${Math.abs(spamSc)} pts)\n` +
+          (spamType ? `🔴 *Type:* ${spamType}\n` : '');
       } else {
-        msg += `\n✅ *Spam:* Clean\n`;
+        out += `✅ *Spam:* Clean\n`;
       }
 
-      // Extra results count
-      if (results.length > 1) {
-        msg += `\n📊 _${results.length} Truecaller records found — showing top match_`;
-      }
+      out +=
+        `\n━━━━━━━━━━━━━━━━━━━━━\n` +
+        `⚠️ _Source: Truecaller crowdsourced DB. Accuracy depends on registrations._` +
+        FOOTER;
 
-      msg += `\n━━━━━━━━━━━━━━━━━━━━━`;
-      msg += `\n⚠️ _Source: Truecaller crowdsourced DB. Name accuracy depends on user registrations._`;
-      msg += FOOTER;
+      // Send with profile pic if possible (WhatsApp)
+      try {
+        const waJid = norm + '@s.whatsapp.net';
+        const ppUrl = await sock.profilePictureUrl(waJid, 'image').catch(() => null);
+        if (ppUrl) {
+          const { getBuffer } = await import('../../lib/helper.js');
+          const imgBuf = await getBuffer(ppUrl).catch(() => null);
+          if (imgBuf) {
+            await sock.sendMessage(jid, { image: imgBuf, caption: out }, { quoted: msg });
+            return await react('✅');
+          }
+        }
+      } catch {}
 
+      // Fallback — text only
+      await reply(out);
       await react('✅');
-      await reply(msg);
 
     } catch (err) {
       await react('❌');
 
-      // Handle token expiry
-      if (err?.response?.status === 401 || err?.response?.status === 403) {
+      const status = err?.response?.status;
+      const errMsg = err?.response?.data?.message || err.message || 'Unknown error';
+
+      if (status === 429) {
         return reply(
-          `❌ *Token Expired / Invalid*\n\n` +
-          `Truecaller token expire ho gaya.\n` +
-          `Naya token lo: \`${prefix}simowner setup\`` +
+          `❌ *Rate Limit Exceeded*\n\n` +
+          `_RapidAPI daily limit khatam ho gai._\n` +
+          `Kal dobara try karo ya plan upgrade karo.\n\n` +
+          `rapidapi.com → Truecaller API → Pricing` +
+          FOOTER
+        );
+      }
+      if (status === 403 || status === 401) {
+        return reply(
+          `❌ *API Key Invalid / Expired*\n\n` +
+          `RapidAPI key check karo aur \`RAPIDAPI_TRUECALLER_KEY\` secret update karo.` +
           FOOTER
         );
       }
 
       await reply(
-        `❌ *Lookup Failed*\n\n` +
-        `_${(err?.response?.data?.message || err.message || 'Unknown error').slice(0, 150)}_` +
+        `❌ *Lookup Failed*\n\n_${String(errMsg).slice(0, 200)}_` +
         FOOTER
       );
     }
