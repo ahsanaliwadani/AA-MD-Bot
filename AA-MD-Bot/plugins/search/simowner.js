@@ -243,7 +243,8 @@ export default {
 
       out +=
         `\n━━━━━━━━━━━━━━━━━━━━━\n` +
-        `⚠️ _Source: Truecaller crowdsourced DB. Accuracy depends on registrations._` +
+        `⚠️ _Source: Truecaller crowdsourced DB. Accuracy depends on registrations._\n\n` +
+        `📌 *Disclaimer:* Ye result 100% accurate nahi hota. Ye tool sirf *educational purpose* ke liye hai. Kisi bhi illegal kaam ke liye use mat karo.` +
         FOOTER;
 
       // Send with profile pic if possible (WhatsApp)

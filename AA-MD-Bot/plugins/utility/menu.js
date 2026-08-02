@@ -224,6 +224,7 @@ function buildNewSection(pref, theme) {
     C("upscale",     "Upscale / enhance image quality"),
     L(""),
     L("🔍 *Search / Stalk*"),
+    C("simowner",    "🆕 Pakistan SIM owner info (Truecaller) 🇵🇰"),
     C("telestalk",   "Telegram profile lookup"),
     C("igstalk",     "Instagram profile lookup"),
     C("wachannel",   "WhatsApp channel stalk"),
