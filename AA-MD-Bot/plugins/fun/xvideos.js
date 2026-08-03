@@ -1,75 +1,122 @@
 // ============================================
-// AA MD Bot — XVideos + XNXX + Eporner Search & Download 🔞
+// AA MD Bot — Adult Video Search & Send 🔞
 // Developer: Ahsan Ali | AA Mods
 //
-// SELF-CHAT ONLY — works only in owner's "You" chat
+// SELF-CHAT ONLY — owner's "You" chat only
 //
-// Source priority:
-//   1. Eporner.com  — public API + gvideo CDN (full videos, no scraping block)
-//   2. XVideos      — DC search API + page scrape for CDN URL
-//   3. XNXX         — DC search API + page scrape for CDN URL
-//   4. Preview clip — DC thumbnail.preview (last resort, ~5s)
-//   5. Cover image  — absolute last resort
+// How it works (Pakistan-safe):
+//   Bot runs on Replit (outside Pakistan) →
+//   downloads full MP4 on server →
+//   sends buffer to WhatsApp.
+//   User's phone NEVER contacts blocked sites.
+//
+// Download priority:
+//   1. Eporner.com (yt-dlp → signed CDN URL → full MP4)
+//   2. XVideos via DC API (yt-dlp → HLS download → MP4)
+//   3. XNXX via DC API (yt-dlp → MP4)
+//   4. Preview clip (5s, last resort)
+//   5. Thumbnail image (absolute last resort)
 // ============================================
 
 import axios from 'axios';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
 
-const DC     = 'https://apis.davidcyriltech.my.id';
-const FOOTER = '\n\n> 🔞 *AA MD Bot* • 👨‍💻 *Ahsan Ali Wadani*';
+const execFileP = promisify(execFile);
+const DC        = 'https://apis.davidcyriltech.my.id';
+const YTDLP     = '/home/runner/.local/bin/yt-dlp';
+const TEMP_DIR  = '/home/runner/workspace/AA-MD-Bot/temp';
+const FOOTER    = '\n\n> 🔞 *AA MD Bot* • 👨‍💻 *Ahsan Ali Wadani*';
+const UA        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-const HEADERS = {
-  'User-Agent': UA,
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-};
+// ── yt-dlp: get direct CDN URL (no download yet) ─────────────────────────────
+// Works best for eporner (returns signed MP4 CDN URL).
+// For xvideos/xnxx returns HLS m3u8 — use ytdlpDownload for those.
+async function ytdlpGetUrl(pageUrl, format = 'best[height<=360][ext=mp4]/best[height<=360]/best[ext=mp4]/best') {
+  const { stdout } = await execFileP(YTDLP, [
+    '-g',
+    '-f', format,
+    '--no-warnings',
+    '--no-playlist',
+    '--socket-timeout', '15',
+    pageUrl,
+  ], { timeout: 30000 });
 
-// ── Eporner.com — free public API, returns real CDN MP4 via embed page ────────
+  const lines = stdout.trim().split('\n').filter(Boolean);
+  return lines[0] || null; // first line = video URL
+}
+
+// ── yt-dlp: download to temp file, return buffer ─────────────────────────────
+// Used for HLS/fragmented sources (xvideos/xnxx) that can't be downloaded
+// with a simple axios GET — yt-dlp handles the stitching internally.
+async function ytdlpDownload(pageUrl, reqId) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+  const outFile = path.join(TEMP_DIR, `xv_${reqId}.mp4`);
+
+  try {
+    await execFileP(YTDLP, [
+      '-o', outFile,
+      '-f', 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best',
+      '--no-warnings',
+      '--no-playlist',
+      '--socket-timeout', '20',
+      '--merge-output-format', 'mp4',
+      pageUrl,
+    ], { timeout: 90000 });
+
+    if (!fs.existsSync(outFile)) throw new Error('Output file not created');
+    const stat = fs.statSync(outFile);
+    if (stat.size < 20000)       throw new Error(`File too small: ${stat.size} bytes`);
+    if (stat.size > 60 * 1024 * 1024) throw new Error(`File too large: ${(stat.size/1024/1024).toFixed(0)} MB`);
+
+    const buf = fs.readFileSync(outFile);
+    return buf;
+  } finally {
+    try { fs.unlinkSync(outFile); } catch {}
+  }
+}
+
+// ── Axios buffer download (for signed CDN URLs from yt-dlp -g) ───────────────
+async function downloadBuffer(url, maxMB = 55, timeoutMs = 90000) {
+  const res = await axios.get(url, {
+    responseType: 'arraybuffer',
+    headers: { 'User-Agent': UA },
+    timeout: timeoutMs,
+    maxContentLength: maxMB * 1024 * 1024,
+    maxRedirects: 10,
+  });
+  const buf = Buffer.from(res.data);
+  if (buf.length < 20000) throw new Error(`Downloaded file too small: ${buf.length} bytes`);
+  return buf;
+}
+
+// ── Eporner search ────────────────────────────────────────────────────────────
 async function searchEporner(query, limit = 10) {
   const { data } = await axios.get('https://www.eporner.com/api/v2/video/search/', {
     params: { query, per_page: limit, page: 1, order: 'top-rated', gay: 0, format: 'json' },
     headers: { 'User-Agent': UA },
     timeout: 12000,
   });
-  const videos = data?.videos || [];
-  return videos.map(v => ({
-    title:      v.title || '',
-    embedId:    v.id    || '',
-    embedUrl:   v.embed || '',
-    thumb:      v.default_thumb?.src || v.default_thumb || '',
-    duration:   v.length_min || '',
-    views:      v.views ? `${Number(v.views).toLocaleString()} views` : '',
-    pageUrl:    v.url || `https://www.eporner.com/video-${v.id}/`,
-    _src:       'eporner',
+  return (data?.videos || []).map(v => ({
+    title:    v.title || '',
+    pageUrl:  v.url || `https://www.eporner.com/video-${v.id}/`,
+    thumb:    v.default_thumb?.src || v.default_thumb || '',
+    duration: v.length_min || '',
+    views:    v.views ? `${Number(v.views).toLocaleString()} views` : '',
+    _src:     'eporner',
   }));
 }
 
-// ── Extract direct MP4 from eporner embed page ────────────────────────────────
-// Eporner embed page has a URL like: https://gvideo.eporner.com/ID/ID.mp4
-async function extractEpornerMp4(embedUrl, embedId) {
-  const url = embedUrl || `https://www.eporner.com/embed/${embedId}/`;
-  const { data: html } = await axios.get(url, {
-    headers: HEADERS,
-    timeout: 15000,
-    maxRedirects: 5,
-  });
-  // Pattern: "https://gvideo.eporner.com/ID/ID.mp4" anywhere in the page
-  const m = html.match(/["'](https?:\/\/[a-z0-9]+\.eporner\.com\/[^"']+\.mp4[^"']*)['"]/i);
-  if (m?.[1]) return m[1];
-  throw new Error('No MP4 URL found in eporner embed page');
-}
-
-// ── DC API: search XVideos ─────────────────────────────────────────────────────
-async function searchXVideos(query, limit = 10) {
+// ── DC xvideos search ─────────────────────────────────────────────────────────
+async function searchXVideos(query, limit = 6) {
   const { data } = await axios.get(`${DC}/xxx/xvideos`, {
-    params: { q: query },
-    headers: { 'User-Agent': UA },
-    timeout: 12000,
+    params: { q: query }, headers: { 'User-Agent': UA }, timeout: 12000,
   });
-  const results = data?.data?.results || data?.results || [];
-  return results.slice(0, limit).map(r => ({
+  return (data?.data?.results || data?.results || []).slice(0, limit).map(r => ({
     title:      r.title || '',
-    pageUrl:    r.url || '',
+    pageUrl:    r.url   || '',
     previewUrl: r.thumbnail?.preview || null,
     coverUrl:   r.thumbnail?.cover   || null,
     duration:   r.duration || '',
@@ -78,15 +125,12 @@ async function searchXVideos(query, limit = 10) {
   }));
 }
 
-// ── DC API: search XNXX ───────────────────────────────────────────────────────
-async function searchXnxx(query, limit = 10) {
+// ── DC xnxx search ────────────────────────────────────────────────────────────
+async function searchXnxx(query, limit = 6) {
   const { data } = await axios.get(`${DC}/xxx/xnxx`, {
-    params: { q: query },
-    headers: { 'User-Agent': UA },
-    timeout: 12000,
+    params: { q: query }, headers: { 'User-Agent': UA }, timeout: 12000,
   });
-  const results = data?.data?.results || data?.results || [];
-  return results.slice(0, limit).map(r => ({
+  return (data?.data?.results || data?.results || []).slice(0, limit).map(r => ({
     title:      r.title || '',
     pageUrl:    r.url || r.link || '',
     previewUrl: r.thumbnail?.preview || null,
@@ -97,52 +141,12 @@ async function searchXnxx(query, limit = 10) {
   }));
 }
 
-// ── Scrape XVideos/XNXX page for direct MP4 URL ───────────────────────────────
-async function scrapePageMp4(pageUrl, src) {
-  const referer = src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
-  const { data: html } = await axios.get(pageUrl, {
-    headers: { ...HEADERS, Referer: referer },
-    timeout: 15000,
-    maxRedirects: 5,
-  });
-  if (typeof html !== 'string') throw new Error('Non-HTML response');
-
-  // XVideos/XNXX html5player patterns
-  const low  = html.match(/html5player\.setVideoUrlLow\('([^']+)'\)/);
-  const high = html.match(/html5player\.setVideoUrlHigh\('([^']+)'\)/);
-  if (low?.[1])  return { url: low[1],  quality: 'low' };
-  if (high?.[1]) return { url: high[1], quality: 'high' };
-
-  // XNXX alternate pattern
-  const xn = html.match(/setVideoHigh\('([^']+)'\)/);
-  if (xn?.[1]) return { url: xn[1], quality: 'high' };
-
-  throw new Error('No direct MP4 URL found');
-}
-
-// ── Download buffer with size guard ──────────────────────────────────────────
-async function downloadBuffer(url, referer, maxMB = 60, timeoutMs = 90000) {
-  const res = await axios.get(url, {
-    responseType: 'arraybuffer',
-    headers: {
-      ...HEADERS,
-      Referer: referer || 'https://www.eporner.com/',
-      Origin:  referer ? new URL(referer).origin : 'https://www.eporner.com',
-    },
-    timeout: timeoutMs,
-    maxContentLength: maxMB * 1024 * 1024,
-    maxRedirects: 10,
-  });
-  const buf = Buffer.from(res.data);
-  if (buf.length < 20000) throw new Error('File too small — likely blocked or 404');
-  return buf;
-}
-
 function makeCaption(r, query) {
-  const srcLabel = r._src === 'xnxx' ? 'XNXX' : r._src === 'eporner' ? 'Eporner' : 'XVideos';
-  const title    = (r.title || query).slice(0, 100);
+  const srcMap = { eporner: 'Eporner', xvideos: 'XVideos', xnxx: 'XNXX' };
+  const label  = srcMap[r._src] || 'Adult';
+  const title  = (r.title || query).slice(0, 100);
   return (
-    `🔞 *${srcLabel}*\n\n🎬 *${title}*\n` +
+    `🔞 *${label}*\n\n🎬 *${title}*\n` +
     (r.duration ? `⏱️ ${r.duration}   ` : '') +
     (r.views    ? `👁️ ${r.views}` : '') +
     `\n🔗 ${r.pageUrl || ''}${FOOTER}`
@@ -152,9 +156,8 @@ function makeCaption(r, query) {
 export default {
   command:     'xv',
   alias:       ['xvideos', 'xvid', 'xvideo', 'xnxx', 'pornvideo', 'pv'],
-  description: 'Search & send adult video (Eporner + XVideos + XNXX) 🔞',
+  description: 'Search & send full adult video 🔞 (Pakistan-safe)',
   category:    'fun',
-  usage:       '.xv <search term>',
 
   async execute({ sock, msg, jid, text, react, reply, prefix, fromMe }) {
     if (!fromMe) return;
@@ -164,7 +167,8 @@ export default {
       return reply(
         `🔞 *Adult Video Search*\n\n` +
         `*Usage:* ${prefix}xv <search>\n\n` +
-        `*Sources:* Eporner + XVideos + XNXX\n\n` +
+        `*Sources:* Eporner + XVideos + XNXX\n` +
+        `*Format:* Full MP4, plays on WhatsApp even in Pakistan 🇵🇰\n\n` +
         `*Examples:*\n▸ ${prefix}xv asian\n▸ ${prefix}xv romantic\n▸ ${prefix}xv cute girl\n\n` +
         `⚠️ _18+ only — self chat only_${FOOTER}`
       );
@@ -173,99 +177,134 @@ export default {
     await react('🔞');
     await reply(`🔍 _Searching for "${query}"..._`);
 
+    const reqId = Date.now();
+
     try {
-      // ── Fetch all three sources in parallel ─────────────────────────────────
-      const [epornerRes, xvRes, xnRes] = await Promise.allSettled([
+      // ── Fetch all sources in parallel ─────────────────────────────────────
+      const [epRes, xvRes, xnRes] = await Promise.allSettled([
         searchEporner(query, 12),
-        searchXVideos(query, 8),
-        searchXnxx(query, 8),
+        searchXVideos(query, 6),
+        searchXnxx(query, 6),
       ]);
 
-      const epornerList = epornerRes.status === 'fulfilled' ? epornerRes.value : [];
-      const xvList      = xvRes.status === 'fulfilled'      ? xvRes.value      : [];
-      const xnList      = xnRes.status === 'fulfilled'      ? xnRes.value      : [];
+      const epornerList = epRes.status === 'fulfilled' ? epRes.value : [];
+      const xvList      = xvRes.status === 'fulfilled' ? xvRes.value : [];
+      const xnList      = xnRes.status === 'fulfilled' ? xnRes.value : [];
 
       if (!epornerList.length && !xvList.length && !xnList.length) {
         throw new Error(`No results found for "${query}"`);
       }
 
-      // Shuffle each list for variety, then interleave eporner first
-      const shuffle = arr => arr.sort(() => Math.random() - 0.5);
-      const pool = [
-        ...shuffle(epornerList).slice(0, 8),
-        ...shuffle(xvList).slice(0, 5),
-        ...shuffle(xnList).slice(0, 5),
-      ];
+      const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
+      const epornerPool = shuffle(epornerList).slice(0, 8);
+      const xvPool      = shuffle(xvList).slice(0, 4);
+      const xnPool      = shuffle(xnList).slice(0, 4);
 
-      // ── PASS 1: Eporner embed → gvideo CDN MP4 (full video, no block) ───────
-      for (const r of pool.filter(r => r._src === 'eporner' && r.embedUrl)) {
+      // ─────────────────────────────────────────────────────────────────────
+      // PASS 1: Eporner via yt-dlp → signed CDN MP4 URL → axios download
+      //   yt-dlp returns a signed URL with Replit IP embedded — download
+      //   immediately with axios. Full video (5-30 min), ~15-50 MB.
+      // ─────────────────────────────────────────────────────────────────────
+      for (const r of epornerPool) {
+        if (!r.pageUrl) continue;
         try {
           await react('📥');
-          const mp4Url = await extractEpornerMp4(r.embedUrl, r.embedId);
-          const buf    = await downloadBuffer(mp4Url, 'https://www.eporner.com/', 60, 100000);
+          console.log('[xv] trying eporner yt-dlp:', r.pageUrl);
+
+          const cdnUrl = await ytdlpGetUrl(r.pageUrl);
+          if (!cdnUrl || !cdnUrl.startsWith('http')) throw new Error('No CDN URL from yt-dlp');
+
+          // CDN URL is signed for THIS Replit instance — download right away
+          const buf = await downloadBuffer(cdnUrl, 55, 100000);
           const caption = makeCaption(r, query);
           await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption }, { quoted: msg });
           return await react('✅');
         } catch (e) {
-          console.error('[xv eporner]', e.message);
+          console.error('[xv eporner yt-dlp]', e.message?.slice(0, 120));
         }
       }
 
-      // ── PASS 2: XVideos/XNXX page scrape → CDN MP4 ──────────────────────────
-      for (const r of pool.filter(r => r._src !== 'eporner' && r.pageUrl)) {
-        const referer = r._src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
+      // ─────────────────────────────────────────────────────────────────────
+      // PASS 2: XVideos via yt-dlp download (handles HLS → MP4 internally)
+      //   yt-dlp downloads and stitches HLS to a proper MP4 file.
+      // ─────────────────────────────────────────────────────────────────────
+      for (const r of xvPool) {
+        if (!r.pageUrl) continue;
         try {
           await react('📥');
-          const { url: mp4Url } = await scrapePageMp4(r.pageUrl, r._src);
-          const buf = await downloadBuffer(mp4Url, referer, 60, 100000);
+          console.log('[xv] trying xvideos yt-dlp download:', r.pageUrl);
+          const buf = await ytdlpDownload(r.pageUrl, reqId + '_xv');
           const caption = makeCaption(r, query);
           await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption }, { quoted: msg });
           return await react('✅');
         } catch (e) {
-          console.error('[xv scrape]', e.message);
+          console.error('[xv xvideos yt-dlp]', e.message?.slice(0, 120));
         }
       }
 
-      // ── PASS 3: CDN preview clips (short ~5-15s clips from DC API) ───────────
-      for (const r of pool.filter(r => r.previewUrl)) {
-        const referer = r._src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
+      // ─────────────────────────────────────────────────────────────────────
+      // PASS 3: XNXX via yt-dlp download
+      // ─────────────────────────────────────────────────────────────────────
+      for (const r of xnPool) {
+        if (!r.pageUrl) continue;
         try {
           await react('📥');
-          const buf = await downloadBuffer(r.previewUrl, referer, 20, 30000);
-          const caption = makeCaption(r, query) + '\n\n_⚠️ Preview clip — open link for full video_';
+          console.log('[xv] trying xnxx yt-dlp download:', r.pageUrl);
+          const buf = await ytdlpDownload(r.pageUrl, reqId + '_xn');
+          const caption = makeCaption(r, query);
+          await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption }, { quoted: msg });
+          return await react('✅');
+        } catch (e) {
+          console.error('[xv xnxx yt-dlp]', e.message?.slice(0, 120));
+        }
+      }
+
+      // ─────────────────────────────────────────────────────────────────────
+      // PASS 4: Preview clips (xvideos/xnxx thumbnail.preview ~5s)
+      //   Short clips but they DO play on WhatsApp.
+      // ─────────────────────────────────────────────────────────────────────
+      const previewPool = [...xvPool, ...xnPool].filter(r => r.previewUrl);
+      for (const r of previewPool) {
+        const referer = r._src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
+        try {
+          const res = await axios.get(r.previewUrl, {
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': UA, Referer: referer },
+            timeout: 30000, maxContentLength: 20 * 1024 * 1024,
+          });
+          const buf = Buffer.from(res.data);
+          if (buf.length < 10000) continue;
+          const caption = makeCaption(r, query) + '\n\n_⚠️ Preview clip (short) — bot will retry full video next time_';
           await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption }, { quoted: msg });
           return await react('✅');
         } catch {}
       }
 
-      // ── PASS 4: Eporner thumbnail (image fallback) ───────────────────────────
-      for (const r of pool.filter(r => r._src === 'eporner' && r.thumb)) {
+      // ─────────────────────────────────────────────────────────────────────
+      // PASS 5: Eporner thumbnail image (absolute last resort)
+      // ─────────────────────────────────────────────────────────────────────
+      for (const r of epornerPool.filter(x => x.thumb)) {
         try {
-          const buf = await downloadBuffer(r.thumb, 'https://www.eporner.com/', 5, 15000);
-          const caption = makeCaption(r, query) + '\n\n_📸 Thumbnail — open link above to watch full video_';
+          const res = await axios.get(r.thumb, {
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': UA },
+            timeout: 15000, maxContentLength: 5 * 1024 * 1024,
+          });
+          const buf = Buffer.from(res.data);
+          if (buf.length < 5000) continue;
+          const caption = makeCaption(r, query) + '\n\n_📸 Thumbnail — servers busy, try again_';
           await sock.sendMessage(jid, { image: buf, caption }, { quoted: msg });
           return await react('✅');
         } catch {}
       }
 
-      // ── PASS 5: XVideos cover image fallback ─────────────────────────────────
-      for (const r of pool.filter(r => r.coverUrl)) {
-        const referer = r._src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
-        try {
-          const buf = await downloadBuffer(r.coverUrl, referer, 5, 15000);
-          const caption = makeCaption(r, query) + '\n\n_📸 Thumbnail — open link above to watch full video_';
-          await sock.sendMessage(jid, { image: buf, caption }, { quoted: msg });
-          return await react('✅');
-        } catch {}
-      }
-
-      throw new Error('All download attempts failed. Try different keywords or try again later.');
+      throw new Error('All download attempts exhausted. Try different keywords or try again in a minute.');
 
     } catch (err) {
       await react('❌');
       await reply(
-        `❌ *Search Failed*\n\n_${(err.message || 'Unknown error').slice(0, 200)}_\n\n` +
-        `💡 *Try:* simpler keywords like "cute" "hot" "romantic" "asian"${FOOTER}`
+        `❌ *Download Failed*\n\n_${(err.message || 'Unknown error').slice(0, 200)}_\n\n` +
+        `💡 *Try:* simpler keywords — "romantic" "cute" "asian" "hot"${FOOTER}`
       );
     }
   },
