@@ -3,68 +3,85 @@
 // Developer: Ahsan Ali | AA Mods
 //
 // SELF-CHAT ONLY — works only in owner's "You" chat
-// Sources: DC xvideos API + DC xnxx API
-// Strategy: try CDN preview clips across ALL results (no yt-dlp)
-//           fallback to cover thumbnail image
+// Strategy:
+//   1. DC search API → get page URLs
+//   2. Scrape xvideos/xnxx page → extract direct CDN MP4 URL
+//   3. Download MP4 directly (no yt-dlp)
+//   4. Fallback: CDN preview clip
+//   5. Final fallback: cover thumbnail
 // ============================================
 
 import axios from 'axios';
+
 const DC     = 'https://apis.davidcyriltech.my.id';
-const UA     = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 const FOOTER = '\n\n> 🔞 *AA MD Bot* • 👨‍💻 *Ahsan Ali Wadani*';
 
-// ── Search both APIs ────────────────────────────────────────────────────────
+const HEADERS_BROWSER = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+};
+
+// ── Search both APIs ──────────────────────────────────────────────────────────
 async function searchVideos(query) {
   const [xvRes, xnRes] = await Promise.allSettled([
-    axios.get(`${DC}/xxx/xvideos`, { params: { q: query }, headers: { 'User-Agent': UA }, timeout: 15000 }),
-    axios.get(`${DC}/xxx/xnxx`,    { params: { q: query }, headers: { 'User-Agent': UA }, timeout: 15000 }),
+    axios.get(`${DC}/xxx/xvideos`, { params: { q: query }, headers: { 'User-Agent': HEADERS_BROWSER['User-Agent'] }, timeout: 15000 }),
+    axios.get(`${DC}/xxx/xnxx`,    { params: { q: query }, headers: { 'User-Agent': HEADERS_BROWSER['User-Agent'] }, timeout: 15000 }),
   ]);
 
-  const xvResults = xvRes.status === 'fulfilled'
-    ? (xvRes.value.data?.data?.results || xvRes.value.data?.results || []).map(r => ({
-        ...r, _src: 'xvideos',
-        previewUrl: r.thumbnail?.preview || null,
-        coverUrl:   r.thumbnail?.cover   || null,
-        pageUrl:    r.url || r.link || '',
-      }))
-    : [];
+  const pick = (res, src) => {
+    if (res.status !== 'fulfilled') return [];
+    const d = res.value.data;
+    return (d?.data?.results || d?.results || []).map(r => ({
+      ...r,
+      _src:       src,
+      previewUrl: r.thumbnail?.preview || null,
+      coverUrl:   r.thumbnail?.cover   || null,
+      pageUrl:    r.url || r.link || '',
+    }));
+  };
 
-  const xnResults = xnRes.status === 'fulfilled'
-    ? (xnRes.value.data?.data?.results || xnRes.value.data?.results || []).map(r => ({
-        ...r, _src: 'xnxx',
-        previewUrl: r.thumbnail?.preview || null,
-        coverUrl:   r.thumbnail?.cover   || null,
-        pageUrl:    r.url || r.link || '',
-      }))
-    : [];
-
-  // Interleave both — previews first
-  const all = [...xvResults, ...xnResults];
-  return [...all.filter(r => r.previewUrl), ...all.filter(r => !r.previewUrl)];
+  const all = [...pick(xvRes, 'xvideos'), ...pick(xnRes, 'xnxx')];
+  // Put results with page URLs first
+  return [...all.filter(r => r.pageUrl), ...all.filter(r => !r.pageUrl)];
 }
 
-// ── Download CDN preview clip ────────────────────────────────────────────────
-async function fetchPreview(previewUrl, referer) {
-  const res = await axios.get(previewUrl, {
-    responseType: 'arraybuffer',
-    headers: { 'User-Agent': UA, 'Referer': referer, 'Origin': new URL(referer).origin },
-    timeout: 45000,
-    maxContentLength: 40 * 1024 * 1024,
-  });
-  const buf = Buffer.from(res.data);
-  if (buf.length < 10000) throw new Error('clip too small');
-  return buf;
-}
+// ── Scrape page and extract direct MP4 URL ────────────────────────────────────
+async function extractMp4(pageUrl, src) {
+  const referer = src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
 
-// ── Download cover image ─────────────────────────────────────────────────────
-async function fetchCover(coverUrl, referer) {
-  const res = await axios.get(coverUrl, {
-    responseType: 'arraybuffer',
-    headers: { 'User-Agent': UA, 'Referer': referer },
+  const { data: html } = await axios.get(pageUrl, {
+    headers: { ...HEADERS_BROWSER, Referer: referer },
     timeout: 15000,
+    maxRedirects: 5,
+  });
+
+  if (typeof html !== 'string') throw new Error('Non-HTML response');
+
+  // Try low quality first (smaller file), then high
+  const lowMatch  = html.match(/html5player\.setVideoUrlLow\('([^']+)'\)/);
+  const highMatch = html.match(/html5player\.setVideoUrlHigh\('([^']+)'\)/);
+
+  if (lowMatch?.[1])  return { url: lowMatch[1],  quality: 'low' };
+  if (highMatch?.[1]) return { url: highMatch[1], quality: 'high' };
+
+  throw new Error('No direct MP4 URL found in page');
+}
+
+// ── Download a video/image buffer with size guard ─────────────────────────────
+async function downloadBuffer(url, referer, maxMB = 50, timeoutMs = 90000) {
+  const res = await axios.get(url, {
+    responseType: 'arraybuffer',
+    headers: {
+      ...HEADERS_BROWSER,
+      Referer: referer,
+      Origin:  new URL(referer).origin,
+    },
+    timeout: timeoutMs,
+    maxContentLength: maxMB * 1024 * 1024,
   });
   const buf = Buffer.from(res.data);
-  if (buf.length < 1000) throw new Error('image too small');
+  if (buf.length < 10000) throw new Error('Downloaded file too small — likely blocked');
   return buf;
 }
 
@@ -79,7 +96,7 @@ function makeCaption(r, query) {
     (views    ? `👁️ ${views}   ` : '') +
     (duration ? `⏱️ ${duration}   ` : '') +
     (rating   ? `⭐ ${rating}` : '') +
-    `\n🔗 ${r.pageUrl}${FOOTER}`
+    `\n🔗 ${r.pageUrl || ''}${FOOTER}`
   );
 }
 
@@ -105,47 +122,58 @@ export default {
     }
 
     await react('🔞');
+    await reply(`🔍 _Searching XVideos + XNXX for "${query}"..._`);
 
     try {
-      await reply(`🔍 _Searching XVideos + XNXX for "${query}"..._`);
       const results = await searchVideos(query);
       if (!results.length) throw new Error(`No results found for "${query}"`);
 
-      const pool = results.slice(0, 20);
-      // Shuffle top results for variety
-      const shuffled = pool.sort(() => Math.random() - 0.5);
+      // Shuffle top pool for variety
+      const pool = results.slice(0, 20).sort(() => Math.random() - 0.5);
 
-      // ── Try CDN preview clips across multiple results ─────────────────────
-      for (const r of shuffled.filter(r => r.previewUrl)) {
+      // ── PASS 1: Scrape page → direct MP4 CDN URL ───────────────────────────
+      for (const r of pool.filter(r => r.pageUrl)) {
         const referer = r._src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
         try {
           await react('📥');
-          const buf = await fetchPreview(r.previewUrl, referer);
-          await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption: makeCaption(r, query) }, { quoted: msg });
+          const { url: mp4Url } = await extractMp4(r.pageUrl, r._src);
+          const buf = await downloadBuffer(mp4Url, referer, 50, 90000);
+          const caption = makeCaption(r, query);
+          await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption }, { quoted: msg });
           return await react('✅');
-        } catch {}
+        } catch { /* try next */ }
       }
 
-      // ── All previews failed — try cover image ─────────────────────────────
-      for (const r of shuffled.filter(r => r.coverUrl)) {
+      // ── PASS 2: CDN preview clips (short but better than nothing) ──────────
+      for (const r of pool.filter(r => r.previewUrl)) {
         const referer = r._src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
         try {
-          const buf = await fetchCover(r.coverUrl, referer);
-          await sock.sendMessage(jid, {
-            image:   buf,
-            caption: makeCaption(r, query) + '\n\n_⚠️ Preview clip unavailable — thumbnail shown_',
-          }, { quoted: msg });
+          await react('📥');
+          const buf = await downloadBuffer(r.previewUrl, referer, 20, 30000);
+          const caption = makeCaption(r, query) + '\n\n_⚠️ Preview clip — full video: tap link above_';
+          await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption }, { quoted: msg });
           return await react('✅');
         } catch {}
       }
 
-      throw new Error('Could not fetch any media — all CDN links blocked. Try different keywords.');
+      // ── PASS 3: Cover image fallback ────────────────────────────────────────
+      for (const r of pool.filter(r => r.coverUrl)) {
+        const referer = r._src === 'xnxx' ? 'https://www.xnxx.com/' : 'https://www.xvideos.com/';
+        try {
+          const buf = await downloadBuffer(r.coverUrl, referer, 5, 15000);
+          const caption = makeCaption(r, query) + '\n\n_📸 Thumbnail only — open link above to watch_';
+          await sock.sendMessage(jid, { image: buf, caption }, { quoted: msg });
+          return await react('✅');
+        } catch {}
+      }
+
+      throw new Error('All download attempts failed — CDN may be blocking. Try different keywords.');
 
     } catch (err) {
       await react('❌');
       await reply(
         `❌ *Search Failed*\n\n_${(err.message || 'Unknown error').slice(0, 200)}_\n\n` +
-        `💡 *Tips:*\n▸ Try simpler keywords (e.g. "cute" "asian" "hot")\n▸ Try again in a moment${FOOTER}`
+        `💡 *Try:* simpler keywords like "cute" "hot" "romantic"${FOOTER}`
       );
     }
   },
