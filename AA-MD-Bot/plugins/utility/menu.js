@@ -161,8 +161,6 @@ function buildOwnerSection(pref, isSuperOwnerUser, theme) {
     L(""),
     L("🗑️ *Anti-Delete / Anti-Edit*"),
     C("antidelete on/off",       "Recover deleted msgs → (You) chat"),
-    C("antiedit on/off",         "🆕 Catch edited messages → (You) chat"),
-    C("antideletestatus on/off", "🆕 Save deleted statuses → (You) chat"),
     L(""),
     L("🤖 *Auto Features*"),
     C("autoread on/off",         "Silent read all messages"),
@@ -203,8 +201,6 @@ function buildNewSection(pref, theme) {
 
   const lines = [
     L("✨ *Latest Additions*"),
-    C("antiedit on/off",         "Catch edited messages → (You) chat"),
-    C("antideletestatus on/off", "Save deleted statuses → (You) chat"),
     C("theme",                   "Change menu visual theme (19 themes!)"),
     L("_theme set elite | fire | ocean | samurai | aurora…_"),
     L(""),

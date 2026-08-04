@@ -1,10 +1,11 @@
 // ── AA MD Bot - Shared AI Engine ─────────────────────────────────────────────
 // Single source for all AI chat: .ai command, .chatbot group, .autoai DM relay
 // Fallback chain:
-//   ABZTech Gemini → AB Llama → pollinations POST → pollinations GET → ch.at
+//   DC APIs (Gemini/GPT5/Grok) → ABZTech Gemini → AB Llama →
+//   Pollinations POST → Pollinations GET → ch.at
 //
-// AB Llama & ABZTech Gemini are fast free GET APIs (confirmed working).
-// pollinations POST is used for multi-turn context (.ai command).
+// All providers validated — error strings like "Failed to fetch from Copilot"
+// are caught and rejected before they reach the user.
 
 import axios from 'axios';
 
@@ -65,6 +66,25 @@ Rules:
 - If someone is funny → joke back
 - NEVER say you are an AI or a bot`;
 
+// ── Response validator ────────────────────────────────────────────────────────
+// Rejects API error strings that slip through as "valid" text
+// (e.g. "Failed to fetch from Copilot", "Error: network timeout", etc.)
+function isValidResponse(text) {
+  if (!text || typeof text !== 'string') return false;
+  const t = text.trim();
+  if (t.length < 3) return false;
+  const lower = t.toLowerCase();
+  // Hard rejections — these are API error messages, not AI responses
+  if (lower.includes('failed to fetch')) return false;
+  if (lower.includes('copilot') || lower.includes('capilot')) return false;
+  if (lower.startsWith('error:') || lower.startsWith('failed:')) return false;
+  if (lower.includes('network error') || lower.includes('fetch error')) return false;
+  if (lower.includes('cloudflare') && lower.includes('error')) return false;
+  if (lower.includes('5xx') || lower.includes('503') || lower.includes('502')) return false;
+  if (/^(error|exception|traceback|typeerror|syntaxerror)/i.test(t)) return false;
+  return true;
+}
+
 // ── Backend 0a: ABZTech Gemini (FAST — free GET, no key) ─────────────────────
 async function tryABZTechGemini(userMsg) {
   const { data } = await axios.get(
@@ -72,7 +92,7 @@ async function tryABZTechGemini(userMsg) {
     { timeout: 15000 }
   );
   const text = data?.data?.answer?.trim() || data?.answer?.trim();
-  if (!text || text.length < 2) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -83,7 +103,7 @@ async function tryABLlama(prompt) {
     { timeout: 15000 }
   );
   const text = (data?.response || data?.data || '').trim();
-  if (!text || text.length < 2) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -95,7 +115,7 @@ async function tryPollinationsPost(messages, model = 'openai-fast') {
     { headers: { 'Content-Type': 'application/json' }, timeout: 22000 }
   );
   const text = data?.choices?.[0]?.message?.content?.trim();
-  if (!text || text.length < 2) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -107,7 +127,7 @@ async function tryPollinationsGet(userMsg) {
     { timeout: 18000 }
   );
   const text = typeof res.data === 'string' ? res.data.trim() : null;
-  if (!text || text.length < 2) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -124,7 +144,7 @@ async function tryChAt(userMsg) {
   // Response format: "Q: ...\nA: <actual answer>"
   const match = raw.match(/\bA:\s*([\s\S]+)$/);
   const text  = match ? match[1].trim() : (raw.trim().length > 2 ? raw.trim() : null);
-  if (!text) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -135,7 +155,7 @@ async function tryDCGemini(userMsg) {
     { timeout: 15000 }
   );
   const text = (data?.data || '').trim();
-  if (!text || text.length < 2) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -146,7 +166,7 @@ async function tryDCGpt5(userMsg) {
     { timeout: 15000 }
   );
   const text = (data?.data || '').trim();
-  if (!text || text.length < 2) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -157,7 +177,35 @@ async function tryDCGrok(userMsg) {
     { timeout: 15000 }
   );
   const text = (data?.data || '').trim();
-  if (!text || text.length < 2) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
+  return text;
+}
+
+// ── Backend DC-d: DavidCyrilTech Claude (extra fallback) ─────────────────────
+async function tryDCClaude(userMsg) {
+  const { data } = await axios.get(
+    `https://davidcyriltech.my.id/ai/claude?prompt=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
+    { timeout: 15000 }
+  );
+  const text = (data?.data || data?.result || '').trim();
+  if (!isValidResponse(text)) throw new Error('empty');
+  return text;
+}
+
+// ── Backend Pollinations Mistral (fast POST, no key) ─────────────────────────
+async function tryPollinationsMistral(userMsg) {
+  const { data } = await axios.post(
+    'https://text.pollinations.ai/openai',
+    {
+      model: 'mistral',
+      messages: [{ role: 'user', content: String(userMsg).slice(0, 800) }],
+      temperature: 0.5,
+      max_tokens: 500,
+    },
+    { headers: { 'Content-Type': 'application/json' }, timeout: 18000 }
+  );
+  const text = data?.choices?.[0]?.message?.content?.trim();
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -169,7 +217,7 @@ async function tryPollinationsModel(messages, model) {
     { headers: { 'Content-Type': 'application/json' }, timeout: 22000 }
   );
   const text = data?.choices?.[0]?.message?.content?.trim();
-  if (!text || text.length < 2) throw new Error('empty');
+  if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
@@ -211,19 +259,21 @@ export async function chatAI(jid, userMsg, systemPrompt) {
 
   let reply = null;
 
-  // 1. Race DC APIs (confirmed working) + ABZTech + ABLlama in parallel (max 13s)
+  // 1. Race DC APIs + ABZTech + ABLlama + Mistral in parallel (max 13s)
   reply = await raceSuccess([
     tryDCGemini(userMsg).catch(() => null),
     tryDCGpt5(userMsg).catch(() => null),
     tryDCGrok(userMsg).catch(() => null),
+    tryDCClaude(userMsg).catch(() => null),
     tryABZTechGemini(userMsg).catch(() => null),
     tryABLlama(userMsg).catch(() => null),
+    tryPollinationsMistral(userMsg).catch(() => null),
   ], 13000);
 
   // 2. pollinations POST — multi-turn context fallback
   if (!reply) reply = await tryPollinationsPost(messages).catch(() => null);
 
-  // 4. pollinations GET — single-turn fallback
+  // 3. pollinations GET — single-turn fallback
   if (!reply) {
     const flatCtx = messages
       .filter(m => m.role !== 'system')
@@ -233,7 +283,7 @@ export async function chatAI(jid, userMsg, systemPrompt) {
     reply = await tryPollinationsGet(flatCtx).catch(() => null);
   }
 
-  // 5. pollinations alternate models (mistral, openai-large, claude)
+  // 4. pollinations alternate models
   if (!reply) {
     for (const model of ['mistral', 'openai-large', 'claude-sonnet-4-5']) {
       reply = await tryPollinationsModel(messages, model).catch(() => null);
@@ -241,7 +291,7 @@ export async function chatAI(jid, userMsg, systemPrompt) {
     }
   }
 
-  // 6. ch.at — last resort
+  // 5. ch.at — last resort
   if (!reply) {
     reply = await tryChAt(userMsg).catch(() => null);
   }
@@ -253,7 +303,7 @@ export async function chatAI(jid, userMsg, systemPrompt) {
   return cleaned;
 }
 
-// ── Fast chat function for .gf (speed-optimised, parallel GET + POST fallback) ─
+// ── Fast chat function for .gf / .bf (speed-optimised, parallel GET + POST fallback) ─
 // Tries fast GET APIs in parallel first; falls back to POST only if needed.
 // systemPrompt is used for POST; GET APIs get a compact embedded context.
 export async function chatAIFast(jid, userMsg, systemPrompt) {
@@ -271,15 +321,16 @@ export async function chatAIFast(jid, userMsg, systemPrompt) {
 
   let reply = null;
 
-  // Phase 1: race all fast GET APIs in parallel — take whichever wins first (max 13s)
-  // DC APIs work best with just the user message (they have their own defaults).
-  // ABZTech/ABLlama can handle the full getPrompt (compact sys + context).
+  // Phase 1: race all fast APIs in parallel — take whichever wins first (max 13s)
+  // DC APIs work best with just the user message; ABZTech/ABLlama/Mistral use full context.
   reply = await raceSuccess([
-    tryABZTechGemini(getPrompt).catch(() => null),
-    tryABLlama(getPrompt).catch(() => null),
     tryDCGemini(userMsg).catch(() => null),
     tryDCGpt5(userMsg).catch(() => null),
     tryDCGrok(userMsg).catch(() => null),
+    tryDCClaude(userMsg).catch(() => null),
+    tryABZTechGemini(getPrompt).catch(() => null),
+    tryABLlama(getPrompt).catch(() => null),
+    tryPollinationsMistral(userMsg).catch(() => null),
   ], 13000);
 
   // Phase 2: pollinations POST with full system prompt + conversation history

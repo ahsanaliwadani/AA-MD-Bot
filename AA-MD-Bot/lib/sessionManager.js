@@ -89,13 +89,9 @@ export function setMessageHandler(fn) { messageHandler = fn; }
 export function setConnectionHandler(fn) { connectionHandler = fn; }
 
 // ── Auto Status Handler ─────────────────────────────────────────────────────
-// Handles status@broadcast messages: auto-view, auto-react, auto-save.
-// Also eagerly downloads media into statusMediaMap so antideletestatus
-// can recover deleted statuses even after the CDN URL expires.
-async function handleStatusMessage(sock, msg, sessionId, statusMediaMap) {
+// Handles status@broadcast messages: auto-view and auto-react.
+async function handleStatusMessage(sock, msg, sessionId) {
   try {
-    const senderJid = msg.key.participant || msg.key.remoteJid;
-
     // Skip own statuses
     if (msg.key.fromMe) return;
 
@@ -119,59 +115,6 @@ async function handleStatusMessage(sock, msg, sessionId, statusMediaMap) {
       await sock.sendMessage('status@broadcast', {
         react: { text: statusEmoji, key: msg.key },
       }).catch(() => {});
-    }
-
-    // 3) Eagerly download & buffer status media for antideletestatus
-    if (msg.key.id && !msg.key.fromMe) {
-      const m          = msg.message;
-      const hasMedia   = !!(m?.imageMessage || m?.videoMessage || m?.audioMessage);
-      const statusText = m?.conversation || m?.extendedTextMessage?.text || null;
-      const senderNum  = senderJid.split('@')[0].split(':')[0];
-      const pushName   = msg.pushName || '';
-
-      const adStatusEnabled =
-        db.sessionSettings.getValue(sessionId, 'antiDeleteStatus') ??
-        db.settings.getValue('antiDeleteStatus') ?? false;
-
-      const needsBuffer = adStatusEnabled && hasMedia;
-
-      let mediaBuf   = null;
-      let mimeType   = null;
-      let isVideo    = !!m?.videoMessage;
-      let isAudio    = !!m?.audioMessage;
-
-      if (needsBuffer) {
-        try {
-          mediaBuf = await downloadMediaMessage(msg, 'buffer', {},
-            { reuploadRequest: sock.updateMediaMessage });
-          if (!mediaBuf || mediaBuf.length < 500) mediaBuf = null;
-          else {
-            mimeType = m?.imageMessage?.mimetype
-              || m?.videoMessage?.mimetype
-              || m?.audioMessage?.mimetype
-              || 'image/jpeg';
-          }
-        } catch {}
-      }
-
-      const baseEntry = {
-        buffer:    mediaBuf,
-        mimetype:  mimeType,
-        text:      hasMedia ? null : statusText,
-        senderNum,
-        senderJid,
-        pushName,
-        isVideo,
-        isAudio,
-        msgKey:    msg.key,
-        time:      Date.now(),
-      };
-
-      // Store in antideletestatus map
-      if (statusMediaMap && adStatusEnabled && (mediaBuf || statusText)) {
-        statusMediaMap.set(msg.key.id, baseEntry);
-        if (statusMediaMap.size > 60) statusMediaMap.delete(statusMediaMap.keys().next().value);
-      }
     }
   } catch (err) {
     logger.warn({ err: err.message }, 'handleStatusMessage error');
@@ -482,82 +425,18 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
   const _CACHE_MAX = 200;
   const _floodMap  = new Map(); // anti-flood tracker
 
-  // Pre-downloaded status media (image/video) for antideletestatus
-  // Map<msgId, { buffer, mimetype, pushName, senderNum, time }>
-  const _statusMediaMap  = new Map();
-  const _STATUS_MEDIA_MAX = 60; // keep last 60 status buffers
 
 
-  // messages.update — fires for: edited messages, read-receipts, ViewOnce unlocks.
-  // We handle antiedit here (Baileys delivers edits via this event in most cases)
-  // AND ViewOnce delivery (original purpose).
+  // messages.update — fires for: read-receipts, ViewOnce unlocks.
   sock.ev.on('messages.update', async (updates) => {
     for (const update of updates) {
       try {
         const content = update?.update?.message;
         if (!content) continue;
-        const chatJid = update.key?.remoteJid;
-        const msg     = { key: update.key, message: content };
+        const msg = { key: update.key, message: content };
 
         // ── ViewOnce reveal ──────────────────────────────────────────────
         try { await handleViewOnceMessage(msg, sock, sessionId); } catch {}
-
-        // ── Anti-Edit: detect message edit via messages.update ───────────
-        // Baileys delivers edits here as content.editedMessage OR content.protocolMessage (type 14)
-        const editWrapper = content.editedMessage
-          || (content.protocolMessage?.editedMessage ? content : null);
-        if (editWrapper && chatJid && !update.key?.fromMe) {
-          try {
-            const isGroup = chatJid.endsWith('@g.us');
-            const settings = db.settings.get();
-            const aeEnabled = isGroup
-              ? (db.groups.get(sessionId, chatJid)?.antiedit ?? settings.antiedit ?? false)
-              : (settings.antiedit ?? false);
-
-            if (aeEnabled) {
-              // Baileys delivers edits in two shapes via messages.update:
-              //   Shape A: content.editedMessage.message = { conversation: 'new text' }
-              //   Shape B: content.protocolMessage = { type:14, editedMessage: { conversation: 'new text' } }
-              // original message ID is always on update.key.id (Baileys keeps the original key)
-              const originalId = update.key?.id;
-              const ewMsg      =
-                content.editedMessage?.message      // Shape A
-                || content.protocolMessage?.editedMessage  // Shape B
-                || {};
-              const newText    =
-                ewMsg.conversation ||
-                ewMsg.extendedTextMessage?.text ||
-                '[non-text edit]';
-
-              const editorJid = update.key?.participant || chatJid;
-              const editorNum = editorJid?.split('@')[0]?.split(':')[0] || '?';
-              const selfNum   = sock.user?.id?.split('@')[0]?.split(':')[0];
-              const selfJid   = selfNum ? `${selfNum}@s.whatsapp.net` : null;
-              const now       = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
-              const whereAE   = isGroup ? 'Group' : 'DM';
-
-              if (selfJid) {
-                // Get original text from cache
-                const original = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
-                const origText =
-                  original?.message?.conversation ||
-                  original?.message?.extendedTextMessage?.text ||
-                  '[original not in cache]';
-                const nameAE   = original?.pushName || editorNum;
-
-                await sock.sendMessage(selfJid, {
-                  text:
-                    `✏️ *Message Edited*\n\n` +
-                    `👤 By: *${nameAE}* (+${editorNum})\n` +
-                    `📍 Where: ${whereAE}\n` +
-                    `🕐 Time: ${now}\n\n` +
-                    `📄 *Before:* ${origText.slice(0, 300)}\n` +
-                    `📝 *After:*  ${newText.slice(0, 300)}`,
-                }).catch(() => {});
-              }
-            }
-          } catch {}
-        }
       } catch {}
     }
   });
@@ -585,74 +464,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
           const selfNum3 = sock.user?.id?.split('@')[0]?.split(':')[0];
           const selfJid3 = selfNum3 ? `${selfNum3}@s.whatsapp.net` : null;
 
-          // ── Anti-Delete STATUS: catch deleted WhatsApp statuses ─────────────
+          // Skip status deletions — antideletestatus removed
           const isStatusDel = chatJid === 'status@broadcast' || deletedKey?.remoteJid === 'status@broadcast';
-          if (isStatusDel && selfJid3) {
-            const adStatusEnabled =
-              db.sessionSettings.getValue(sessionId, 'antiDeleteStatus') ??
-              settings.antiDeleteStatus ?? false;
-            if (adStatusEnabled) {
-              const now = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
-
-              // ── Priority 1: Use pre-buffered media (downloaded when status arrived) ──
-              const buffered = deletedId ? _statusMediaMap.get(deletedId) : null;
-              if (buffered) {
-                const senderNum = buffered.senderNum || '?';
-                const nameStr   = buffered.pushName ? `*${buffered.pushName}* (+${senderNum})` : `+${senderNum}`;
-                await sock.sendMessage(selfJid3, {
-                  text: `🗑️ *Status Deleted!*\n\n👤 From: ${nameStr}\n🕐 ${now}`,
-                }).catch(() => {});
-
-                if (buffered.buffer) {
-                  if (buffered.isVideo) {
-                    await sock.sendMessage(selfJid3, {
-                      video:   buffered.buffer,
-                      mimetype: buffered.mimetype || 'video/mp4',
-                      caption: `🎥 Deleted status from ${nameStr}`,
-                    }).catch(() => {});
-                  } else if (buffered.isAudio) {
-                    await sock.sendMessage(selfJid3, {
-                      audio:    buffered.buffer,
-                      mimetype: buffered.mimetype || 'audio/ogg; codecs=opus',
-                      ptt:      true,
-                    }).catch(() => {});
-                  } else {
-                    await sock.sendMessage(selfJid3, {
-                      image:   buffered.buffer,
-                      mimetype: buffered.mimetype || 'image/jpeg',
-                      caption: `🖼️ Deleted status from ${nameStr}`,
-                    }).catch(() => {});
-                  }
-                } else if (buffered.text) {
-                  await sock.sendMessage(selfJid3, {
-                    text: `📝 *Deleted Status Text:*\n\n${buffered.text}`,
-                  }).catch(() => {});
-                }
-                _statusMediaMap.delete(deletedId);
-
-              } else {
-                // ── Fallback: Try forwarding raw message object from msg cache ──
-                const statusCache = _msgCache.get('status@broadcast');
-                const original    = statusCache?.get(deletedId);
-                if (original && !original.key.fromMe) {
-                  const statusSender = original.key.participant || deletedKey?.participant || 'unknown';
-                  const senderNum    = statusSender.split('@')[0].split(':')[0];
-                  await sock.sendMessage(selfJid3, {
-                    text: `🗑️ *Status Deleted!*\n\n👤 From: +${senderNum}\n🕐 ${now}\n\n⚠️ _Media may not load (CDN expired)_`,
-                  }).catch(() => {});
-                  await sock.sendMessage(selfJid3, { forward: original, force: true }).catch(() => {});
-                } else {
-                  // Notify even if we can't recover content
-                  const senderNum = (deletedKey?.participant || deletedKey?.remoteJid || 'unknown')
-                    .split('@')[0].split(':')[0];
-                  await sock.sendMessage(selfJid3, {
-                    text: `🗑️ *Status Deleted!*\n\n👤 From: +${senderNum}\n🕐 ${now}\n\n⚠️ _Content not cached_`,
-                  }).catch(() => {});
-                }
-              }
-            }
-            return; // status deletion processed
-          }
+          if (isStatusDel) return;
 
           const adEnabled = isGroup
             ? (db.groups.get(sessionId, chatJid)?.antidelete ?? settings.antidelete ?? false)
@@ -701,75 +515,6 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         return; // stop processing this message (it's a deletion event, not a real message)
       }
 
-      // ── Anti-Edit: detect editedMessage ──────────────────────────────────────
-      const editWrapper = msg.message?.editedMessage;
-      if (editWrapper) {
-        try {
-          const chatJid   = msg.key.remoteJid;
-          const isGroup   = chatJid?.endsWith('@g.us');
-          const settings  = db.settings.get();
-          const aeEnabled = isGroup
-            ? (db.groups.get(sessionId, chatJid)?.antiedit ?? settings.antiedit ?? false)
-            : (settings.antiedit ?? false);
-
-          if (aeEnabled) {
-            // messages.upsert editedMessage arrives in two shapes:
-            // Shape A (Baileys normalised): editedMessage.message = { conversation: "new" }
-            // Shape B (raw re-emitted):     editedMessage.message.protocolMessage.editedMessage has text
-            const ewMsg      = editWrapper.message || {};
-            const proto2     = ewMsg.protocolMessage || {};
-            const editedBody = proto2.editedMessage || {};
-            // Original message ID: from the protocolMessage key first, then the msg key
-            const originalId = proto2.key?.id || msg.key?.id;
-
-            const newText =
-              ewMsg.conversation ||
-              ewMsg.extendedTextMessage?.text ||
-              editedBody.conversation ||
-              editedBody.extendedTextMessage?.text ||
-              // Also check if editWrapper itself has the text directly (some Baileys builds)
-              editWrapper.conversation ||
-              editWrapper.extendedTextMessage?.text ||
-              '[non-text edit]';
-
-            const editorJid = msg.key.participant || msg.key.remoteJid;
-            const editorNum = editorJid?.split('@')[0]?.split(':')[0] || '?';
-            const now       = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
-
-            const selfNum4 = sock.user?.id?.split('@')[0]?.split(':')[0];
-            const selfJid4 = selfNum4 ? `${selfNum4}@s.whatsapp.net` : null;
-
-            if (selfJid4) {
-              const original  = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
-              const origText  =
-                original?.message?.conversation ||
-                original?.message?.extendedTextMessage?.text ||
-                '[original not in cache]';
-              const nameAE    = original?.pushName || editorNum;
-              const whereAE   = isGroup ? 'Group' : 'DM';
-
-              await sock.sendMessage(selfJid4, {
-                text:
-                  `✏️ *Message Edited*\n\n` +
-                  `👤 By: *${nameAE}* (+${editorNum})\n` +
-                  `📍 Where: ${whereAE}\n` +
-                  `🕐 Time: ${now}\n\n` +
-                  `📄 *Before:* ${origText.slice(0, 300)}\n` +
-                  `📝 *After:*  ${newText.slice(0, 300)}`,
-              }).catch(() => {});
-
-              // Forward original if cached (so bot owner sees the original message)
-              if (original) {
-                await sock.sendMessage(selfJid4, {
-                  forward: original, force: true,
-                }).catch(() => {});
-              }
-            }
-          }
-        } catch {}
-        // Don't return — editedMessage could still have a command text, let handler process it
-      }
-
       // Cache this message for potential anti-delete recovery
       const cJid = msg.key.remoteJid;
       const cId  = msg.key.id;
@@ -801,7 +546,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
           sCache.set(sId, msg);
           if (sCache.size > _CACHE_MAX) sCache.delete(sCache.keys().next().value);
         }
-        await handleStatusMessage(sock, msg, sessionId, _statusMediaMap).catch(() => {});
+        await handleStatusMessage(sock, msg, sessionId).catch(() => {});
         return; // status messages handled, not a command
       }
 

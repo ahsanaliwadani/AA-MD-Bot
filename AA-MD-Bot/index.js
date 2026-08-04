@@ -352,7 +352,7 @@ async function startServer() {
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
-            'Set-Cookie': `adminToken=${_makeToken()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`,
+            'Set-Cookie': `adminToken=${_makeToken()}; Path=/; HttpOnly; SameSite=Strict`,
           });
           res.end(JSON.stringify({ ok: true }));
         } catch { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: 'Bad request' })); }
