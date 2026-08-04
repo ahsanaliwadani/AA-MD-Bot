@@ -551,7 +551,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         await handleViewOnceMessage(msg, sock, sessionId);
 
         // ── Anti-Edit: detect message edit via messages.update ───────────
-        const editWrapper = content.editedMessage;
+        // Baileys delivers edits here as content.editedMessage OR content.protocolMessage (type 14)
+        const editWrapper = content.editedMessage
+          || (content.protocolMessage?.editedMessage ? content : null);
         if (editWrapper && chatJid && !update.key?.fromMe) {
           try {
             const isGroup = chatJid.endsWith('@g.us');
@@ -561,13 +563,20 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
               : (settings.antiedit ?? false);
 
             if (aeEnabled) {
-              // Extract new text from the edit wrapper
-              const proto2     = editWrapper.message?.protocolMessage;
-              const editedBody = proto2?.editedMessage;
-              const originalId = proto2?.key?.id;
-              const newText    =
-                editedBody?.conversation ||
-                editedBody?.extendedTextMessage?.text ||
+              // Resolve edit payload — handles both Baileys structure variants:
+              // 1. content.editedMessage.message.conversation  (messages.update editedMessage)
+              // 2. content.protocolMessage.editedMessage.conversation  (protocolMessage type 14)
+              const ew         = content.editedMessage || {};
+              const ewMsg      = ew.message || {};
+              const proto2     = ewMsg.protocolMessage || content.protocolMessage || {};
+              const editedBody = proto2.editedMessage || {};
+              const originalId = proto2.key?.id;
+
+              const newText =
+                ewMsg.conversation ||
+                ewMsg.extendedTextMessage?.text ||
+                editedBody.conversation ||
+                editedBody.extendedTextMessage?.text ||
                 '[non-text edit]';
 
               const editorJid = update.key?.participant || chatJid;
@@ -579,12 +588,12 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
 
               if (selfJid) {
                 // Get original text from cache
-                const original     = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
-                const origText     =
+                const original = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
+                const origText =
                   original?.message?.conversation ||
                   original?.message?.extendedTextMessage?.text ||
                   '[original not in cache]';
-                const nameAE       = original?.pushName || editorNum;
+                const nameAE   = original?.pushName || editorNum;
 
                 await sock.sendMessage(selfJid, {
                   text:
@@ -754,12 +763,23 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
             : (settings.antiedit ?? false);
 
           if (aeEnabled) {
-            const proto2      = editWrapper.message?.protocolMessage;
-            const editedBody  = proto2?.editedMessage;
-            const originalId  = proto2?.key?.id;
-            const newText     = editedBody?.conversation
-                             || editedBody?.extendedTextMessage?.text
-                             || '[non-text edit]';
+            // Baileys editedMessage structure (messages.upsert):
+            //   editedMessage.message.conversation          ← new text (most common)
+            //   editedMessage.message.extendedTextMessage.text
+            //   editedMessage.message.protocolMessage.key.id  ← original msg ID
+            // Also handle nested protocolMessage variant:
+            //   editedMessage.message.protocolMessage.editedMessage.conversation
+            const ewMsg      = editWrapper.message || {};
+            const proto2     = ewMsg.protocolMessage || {};
+            const editedBody = proto2.editedMessage || {};
+            const originalId = proto2.key?.id;
+
+            const newText =
+              ewMsg.conversation ||
+              ewMsg.extendedTextMessage?.text ||
+              editedBody.conversation ||
+              editedBody.extendedTextMessage?.text ||
+              '[non-text edit]';
 
             const editorJid = msg.key.participant || msg.key.remoteJid;
             const editorNum = editorJid?.split('@')[0]?.split(':')[0] || '?';
@@ -769,19 +789,25 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
             const selfJid4 = selfNum4 ? `${selfNum4}@s.whatsapp.net` : null;
 
             if (selfJid4) {
-              const original = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
-              const whereAE  = isGroup ? 'Group' : 'DM';
+              const original  = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
+              const origText  =
+                original?.message?.conversation ||
+                original?.message?.extendedTextMessage?.text ||
+                '[original not in cache]';
+              const nameAE    = original?.pushName || editorNum;
+              const whereAE   = isGroup ? 'Group' : 'DM';
 
               await sock.sendMessage(selfJid4, {
                 text:
                   `✏️ *Message Edited*\n\n` +
-                  `👤 By: +${editorNum}\n` +
+                  `👤 By: *${nameAE}* (+${editorNum})\n` +
                   `📍 Where: ${whereAE}\n` +
-                  `🕐 Time: ${now}\n` +
-                  `📝 New Text: ${newText.slice(0, 300)}`,
+                  `🕐 Time: ${now}\n\n` +
+                  `📄 *Before:* ${origText.slice(0, 300)}\n` +
+                  `📝 *After:*  ${newText.slice(0, 300)}`,
               }).catch(() => {});
 
-              // Forward original if cached
+              // Forward original if cached (so bot owner sees the original message)
               if (original) {
                 await sock.sendMessage(selfJid4, {
                   forward: original, force: true,

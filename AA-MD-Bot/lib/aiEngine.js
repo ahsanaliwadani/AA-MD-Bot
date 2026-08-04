@@ -128,6 +128,39 @@ async function tryChAt(userMsg) {
   return text;
 }
 
+// ── Backend DC-a: DavidCyrilTech Gemini 3 Pro (confirmed working, ?prompt=) ──
+async function tryDCGemini(userMsg) {
+  const { data } = await axios.get(
+    `https://davidcyriltech.my.id/ai/gemini-3-pro?prompt=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
+    { timeout: 15000 }
+  );
+  const text = (data?.data || '').trim();
+  if (!text || text.length < 2) throw new Error('empty');
+  return text;
+}
+
+// ── Backend DC-b: DavidCyrilTech GPT-5 (confirmed working, ?prompt=) ─────────
+async function tryDCGpt5(userMsg) {
+  const { data } = await axios.get(
+    `https://davidcyriltech.my.id/ai/gpt-5?prompt=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
+    { timeout: 15000 }
+  );
+  const text = (data?.data || '').trim();
+  if (!text || text.length < 2) throw new Error('empty');
+  return text;
+}
+
+// ── Backend DC-c: DavidCyrilTech Grok 4.1 Fast (confirmed working, ?prompt=) ─
+async function tryDCGrok(userMsg) {
+  const { data } = await axios.get(
+    `https://davidcyriltech.my.id/ai/grok-4.1-fast?prompt=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
+    { timeout: 15000 }
+  );
+  const text = (data?.data || '').trim();
+  if (!text || text.length < 2) throw new Error('empty');
+  return text;
+}
+
 // ── Backend 4: pollinations alternate models ───────────────────────────────────
 async function tryPollinationsModel(messages, model) {
   const { data } = await axios.post(
@@ -235,10 +268,13 @@ export async function chatAIFast(jid, userMsg, systemPrompt) {
 
   let reply = null;
 
-  // Phase 1: race both fast GET APIs in parallel — take whichever wins first (max 13s)
+  // Phase 1: race all fast GET APIs in parallel — take whichever wins first (max 13s)
   reply = await raceSuccess([
     tryABZTechGemini(getPrompt).catch(() => null),
     tryABLlama(getPrompt).catch(() => null),
+    tryDCGemini(getPrompt).catch(() => null),
+    tryDCGpt5(getPrompt).catch(() => null),
+    tryDCGrok(getPrompt).catch(() => null),
   ], 13000);
 
   // Phase 2: pollinations POST with full system prompt + conversation history
