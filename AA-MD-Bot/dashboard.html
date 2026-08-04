@@ -544,7 +544,38 @@
         </div>
         <div class="cat-grid" id="ovCats"></div>
 
+        <!-- ── Storage Usage ── -->
         <div class="section-hdr" style="margin-top:22px">
+          <div class="section-title">💾 Storage</div>
+          <div class="section-meta" id="storageRefreshMeta" style="font-size:.78rem;color:var(--text3)"></div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px">
+          <!-- Disk bar -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:.83rem;color:var(--text2)">Disk Usage</span>
+            <span style="font-size:.83rem;font-weight:600" id="diskLabel">—</span>
+          </div>
+          <div style="background:var(--surface2);border-radius:99px;height:8px;overflow:hidden;margin-bottom:16px">
+            <div id="diskBar" style="height:100%;width:0%;background:var(--green);border-radius:99px;transition:width .6s ease"></div>
+          </div>
+          <!-- Per-folder rows -->
+          <div id="folderRows" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px">
+            <div style="color:var(--text3);font-size:.8rem">Loading…</div>
+          </div>
+          <!-- Cleanup buttons -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn-sm" onclick="doCleanup(['downloads','temp'])" id="cleanBtn">
+              🧹 Clean Downloads &amp; Temp
+            </button>
+            <button class="btn-sm" onclick="doCleanup(['logs','cache'])" style="opacity:.8">
+              🗑️ Clear Logs &amp; Cache
+            </button>
+            <button class="btn-sm" onclick="loadStorage()" style="margin-left:auto">↻ Refresh</button>
+          </div>
+          <div id="cleanupResult" style="display:none;margin-top:10px;font-size:.82rem;padding:8px 12px;border-radius:var(--radius-sm)"></div>
+        </div>
+
+        <div class="section-hdr" style="margin-top:6px">
           <div class="section-title">Connected Sessions</div>
           <div class="section-meta" id="ovSessionMeta"></div>
         </div>
@@ -569,7 +600,10 @@
             <select class="bc-select" id="bcTarget">
               <option value="">All connected sessions</option>
             </select>
-            <textarea class="bc-textarea" id="bcMessage" placeholder="Type your broadcast message here…"></textarea>
+            <textarea class="bc-textarea" id="bcMessage" placeholder="Type your broadcast message here…&#10;&#10;Formatting tips:&#10;*bold* → bold text&#10;_italic_ → italic&#10;~strikethrough~&#10;Line breaks work normally"></textarea>
+            <div style="font-size:.75rem;color:var(--text3);margin-top:5px;line-height:1.7">
+              💡 <strong style="color:var(--text2)">*bold*</strong> &nbsp; <em style="color:var(--text2)">_italic_</em> &nbsp; <s style="color:var(--text2)">~strike~</s> &nbsp; line breaks: Enter key
+            </div>
 
             <!-- Image upload -->
             <div style="margin-top:10px">
@@ -895,7 +929,7 @@ async function showApp() {
 }
 
 async function loadAll() {
-  await Promise.all([loadStats(), loadSessions(), loadSettings()]);
+  await Promise.all([loadStats(), loadSessions(), loadSettings(), loadStorage()]);
   renderOverview();
 }
 
@@ -1144,6 +1178,62 @@ function clearBcImage() {
   document.getElementById('bcImageClear').style.display = 'none';
 }
 
+// ══════════════════════════════════════════════════════════
+//  STORAGE
+// ══════════════════════════════════════════════════════════
+function fmtBytes(b) {
+  if (!b || b < 1024) return '0 KB';
+  if (b < 1024*1024) return (b/1024).toFixed(0)+' KB';
+  if (b < 1024*1024*1024) return (b/1024/1024).toFixed(1)+' MB';
+  return (b/1024/1024/1024).toFixed(2)+' GB';
+}
+
+async function loadStorage() {
+  try {
+    const d = await fetch('/admin/storage').then(r=>r.json()).catch(()=>null);
+    if (!d?.ok) return;
+    // Disk bar
+    const pct = d.total ? Math.round(d.used/d.total*100) : 0;
+    const bar = document.getElementById('diskBar');
+    const lbl = document.getElementById('diskLabel');
+    if (bar) { bar.style.width = pct+'%'; bar.style.background = pct>85?'var(--red)':pct>60?'var(--yellow)':'var(--green)'; }
+    if (lbl) lbl.textContent = `${fmtBytes(d.used)} / ${fmtBytes(d.total)} (${pct}%)`;
+    document.getElementById('storageRefreshMeta').textContent = 'Updated '+new Date().toLocaleTimeString();
+    // Folder rows
+    const folderIcons = { downloads:'📥', temp:'🕐', logs:'📋', cache:'⚡' };
+    const rows = document.getElementById('folderRows');
+    if (rows && d.folders) {
+      rows.innerHTML = Object.entries(d.folders).map(([k,v])=>`
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+          <div style="font-size:.78rem;color:var(--text3);margin-bottom:3px">${folderIcons[k]||'📁'} ${k}</div>
+          <div style="font-weight:600;font-size:.92rem">${fmtBytes(v)}</div>
+        </div>`).join('');
+    }
+  } catch {}
+}
+
+async function doCleanup(folders) {
+  const btn = document.getElementById('cleanBtn');
+  const res = document.getElementById('cleanupResult');
+  if (btn) { btn.disabled=true; btn.textContent='Cleaning…'; }
+  try {
+    const d = await fetch('/admin/cleanup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folders})}).then(r=>r.json()).catch(()=>null);
+    if (d?.ok) {
+      res.textContent = `✅ Cleaned ${d.count} file(s), freed ${fmtBytes(d.freed)}`;
+      res.style.background='var(--green-dim)'; res.style.color='var(--green)';
+    } else {
+      res.textContent = '❌ Cleanup failed';
+      res.style.background='var(--red-dim)'; res.style.color='var(--red)';
+    }
+  } catch {
+    res.textContent = '❌ Network error';
+    res.style.background='var(--red-dim)'; res.style.color='var(--red)';
+  }
+  res.style.display = 'block';
+  if (btn) { btn.disabled=false; btn.textContent='🧹 Clean Downloads & Temp'; }
+  setTimeout(()=>{ res.style.display='none'; loadStorage(); }, 3000);
+}
+
 async function sendBroadcast() {
   const msg = document.getElementById('bcMessage').value.trim();
   const target = document.getElementById('bcTarget').value;
@@ -1288,7 +1378,7 @@ function showPage(name, el) {
   document.getElementById('pageSub').textContent   = meta[1];
   if (name==='sessions')  renderSessions();
   if (name==='pair')      renderPairSessions();
-  if (name==='overview')  renderOverview();
+  if (name==='overview')  { renderOverview(); loadStorage(); }
   if (name==='broadcast') { updateBcTargetSelect(); renderBcHistory(); }
   if (name==='logs')      startLogPolling();
   else                    stopLogPolling();

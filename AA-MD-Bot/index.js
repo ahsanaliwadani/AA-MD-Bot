@@ -480,6 +480,72 @@ async function startServer() {
       return;
     }
 
+    // ── Admin: storage info ─────────────────────────────────
+    if (p === '/admin/storage' && req.method === 'GET') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      try {
+        const { execFile } = await import('child_process');
+        const { promisify } = await import('util');
+        const execFileP = promisify(execFile);
+        // Disk totals
+        let total = 0, used = 0, avail = 0;
+        try {
+          const df = await execFileP('df', ['-k', __dirname]);
+          const parts = df.stdout.trim().split('\n')[1]?.split(/\s+/);
+          if (parts) { total = parseInt(parts[1]) * 1024; used = parseInt(parts[2]) * 1024; avail = parseInt(parts[3]) * 1024; }
+        } catch {}
+        // Per-folder sizes
+        const folderNames = ['downloads', 'temp', 'logs', 'cache'];
+        const folders = {};
+        for (const f of folderNames) {
+          try {
+            const du = await execFileP('du', ['-sk', path.join(__dirname, f)]);
+            folders[f] = parseInt(du.stdout.split('\t')[0]) * 1024;
+          } catch { folders[f] = 0; }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, total, used, avail, folders }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    // ── Admin: cleanup folders ───────────────────────────────
+    if (p === '/admin/cleanup' && req.method === 'POST') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', async () => {
+        try {
+          const { folders: toClean = ['downloads', 'temp'] } = JSON.parse(body || '{}');
+          const allowed = ['downloads', 'temp', 'logs', 'cache'];
+          let freed = 0, count = 0;
+          for (const folder of toClean) {
+            if (!allowed.includes(folder)) continue;
+            const dir = path.join(__dirname, folder);
+            try {
+              const files = await fs.readdir(dir);
+              for (const file of files) {
+                try {
+                  const fp = path.join(dir, file);
+                  const stat = await fs.stat(fp);
+                  if (stat.isFile()) { freed += stat.size; await fs.unlink(fp); count++; }
+                } catch {}
+              }
+            } catch {}
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, freed, count }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      });
+      return;
+    }
+
     // ── Admin: broadcast message ─────────────────────────────
     if (p === '/admin/broadcast' && req.method === 'POST') {
       if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
@@ -487,8 +553,10 @@ async function startServer() {
       req.on('data', d => body += d);
       req.on('end', async () => {
         try {
-          const { message, targetSession, image, imageMime } = JSON.parse(body || '{}');
-          if (!message?.trim() && !image) {
+          const { message: rawMsg, targetSession, image, imageMime } = JSON.parse(body || '{}');
+          // Normalize line endings: \r\n and \r → \n so WhatsApp receives clean newlines
+          const message = (rawMsg || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          if (!message.trim() && !image) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify({ ok: false, error: 'message or image is required' }));
           }
@@ -509,7 +577,7 @@ async function startServer() {
               const jid = ownerRaw.includes('@') ? ownerRaw : `${ownerRaw.replace(/\D/g, '')}@s.whatsapp.net`;
               if (jid && jid.length > 10) {
                 if (imgBuf) {
-                  const caption = message?.trim()
+                  const caption = message.trim()
                     ? `${header}\n\n${message.trim()}`
                     : header;
                   await sock.sendMessage(jid, { image: imgBuf, mimetype: imgMime, caption });
