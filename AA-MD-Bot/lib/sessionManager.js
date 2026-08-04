@@ -258,7 +258,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     getMessage: async () => ({ conversation: '' }),
     syncFullHistory: false,
     markOnlineOnConnect: false,
-    shouldIgnoreJid: jid => isJidBroadcast(jid),
+    // Allow status@broadcast through — needed for status saver & antideletestatus.
+    // Only ignore other broadcast JIDs (e.g. legacy broadcast lists).
+    shouldIgnoreJid: jid => isJidBroadcast(jid) && jid !== 'status@broadcast',
   });
 
   sock.sessionId = sessionId;
@@ -563,20 +565,15 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
               : (settings.antiedit ?? false);
 
             if (aeEnabled) {
-              // Resolve edit payload — handles both Baileys structure variants:
-              // 1. content.editedMessage.message.conversation  (messages.update editedMessage)
-              // 2. content.protocolMessage.editedMessage.conversation  (protocolMessage type 14)
-              const ew         = content.editedMessage || {};
-              const ewMsg      = ew.message || {};
-              const proto2     = ewMsg.protocolMessage || content.protocolMessage || {};
-              const editedBody = proto2.editedMessage || {};
-              const originalId = proto2.key?.id;
-
-              const newText =
+              // Baileys source (process-message.js MESSAGE_EDIT case) emits:
+              //   update.key.id          = ORIGINAL message ID (Baileys swaps the key)
+              //   update.update.message  = { editedMessage: { message: <new content> } }
+              // So the original ID is on update.key, not inside editWrapper.
+              const originalId = update.key?.id;
+              const ewMsg      = (content.editedMessage?.message) || {};
+              const newText    =
                 ewMsg.conversation ||
                 ewMsg.extendedTextMessage?.text ||
-                editedBody.conversation ||
-                editedBody.extendedTextMessage?.text ||
                 '[non-text edit]';
 
               const editorJid = update.key?.participant || chatJid;
@@ -763,16 +760,16 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
             : (settings.antiedit ?? false);
 
           if (aeEnabled) {
-            // Baileys editedMessage structure (messages.upsert):
-            //   editedMessage.message.conversation          ← new text (most common)
-            //   editedMessage.message.extendedTextMessage.text
-            //   editedMessage.message.protocolMessage.key.id  ← original msg ID
-            // Also handle nested protocolMessage variant:
-            //   editedMessage.message.protocolMessage.editedMessage.conversation
+            // messages.upsert editedMessage can arrive in two shapes:
+            // Shape A (Baileys normalised): editedMessage.message = { conversation: "new" }
+            //   originalId from editedMessage.message.protocolMessage.key.id (if present)
+            // Shape B (raw protocolMessage re-emitted): editedMessage.message.protocolMessage
+            //   exists with type=MESSAGE_EDIT — get text from protocolMessage.editedMessage
             const ewMsg      = editWrapper.message || {};
             const proto2     = ewMsg.protocolMessage || {};
             const editedBody = proto2.editedMessage || {};
-            const originalId = proto2.key?.id;
+            // Original message ID is in the protocolMessage key for upsert path
+            const originalId = proto2.key?.id || msg.key?.id;
 
             const newText =
               ewMsg.conversation ||
