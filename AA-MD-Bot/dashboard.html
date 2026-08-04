@@ -1,185 +1,885 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AA MD Bot — Server</title>
-    <meta name="theme-color" content="#25d366" />
-    <link rel="icon" type="image/webp" href="/logo.webp" />
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body {
-        background: #060911;
-        color: #dde6f4;
-        font-family: 'Segoe UI', sans-serif;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 32px;
-        padding: 24px;
-      }
-      .logo {
-        width: 80px;
-        height: 80px;
-        border-radius: 50%;
-        border: 2px solid #25d366;
-        box-shadow: 0 0 24px rgba(37,211,102,0.3);
-      }
-      h1 {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #fff;
-      }
-      h1 span { color: #25d366; }
-      .status {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.9rem;
-        color: #6b7f99;
-        background: #0d1421;
-        border: 1px solid #182030;
-        border-radius: 999px;
-        padding: 6px 16px;
-      }
-      .dot {
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: #25d366;
-        box-shadow: 0 0 6px #25d366;
-        animation: pulse 2s infinite;
-      }
-      @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.4; }
-      }
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        background: #25d366;
-        color: #000;
-        font-weight: 700;
-        font-size: 1rem;
-        padding: 14px 32px;
-        border-radius: 12px;
-        text-decoration: none;
-        transition: transform 0.15s, box-shadow 0.15s;
-        box-shadow: 0 4px 20px rgba(37,211,102,0.35);
-      }
-      .btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 28px rgba(37,211,102,0.5);
-      }
-      .btn svg { width: 20px; height: 20px; }
-      .about {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        width: 100%;
-        max-width: 340px;
-      }
-      .about-item {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        background: #0d1421;
-        border: 1px solid #182030;
-        border-radius: 12px;
-        padding: 12px 16px;
-      }
-      .about-item svg {
-        width: 20px;
-        height: 20px;
-        flex-shrink: 0;
-      }
-      .about-item > div {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .label {
-        font-size: 0.72rem;
-        color: #3d4f65;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .value {
-        font-size: 0.92rem;
-        color: #dde6f4;
-        font-weight: 600;
-      }
-      .sub {
-        font-size: 0.75rem;
-        color: #4a6080;
-        margin-top: 2px;
-      }
-      .privacy {
-        border-color: rgba(37,211,102,0.2);
-        background: rgba(37,211,102,0.04);
-      }
-    </style>
-  </head>
-  <body>
-    <img src="/logo.webp" class="logo" alt="AA MD Bot" onerror="this.style.display='none'" />
-    <h1>AA MD <span>Bot</span></h1>
-    <a href="https://aa-md-bot.vercel.app/" target="_blank" class="btn">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-        <polyline points="15 3 21 3 21 9"/>
-        <line x1="10" y1="14" x2="21" y2="3"/>
-      </svg>
-      Open Dashboard
-    </a>
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AA MD Bot — Admin Panel</title>
+  <meta name="theme-color" content="#25d366"/>
+  <link rel="icon" type="image/webp" href="/logo.webp"/>
+  <style>
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
-    <div class="about">
-      <div class="about-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        <div>
-          <span class="label">Version</span>
-          <span class="value">v3.0.0</span>
-        </div>
-      </div>
-      <div class="about-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        <div>
-          <span class="label">Developer</span>
-          <span class="value">Ahsan Ali Wadani</span>
-        </div>
-      </div>
-      <div class="about-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        <div>
-          <span class="label">Platform</span>
-          <span class="value">Multi-Device WhatsApp</span>
-        </div>
-      </div>
-      <div class="about-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        <div>
-          <span class="label">Features</span>
-          <span class="value">200+ Commands &amp; Tools</span>
-          <span class="sub">Downloader · AI · Islamic · Fun · Group</span>
-        </div>
-      </div>
-      <div class="about-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-        <div>
-          <span class="label">Multi-Session</span>
-          <span class="value">Multiple Numbers at Once</span>
-          <span class="sub">Connect many WhatsApp accounts simultaneously</span>
-        </div>
-      </div>
-      <div class="about-item privacy">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <div>
-          <span class="label">Privacy &amp; Security</span>
-          <span class="value">Your Data is 100% Safe</span>
-          <span class="sub">No chats or media saved · Temp files auto-deleted</span>
-        </div>
+    :root {
+      --bg:        #060911;
+      --surface:   #0c1420;
+      --surface2:  #111d2e;
+      --surface3:  #162236;
+      --border:    #1a2d40;
+      --green:     #25d366;
+      --green2:    #1aaa52;
+      --green-dim: rgba(37,211,102,.12);
+      --green-glow:rgba(37,211,102,.25);
+      --text:      #e2eaf5;
+      --text2:     #8fa3be;
+      --text3:     #3d5470;
+      --red:       #ff4757;
+      --red-dim:   rgba(255,71,87,.12);
+      --yellow:    #ffa502;
+      --yellow-dim:rgba(255,165,2,.12);
+      --blue:      #2196f3;
+      --sidebar-w: 240px;
+      --radius:    14px;
+      --radius-sm: 9px;
+    }
+
+    html, body { height:100%; background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; overflow-x:hidden; }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width:5px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:var(--border); border-radius:99px; }
+
+    /* ═══════════════════════════════════════════════════════
+       LOGIN SCREEN
+    ═══════════════════════════════════════════════════════ */
+    #loginScreen {
+      min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
+      background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(37,211,102,.07) 0%, transparent 70%);
+    }
+    .login-card {
+      background:var(--surface); border:1px solid var(--border); border-radius:20px;
+      padding:44px 40px; width:100%; max-width:400px;
+      box-shadow:0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(37,211,102,.05);
+      animation:fadeIn .35s ease;
+    }
+    .login-logo { display:flex; flex-direction:column; align-items:center; gap:14px; margin-bottom:32px; }
+    .login-logo img { width:68px; height:68px; border-radius:50%; border:2px solid var(--green); box-shadow:0 0 24px var(--green-glow); }
+    .login-logo h1 { font-size:1.45rem; font-weight:700; color:#fff; }
+    .login-logo h1 span { color:var(--green); }
+    .login-logo p { font-size:.82rem; color:var(--text2); }
+    .field { margin-bottom:16px; }
+    .field label { display:block; font-size:.78rem; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:7px; }
+    .field input {
+      width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm);
+      padding:12px 14px; color:var(--text); font-size:.95rem; outline:none; transition:border-color .2s;
+    }
+    .field input:focus { border-color:var(--green); box-shadow:0 0 0 3px var(--green-dim); }
+    .btn-primary {
+      width:100%; background:var(--green); color:#000; font-weight:700; font-size:.97rem;
+      padding:13px; border:none; border-radius:var(--radius-sm); cursor:pointer;
+      transition:transform .15s, box-shadow .15s, background .15s;
+      box-shadow:0 4px 20px var(--green-glow);
+    }
+    .btn-primary:hover { background:#2ee87a; transform:translateY(-1px); box-shadow:0 8px 28px var(--green-glow); }
+    .btn-primary:active { transform:translateY(0); }
+    .btn-primary:disabled { background:#1a4a2e; color:#3a7a52; cursor:not-allowed; transform:none; box-shadow:none; }
+    .login-err { background:var(--red-dim); border:1px solid rgba(255,71,87,.3); border-radius:var(--radius-sm); padding:10px 14px; font-size:.84rem; color:var(--red); margin-bottom:14px; display:none; }
+    .login-warn { background:var(--yellow-dim); border:1px solid rgba(255,165,2,.3); border-radius:var(--radius-sm); padding:10px 14px; font-size:.84rem; color:var(--yellow); margin-bottom:14px; }
+
+    /* ═══════════════════════════════════════════════════════
+       ADMIN APP LAYOUT
+    ═══════════════════════════════════════════════════════ */
+    #app { display:none; height:100vh; overflow:hidden; }
+    #app.visible { display:flex; animation:fadeIn .3s ease; }
+
+    /* Sidebar */
+    #sidebar {
+      width:var(--sidebar-w); min-width:var(--sidebar-w); height:100vh; background:var(--surface);
+      border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden;
+    }
+    .sb-brand { padding:20px 16px 16px; display:flex; align-items:center; gap:11px; border-bottom:1px solid var(--border); }
+    .sb-brand img { width:40px; height:40px; border-radius:50%; border:1.5px solid var(--green); }
+    .sb-brand-text { flex:1; min-width:0; }
+    .sb-brand-name { font-weight:700; font-size:.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sb-brand-ver { font-size:.73rem; color:var(--text2); }
+
+    .sb-nav { flex:1; padding:10px 8px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; }
+    .sb-section { font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text3); padding:14px 10px 6px; }
+    .nav-item {
+      display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:var(--radius-sm);
+      cursor:pointer; font-size:.88rem; font-weight:500; color:var(--text2); transition:all .15s;
+    }
+    .nav-item:hover { background:var(--surface2); color:var(--text); }
+    .nav-item.active { background:var(--green-dim); color:var(--green); }
+    .nav-item svg { width:17px; height:17px; flex-shrink:0; }
+    .nav-badge { margin-left:auto; background:var(--green); color:#000; font-size:.7rem; font-weight:700; padding:2px 7px; border-radius:99px; }
+    .nav-badge.red { background:var(--red); color:#fff; }
+
+    .sb-footer { padding:12px 8px; border-top:1px solid var(--border); }
+    .bot-status { display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--surface2); border-radius:var(--radius-sm); margin-bottom:6px; }
+    .status-dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); flex-shrink:0; animation:pulse 2s infinite; }
+    .status-dot.red { background:var(--red); box-shadow:0 0 6px var(--red); }
+    .status-label { font-size:.8rem; color:var(--text2); flex:1; }
+    .status-uptime { font-size:.73rem; color:var(--text3); }
+    .btn-logout { width:100%; display:flex; align-items:center; justify-content:center; gap:8px; padding:9px; background:transparent; border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text2); font-size:.84rem; cursor:pointer; transition:all .15s; }
+    .btn-logout:hover { border-color:var(--red); color:var(--red); background:var(--red-dim); }
+
+    /* Main content */
+    #main { flex:1; height:100vh; overflow-y:auto; display:flex; flex-direction:column; }
+    .page-header { padding:24px 28px 0; }
+    .page-title { font-size:1.35rem; font-weight:700; color:#fff; }
+    .page-sub { font-size:.84rem; color:var(--text2); margin-top:3px; }
+    .content-area { padding:20px 28px 32px; flex:1; }
+
+    /* ── Pages ── */
+    .page { display:none; }
+    .page.active { display:block; animation:slideIn .2s ease; }
+
+    /* ── Stats grid ── */
+    .stats-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; margin-bottom:22px; }
+    .stat-card {
+      background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+      padding:18px; transition:border-color .2s;
+    }
+    .stat-card:hover { border-color:var(--green); }
+    .stat-icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:12px; }
+    .stat-icon.green { background:var(--green-dim); color:var(--green); }
+    .stat-icon.blue { background:rgba(33,150,243,.12); color:var(--blue); }
+    .stat-icon.yellow { background:var(--yellow-dim); color:var(--yellow); }
+    .stat-icon.red { background:var(--red-dim); color:var(--red); }
+    .stat-icon svg { width:20px; height:20px; }
+    .stat-num { font-size:1.8rem; font-weight:700; color:#fff; line-height:1; }
+    .stat-label { font-size:.78rem; color:var(--text2); margin-top:4px; }
+
+    /* ── Section header ── */
+    .section-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+    .section-title { font-size:1rem; font-weight:600; color:#fff; }
+    .section-meta { font-size:.8rem; color:var(--text2); }
+
+    /* ── Session cards ── */
+    .sessions-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+    .session-card {
+      background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+      padding:18px; transition:all .2s; position:relative; overflow:hidden;
+    }
+    .session-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--green); transform:scaleX(0); transition:transform .2s; }
+    .session-card:hover { border-color:rgba(37,211,102,.3); }
+    .session-card:hover::before { transform:scaleX(1); }
+    .session-card.disconnected { border-color:var(--border); opacity:.7; }
+    .session-card.disconnected::before { background:var(--red); }
+    .sc-top { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+    .sc-avatar {
+      width:44px; height:44px; border-radius:50%; background:var(--green-dim); border:1.5px solid var(--green);
+      display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.05rem; color:var(--green); flex-shrink:0;
+    }
+    .sc-avatar.disconnected { background:var(--red-dim); border-color:var(--red); color:var(--red); }
+    .sc-info { flex:1; min-width:0; }
+    .sc-phone { font-weight:700; font-size:.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sc-name { font-size:.8rem; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+    .sc-badge {
+      display:inline-flex; align-items:center; gap:5px; padding:3px 10px;
+      border-radius:99px; font-size:.73rem; font-weight:600;
+    }
+    .sc-badge.connected { background:var(--green-dim); color:var(--green); }
+    .sc-badge.connecting { background:var(--yellow-dim); color:var(--yellow); }
+    .sc-badge.reconnecting { background:var(--yellow-dim); color:var(--yellow); }
+    .sc-badge.disconnected { background:var(--red-dim); color:var(--red); }
+    .sc-badge-dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+    .sc-meta { display:flex; align-items:center; justify-content:space-between; margin-top:12px; }
+    .sc-time { font-size:.76rem; color:var(--text2); }
+    .btn-disconnect {
+      background:var(--red-dim); color:var(--red); border:1px solid rgba(255,71,87,.25);
+      border-radius:var(--radius-sm); padding:5px 12px; font-size:.78rem; font-weight:600;
+      cursor:pointer; transition:all .15s;
+    }
+    .btn-disconnect:hover { background:var(--red); color:#fff; }
+    .btn-disconnect:disabled { opacity:.4; cursor:not-allowed; }
+    .empty-state { text-align:center; padding:48px 20px; color:var(--text2); }
+    .empty-state svg { width:48px; height:48px; color:var(--text3); margin-bottom:14px; }
+    .empty-state p { font-size:.9rem; }
+
+    /* ── Settings ── */
+    .settings-form { display:grid; gap:22px; max-width:600px; }
+    .settings-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; }
+    .settings-card-title { font-weight:600; font-size:.93rem; margin-bottom:16px; color:#fff; display:flex; align-items:center; gap:8px; }
+    .settings-card-title svg { width:16px; height:16px; color:var(--green); }
+    .setting-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border); }
+    .setting-row:last-child { border-bottom:none; padding-bottom:0; }
+    .setting-label { font-size:.88rem; color:var(--text); }
+    .setting-sub { font-size:.76rem; color:var(--text2); margin-top:2px; }
+
+    /* Toggle */
+    .toggle { position:relative; width:42px; height:23px; flex-shrink:0; }
+    .toggle input { opacity:0; width:0; height:0; position:absolute; }
+    .toggle-slider {
+      position:absolute; inset:0; background:var(--surface3); border-radius:99px; cursor:pointer;
+      transition:background .2s; border:1px solid var(--border);
+    }
+    .toggle-slider::after {
+      content:''; position:absolute; left:3px; top:50%; transform:translateY(-50%);
+      width:15px; height:15px; border-radius:50%; background:var(--text2); transition:all .2s;
+    }
+    .toggle input:checked + .toggle-slider { background:var(--green); border-color:var(--green); }
+    .toggle input:checked + .toggle-slider::after { left:calc(100% - 18px); background:#fff; }
+
+    /* Mode radio */
+    .mode-radios { display:flex; gap:8px; flex-wrap:wrap; }
+    .mode-radio input { display:none; }
+    .mode-radio label {
+      padding:6px 14px; border-radius:var(--radius-sm); border:1px solid var(--border);
+      font-size:.82rem; font-weight:500; cursor:pointer; color:var(--text2); transition:all .15s;
+    }
+    .mode-radio input:checked + label { background:var(--green-dim); border-color:var(--green); color:var(--green); }
+
+    /* Prefix input */
+    .prefix-input { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 12px; color:var(--text); font-size:.9rem; width:100px; outline:none; }
+    .prefix-input:focus { border-color:var(--green); }
+
+    .btn-save {
+      background:var(--green); color:#000; font-weight:700; padding:11px 28px; border:none;
+      border-radius:var(--radius-sm); cursor:pointer; font-size:.9rem; transition:all .15s;
+      box-shadow:0 4px 16px var(--green-glow);
+    }
+    .btn-save:hover { background:#2ee87a; transform:translateY(-1px); }
+    .save-toast { display:none; align-items:center; gap:6px; padding:7px 14px; background:var(--green-dim); border:1px solid rgba(37,211,102,.3); border-radius:var(--radius-sm); font-size:.83rem; color:var(--green); }
+    .save-toast svg { width:15px; height:15px; }
+
+    /* ── Pair tab ── */
+    .pair-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:480px; }
+    .pair-card h3 { font-size:1rem; font-weight:600; margin-bottom:6px; }
+    .pair-card p { font-size:.84rem; color:var(--text2); margin-bottom:18px; }
+    .pair-form { display:flex; flex-direction:column; gap:12px; }
+    .pair-input {
+      background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm);
+      padding:11px 14px; color:var(--text); font-size:.93rem; outline:none; transition:border-color .2s;
+    }
+    .pair-input:focus { border-color:var(--green); }
+    .pair-code-box {
+      background:var(--surface2); border:1px solid rgba(37,211,102,.3); border-radius:var(--radius);
+      padding:20px; text-align:center; margin-top:14px; display:none;
+    }
+    .pair-code { font-size:2.2rem; font-weight:700; letter-spacing:.15em; color:var(--green); font-family:monospace; }
+    .pair-code-sub { font-size:.8rem; color:var(--text2); margin-top:6px; }
+
+    /* ── Category pills ── */
+    .cat-grid { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    .cat-pill { background:var(--surface2); border:1px solid var(--border); border-radius:99px; padding:4px 12px; font-size:.78rem; color:var(--text2); display:flex; align-items:center; gap:5px; }
+    .cat-pill strong { color:var(--text); }
+
+    /* ── Animations ── */
+    @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+    @keyframes slideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    .spinner { width:18px; height:18px; border:2px solid rgba(255,255,255,.2); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; display:inline-block; }
+
+    /* ── Mobile ── */
+    .sb-toggle { display:none; }
+    @media (max-width: 700px) {
+      #sidebar { position:fixed; left:-100%; top:0; bottom:0; z-index:100; transition:left .25s; box-shadow:4px 0 20px rgba(0,0,0,.6); }
+      #sidebar.open { left:0; }
+      .sb-toggle { display:flex; align-items:center; justify-content:center; width:38px; height:38px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; flex-shrink:0; }
+      .sb-toggle svg { width:20px; height:20px; }
+      .sb-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:99; }
+      .sb-overlay.visible { display:block; }
+      #main { width:100%; }
+      .page-header { padding:16px 16px 0; display:flex; align-items:center; gap:12px; }
+      .content-area { padding:16px 16px 32px; }
+      .stats-grid { grid-template-columns:1fr 1fr; }
+      .sessions-grid { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ LOGIN ═══ -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="/logo.webp" alt="AA MD Bot" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><circle cx=%2220%22 cy=%2220%22 r=%2220%22 fill=%22%230d1421%22/><text x=%2250%%25%22 y=%2256%%25%22 text-anchor=%22middle%22 font-size=%2218%22 fill=%22%2325d366%22>🤖</text></svg>'"/>
+      <div style="text-align:center">
+        <h1>AA MD <span>Bot</span></h1>
+        <p>Admin Panel — Secure Access</p>
       </div>
     </div>
-  </body>
+    <div id="loginWarn" class="login-warn" style="display:none"></div>
+    <div id="loginErr" class="login-err"></div>
+    <form onsubmit="doLogin();return false;">
+      <div class="field">
+        <label>Admin Password</label>
+        <input type="password" id="pwInput" placeholder="Enter your ADMIN_PASSWORD" autocomplete="current-password"/>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">
+        <span id="loginBtnText">Sign In</span>
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ APP ═══ -->
+<div id="app">
+  <div id="sbOverlay" class="sb-overlay" onclick="closeSidebar()"></div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sb-brand">
+      <img src="/logo.webp" alt="Bot" onerror="this.style.display='none'"/>
+      <div class="sb-brand-text">
+        <div class="sb-brand-name" id="sbBotName">AA MD Bot</div>
+        <div class="sb-brand-ver" id="sbVer">v3.0.0</div>
+      </div>
+    </div>
+
+    <nav class="sb-nav">
+      <div class="sb-section">Main</div>
+      <div class="nav-item active" data-page="overview" onclick="showPage('overview',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Overview
+      </div>
+      <div class="nav-item" data-page="sessions" onclick="showPage('sessions',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Sessions
+        <span class="nav-badge" id="sessionBadge">0</span>
+      </div>
+
+      <div class="sb-section">Bot</div>
+      <div class="nav-item" data-page="settings" onclick="showPage('settings',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/></svg>
+        Settings
+      </div>
+      <div class="nav-item" data-page="pair" onclick="showPage('pair',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        Add Number
+      </div>
+    </nav>
+
+    <div class="sb-footer">
+      <div class="bot-status">
+        <div class="status-dot" id="botStatusDot"></div>
+        <div class="flex-col" style="flex:1;min-width:0">
+          <div class="status-label" id="botStatusLabel">Online</div>
+          <div class="status-uptime" id="uptimeTicker">—</div>
+        </div>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Logout
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main id="main">
+    <div class="page-header">
+      <button class="sb-toggle" onclick="openSidebar()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div>
+        <div class="page-title" id="pageTitle">Overview</div>
+        <div class="page-sub" id="pageSub">Welcome to AA MD Bot Admin Panel</div>
+      </div>
+    </div>
+    <div class="content-area">
+
+      <!-- ── OVERVIEW ── -->
+      <div class="page active" id="page-overview">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+            <div class="stat-num" id="ovConnected">—</div>
+            <div class="stat-label">Connected Numbers</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+            <div class="stat-num" id="ovPlugins">—</div>
+            <div class="stat-label">Active Plugins</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon yellow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
+            <div class="stat-num" id="ovRam">—</div>
+            <div class="stat-label">RAM Used (MB)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+            <div class="stat-num" id="ovUptime" style="font-size:1.1rem">—</div>
+            <div class="stat-label">Uptime</div>
+          </div>
+        </div>
+
+        <div class="section-hdr">
+          <div class="section-title">Plugin Categories</div>
+          <div class="section-meta" id="ovTotalPlugins"></div>
+        </div>
+        <div class="cat-grid" id="ovCats"></div>
+
+        <div class="section-hdr" style="margin-top:24px">
+          <div class="section-title">Connected Sessions</div>
+          <div class="section-meta" id="ovSessionMeta"></div>
+        </div>
+        <div class="sessions-grid" id="ovSessions"></div>
+      </div>
+
+      <!-- ── SESSIONS ── -->
+      <div class="page" id="page-sessions">
+        <div class="section-hdr" style="margin-bottom:16px">
+          <div class="section-meta" id="sessionsSubtitle" style="font-size:.84rem;color:var(--text2)">Loading…</div>
+          <button class="btn-save" style="padding:7px 16px;font-size:.82rem" onclick="refreshSessions()">↻ Refresh</button>
+        </div>
+        <div class="sessions-grid" id="sessionsGrid"></div>
+      </div>
+
+      <!-- ── SETTINGS ── -->
+      <div class="page" id="page-settings">
+        <div class="settings-form">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+            <div id="saveToast" class="save-toast">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Settings saved!
+            </div>
+            <button class="btn-save" onclick="saveSettings()">Save Changes</button>
+          </div>
+
+          <!-- Bot Behavior -->
+          <div class="settings-card">
+            <div class="settings-card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+              Bot Behavior
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Command Prefix</div><div class="setting-sub">Character to trigger commands (e.g. .menu)</div></div>
+              <input class="prefix-input" id="setPrefixInput" value="." maxlength="3"/>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Bot Mode</div><div class="setting-sub">Who can use the bot</div></div>
+              <div class="mode-radios">
+                <label class="mode-radio"><input type="radio" name="botMode" value="public" id="modePub"/><label for="modePub">Public</label></label>
+                <label class="mode-radio"><input type="radio" name="botMode" value="self" id="modeSelf"/><label for="modeSelf">Self</label></label>
+                <label class="mode-radio"><input type="radio" name="botMode" value="group" id="modeGrp"/><label for="modeGrp">Group</label></label>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Maintenance Mode</div><div class="setting-sub">Block all commands temporarily</div></div>
+              <label class="toggle"><input type="checkbox" id="setMaintenance"/><span class="toggle-slider"></span></label>
+            </div>
+          </div>
+
+          <!-- Auto Features -->
+          <div class="settings-card">
+            <div class="settings-card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Auto Features
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Auto Read</div><div class="setting-sub">Automatically mark messages as read</div></div>
+              <label class="toggle"><input type="checkbox" id="setAutoRead"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Auto Typing</div><div class="setting-sub">Show typing indicator while processing</div></div>
+              <label class="toggle"><input type="checkbox" id="setAutoTyping"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Auto Status View</div><div class="setting-sub">Automatically view WhatsApp statuses</div></div>
+              <label class="toggle"><input type="checkbox" id="setAutoStatusView"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Auto Status React</div><div class="setting-sub">Auto-react to statuses with emoji</div></div>
+              <label class="toggle"><input type="checkbox" id="setAutoStatusReact"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Welcome Message</div><div class="setting-sub">Send welcome when new members join</div></div>
+              <label class="toggle"><input type="checkbox" id="setWelcome"/><span class="toggle-slider"></span></label>
+            </div>
+          </div>
+
+          <!-- Protection -->
+          <div class="settings-card">
+            <div class="settings-card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Protection
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Anti-Spam</div><div class="setting-sub">Ignore users sending commands too fast</div></div>
+              <label class="toggle"><input type="checkbox" id="setAntiSpam"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Status Emoji</div><div class="setting-sub">Emoji used for auto status reactions</div></div>
+              <input class="prefix-input" id="setStatusEmoji" value="❤️" style="width:80px;text-align:center;font-size:1.2rem"/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PAIR ── -->
+      <div class="page" id="page-pair">
+        <div class="pair-card">
+          <h3>Add WhatsApp Number</h3>
+          <p>Enter a phone number with country code to connect it to the bot via pairing code.</p>
+          <div class="pair-form">
+            <input class="pair-input" id="pairSessionId" placeholder="Session ID (e.g. 923001234567)" />
+            <input class="pair-input" id="pairPhone" placeholder="Phone number (e.g. 923001234567)" />
+            <button class="btn-primary" id="pairBtn" onclick="doPair()" style="width:auto;padding:11px 24px">
+              <span id="pairBtnText">Get Pairing Code</span>
+            </button>
+          </div>
+          <div class="pair-code-box" id="pairCodeBox">
+            <div class="pair-code" id="pairCodeVal"></div>
+            <div class="pair-code-sub">Enter this code in WhatsApp → Settings → Linked Devices → Link with phone number</div>
+          </div>
+          <div id="pairErr" style="margin-top:12px;font-size:.84rem;color:var(--red);display:none"></div>
+        </div>
+
+        <div style="margin-top:24px">
+          <div class="section-hdr">
+            <div class="section-title">All Sessions</div>
+          </div>
+          <div class="sessions-grid" id="pairSessions"></div>
+        </div>
+      </div>
+
+    </div><!-- /content-area -->
+  </main>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════════
+let _sessions = [];
+let _stats    = {};
+let _settings = {};
+let _startMs  = 0;
+let _uptimeInterval = null;
+let _sseSource = null;
+
+const PAGE_META = {
+  overview: ['Overview', 'Bot stats and connected sessions at a glance'],
+  sessions: ['Sessions', 'Manage all connected WhatsApp numbers'],
+  settings: ['Settings', 'Configure bot behavior and features'],
+  pair:     ['Add Number', 'Connect a new WhatsApp number via pairing code'],
+};
+
+// ══════════════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('pwInput').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+  const r = await fetch('/auth/check').then(r=>r.json()).catch(()=>({ok:false,passwordSet:true}));
+  if (!r.passwordSet) {
+    const w = document.getElementById('loginWarn');
+    w.textContent = '⚠️ ADMIN_PASSWORD is not set. Add it to your .env or Replit Secrets to secure the panel.';
+    w.style.display = 'block';
+  }
+  if (r.ok) { showApp(); } else { document.getElementById('loginScreen').style.display='flex'; }
+});
+
+// ══════════════════════════════════════════════════════════════
+//  AUTH
+// ══════════════════════════════════════════════════════════════
+async function doLogin() {
+  const btn = document.getElementById('loginBtn');
+  const txt = document.getElementById('loginBtnText');
+  const err = document.getElementById('loginErr');
+  const pw  = document.getElementById('pwInput').value;
+  if (!pw) { showErr(err,'Password cannot be empty'); return; }
+  err.style.display='none';
+  txt.innerHTML = '<span class="spinner"></span>';
+  btn.disabled = true;
+  const r = await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  if (r.ok) { showApp(); }
+  else { showErr(err, r.error||'Login failed'); txt.textContent='Sign In'; btn.disabled=false; }
+}
+
+async function doLogout() {
+  await fetch('/auth/logout');
+  location.reload();
+}
+
+function showErr(el,msg) { el.textContent=msg; el.style.display='block'; }
+
+// ══════════════════════════════════════════════════════════════
+//  APP
+// ══════════════════════════════════════════════════════════════
+async function showApp() {
+  document.getElementById('loginScreen').style.display='none';
+  const app = document.getElementById('app');
+  app.style.display='flex';
+  app.classList.add('visible');
+  await loadAll();
+  connectSSE();
+  startUptimeTicker();
+}
+
+async function loadAll() {
+  await Promise.all([loadStats(), loadSessions(), loadSettings()]);
+  renderOverview();
+}
+
+async function loadStats() {
+  try {
+    const d = await fetch('/admin/stats').then(r=>r.json());
+    _stats = d;
+    _startMs = Date.now() - (d.uptimeMs||0);
+    document.getElementById('sbBotName').textContent = d.botName||'AA MD Bot';
+    document.getElementById('sbVer').textContent = 'v'+(d.version||'3.0.0');
+  } catch {}
+}
+
+async function loadSessions() {
+  try {
+    const d = await fetch('/admin/sessions').then(r=>r.json());
+    _sessions = d.sessions||[];
+    const connected = _sessions.filter(s=>s.status==='connected').length;
+    document.getElementById('sessionBadge').textContent = connected;
+    document.getElementById('sessionBadge').className = 'nav-badge' + (connected===0?' red':'');
+  } catch {}
+}
+
+async function loadSettings() {
+  try {
+    const d = await fetch('/admin/settings').then(r=>r.json());
+    _settings = d;
+    applySettingsToForm(d);
+  } catch {}
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SSE — real-time updates
+// ══════════════════════════════════════════════════════════════
+function connectSSE() {
+  if (_sseSource) _sseSource.close();
+  _sseSource = new EventSource('/events');
+  _sseSource.addEventListener('status', e => {
+    const {sessionId, status} = JSON.parse(e.data);
+    const idx = _sessions.findIndex(s=>s.id===sessionId);
+    if (idx>=0) _sessions[idx].status = status;
+    else _sessions.push({id:sessionId,phone:sessionId,status});
+    const connected = _sessions.filter(s=>s.status==='connected').length;
+    document.getElementById('sessionBadge').textContent = connected;
+    document.getElementById('sessionBadge').className = 'nav-badge'+(connected===0?' red':'');
+    document.getElementById('ovConnected').textContent = connected;
+    renderSessionCard(sessionId);
+    if (document.getElementById('page-sessions').classList.contains('active')) renderSessions();
+    if (document.getElementById('page-overview').classList.contains('active')) renderOverviewSessions();
+  });
+  _sseSource.addEventListener('pairingCode', e => {
+    const {sessionId,code} = JSON.parse(e.data);
+    if (document.getElementById('page-pair').classList.contains('active')) {
+      document.getElementById('pairCodeVal').textContent = code;
+      document.getElementById('pairCodeBox').style.display='block';
+    }
+  });
+  _sseSource.onerror = () => { setTimeout(connectSSE, 5000); };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════════════════════════
+function renderOverview() {
+  const connected = _sessions.filter(s=>s.status==='connected').length;
+  document.getElementById('ovConnected').textContent = connected;
+  document.getElementById('ovPlugins').textContent   = _stats.plugins||0;
+  document.getElementById('ovRam').textContent       = _stats.ram||0;
+  document.getElementById('ovUptime').textContent    = _stats.uptime||'—';
+  document.getElementById('ovTotalPlugins').textContent = `${_stats.plugins||0} total`;
+
+  // Category pills
+  const catsEl = document.getElementById('ovCats');
+  catsEl.innerHTML = '';
+  for (const [cat,count] of Object.entries(_stats.categories||{})) {
+    const pill = document.createElement('div');
+    pill.className='cat-pill';
+    pill.innerHTML=`<strong>${count}</strong> ${cat}`;
+    catsEl.appendChild(pill);
+  }
+
+  renderOverviewSessions();
+}
+
+function renderOverviewSessions() {
+  const connected = _sessions.filter(s=>s.status==='connected');
+  const el = document.getElementById('ovSessions');
+  document.getElementById('ovSessionMeta').textContent = `${connected.length} of ${_sessions.length} online`;
+  if (!connected.length) {
+    el.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>No numbers connected yet.<br/>Use <em>Add Number</em> to pair your first number.</p></div>';
+    return;
+  }
+  el.innerHTML = connected.map(s=>sessionCardHTML(s)).join('');
+}
+
+function renderSessions() {
+  const el = document.getElementById('sessionsGrid');
+  document.getElementById('sessionsSubtitle').textContent = `${_sessions.filter(s=>s.status==='connected').length} connected · ${_sessions.length} total`;
+  if (!_sessions.length) {
+    el.innerHTML='<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>No sessions found. Add a number to get started.</p></div>';
+    return;
+  }
+  el.innerHTML = _sessions.map(s=>sessionCardHTML(s)).join('');
+}
+
+function renderSessionCard(sessionId) {
+  const s = _sessions.find(x=>x.id===sessionId);
+  if (!s) return;
+  // update in-place in overview and sessions grids
+  ['ovSessions','sessionsGrid','pairSessions'].forEach(gridId=>{
+    const grid=document.getElementById(gridId);
+    const existing=grid.querySelector(`[data-session="${s.id}"]`);
+    if (existing) existing.outerHTML = sessionCardHTML(s);
+  });
+}
+
+function sessionCardHTML(s) {
+  const isConnected = s.status==='connected';
+  const initials = (s.phone||s.id||'?').replace(/\D/g,'').slice(-2)||'??';
+  const phoneDisplay = s.phone ? '+'+s.phone : s.id;
+  const name = s.name||'WhatsApp';
+  const time = s.connectedAt ? timeSince(s.connectedAt) : '—';
+  const badgeClass = isConnected?'connected': (s.status==='connecting'||s.status==='reconnecting'?'reconnecting':'disconnected');
+  const avatarClass = isConnected?'':'disconnected';
+  return `<div class="session-card ${isConnected?'':'disconnected'}" data-session="${s.id}">
+    <div class="sc-top">
+      <div class="sc-avatar ${avatarClass}">${initials}</div>
+      <div class="sc-info">
+        <div class="sc-phone">${phoneDisplay}</div>
+        <div class="sc-name">${escHtml(name)}</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="sc-badge ${badgeClass}"><span class="sc-badge-dot"></span>${s.status||'unknown'}</span>
+      ${s.id?`<span style="font-size:.72rem;color:var(--text3);font-family:monospace">${escHtml(s.id)}</span>`:''}
+    </div>
+    <div class="sc-meta">
+      <span class="sc-time">${isConnected?'Connected '+time:s.status}</span>
+      <button class="btn-disconnect" onclick="disconnectSession('${escHtml(s.id)}')" ${!isConnected?'disabled':''}>Disconnect</button>
+    </div>
+  </div>`;
+}
+
+function renderPairSessions() {
+  const el = document.getElementById('pairSessions');
+  if (!_sessions.length) { el.innerHTML='<div style="color:var(--text2);font-size:.85rem">No sessions yet.</div>'; return; }
+  el.innerHTML = _sessions.map(s=>sessionCardHTML(s)).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SETTINGS
+// ══════════════════════════════════════════════════════════════
+function applySettingsToForm(d) {
+  const prefix = Array.isArray(d.prefix)?d.prefix[0]:(d.prefix||'.');
+  document.getElementById('setPrefixInput').value = prefix;
+  const mode = d.botMode||'public';
+  const modeInput = document.querySelector(`input[name="botMode"][value="${mode}"]`);
+  if (modeInput) modeInput.checked=true;
+  document.getElementById('setMaintenance').checked  = !!d.maintenanceMode;
+  document.getElementById('setAutoRead').checked     = !!d.autoRead;
+  document.getElementById('setAutoTyping').checked   = !!d.autoTyping;
+  document.getElementById('setAutoStatusView').checked  = !!d.autoStatusView;
+  document.getElementById('setAutoStatusReact').checked = !!d.autoStatusReact;
+  document.getElementById('setWelcome').checked      = !!d.welcomeMessage;
+  document.getElementById('setAntiSpam').checked     = !!d.antiSpam;
+  document.getElementById('setStatusEmoji').value    = d.statusEmoji||'❤️';
+}
+
+async function saveSettings() {
+  const prefix = document.getElementById('setPrefixInput').value||'.';
+  const mode   = document.querySelector('input[name="botMode"]:checked')?.value||'public';
+  const body = {
+    prefix:          [prefix],
+    botMode:         mode,
+    maintenanceMode: document.getElementById('setMaintenance').checked,
+    autoRead:        document.getElementById('setAutoRead').checked,
+    autoTyping:      document.getElementById('setAutoTyping').checked,
+    autoStatusView:  document.getElementById('setAutoStatusView').checked,
+    autoStatusReact: document.getElementById('setAutoStatusReact').checked,
+    welcomeMessage:  document.getElementById('setWelcome').checked,
+    antiSpam:        document.getElementById('setAntiSpam').checked,
+    statusEmoji:     document.getElementById('setStatusEmoji').value||'❤️',
+  };
+  const r = await fetch('/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>({ok:false}));
+  const toast = document.getElementById('saveToast');
+  if (r.ok) { toast.style.display='inline-flex'; setTimeout(()=>toast.style.display='none',3000); }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SESSIONS ACTIONS
+// ══════════════════════════════════════════════════════════════
+async function disconnectSession(id) {
+  if (!confirm(`Disconnect +${id}?\n\nThis will remove this number from the bot. You can re-add it later.`)) return;
+  const r = await fetch(`/admin/session/${encodeURIComponent(id)}`,{method:'DELETE'}).then(r=>r.json()).catch(()=>({ok:false}));
+  if (r.ok) { _sessions = _sessions.filter(s=>s.id!==id); renderSessions(); renderOverviewSessions(); renderPairSessions(); }
+  else alert('Failed to disconnect: '+(r.error||'Unknown error'));
+}
+
+async function refreshSessions() {
+  await loadSessions();
+  renderSessions();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PAIR
+// ══════════════════════════════════════════════════════════════
+async function doPair() {
+  const btn      = document.getElementById('pairBtn');
+  const btnTxt   = document.getElementById('pairBtnText');
+  const phone    = document.getElementById('pairPhone').value.trim().replace(/\D/g,'');
+  const sid      = document.getElementById('pairSessionId').value.trim() || phone;
+  const errEl    = document.getElementById('pairErr');
+  errEl.style.display='none';
+  document.getElementById('pairCodeBox').style.display='none';
+  if (!phone || phone.length<7) { errEl.textContent='Please enter a valid phone number'; errEl.style.display='block'; return; }
+  btnTxt.innerHTML='<span class="spinner"></span> Getting code…';
+  btn.disabled=true;
+  const r = await fetch('/session/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,method:'pairing',phoneNumber:phone})}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  btnTxt.textContent='Get Pairing Code';
+  btn.disabled=false;
+  if (!r.ok) { errEl.textContent=r.error||'Failed to create session'; errEl.style.display='block'; }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  NAVIGATION
+// ══════════════════════════════════════════════════════════════
+function showPage(name, el) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  if (el) el.classList.add('active');
+  const meta = PAGE_META[name]||[name,''];
+  document.getElementById('pageTitle').textContent = meta[0];
+  document.getElementById('pageSub').textContent   = meta[1];
+  if (name==='sessions') renderSessions();
+  if (name==='pair')     renderPairSessions();
+  if (name==='overview') renderOverview();
+  closeSidebar();
+}
+
+function openSidebar()  { document.getElementById('sidebar').classList.add('open'); document.getElementById('sbOverlay').classList.add('visible'); }
+function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sbOverlay').classList.remove('visible'); }
+
+// ══════════════════════════════════════════════════════════════
+//  UPTIME TICKER
+// ══════════════════════════════════════════════════════════════
+function startUptimeTicker() {
+  if (_uptimeInterval) clearInterval(_uptimeInterval);
+  _uptimeInterval = setInterval(()=>{
+    if (!_startMs) return;
+    const ms = Date.now()-_startMs;
+    document.getElementById('uptimeTicker').textContent = fmtDuration(ms);
+    document.getElementById('ovUptime').textContent = fmtDuration(ms);
+  }, 1000);
+}
+
+function fmtDuration(ms) {
+  const s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60), d=Math.floor(h/24);
+  if (d>0) return `${d}d ${h%24}h ${m%60}m`;
+  if (h>0) return `${h}h ${m%60}m ${s%60}s`;
+  if (m>0) return `${m}m ${s%60}s`;
+  return `${s}s`;
+}
+
+function timeSince(ts) {
+  const ms = Date.now()-ts, s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60), d=Math.floor(h/24);
+  if (d>0) return `${d}d ago`;
+  if (h>0) return `${h}h ago`;
+  if (m>0) return `${m}m ago`;
+  return 'just now';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  UTILS
+// ══════════════════════════════════════════════════════════════
+function escHtml(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
 </html>

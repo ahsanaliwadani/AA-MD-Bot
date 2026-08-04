@@ -19,3 +19,4 @@
 - [SuperOwnerOnly scope](per-session-settings.md) — devices/adddevice/deldevice/setprefix/mode/anticall/antispam/autoreact + all tools plugins are superOwnerOnly.
 - [Oracle deployment reruns](oracle-deploy-reruns.md) — preserve the local MongoDB password, replace only placeholders, and stop before HTTPS when port 5000 is unhealthy.
 - [DC AI & stalk endpoints](dc-ai-endpoints.md) — working: /ai/gemini-3-pro, /ai/gpt-5, /ai/grok-4.1-fast (all use ?prompt=, return {data}); /stalk/wa?url=; /flux binary; /animagine cdn_url. Broken: claude, epicrealism, fluxv2.
+- [Admin panel auth](admin-panel-auth.md) — dashboard is now a password-gated SPA; ADMIN_PASSWORD env var required; cookie-based HMAC token; /auth/login, /auth/check, /auth/logout endpoints added to index.js.

@@ -19,6 +19,7 @@ for (const p of extraPaths) {
 
 import http from 'http';
 import zlib from 'zlib';
+import crypto from 'crypto';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -30,7 +31,7 @@ import { loadAllPlugins, getCategories, plugins } from './lib/pluginLoader.js';
 import { handleMessage } from './lib/commandHandler.js';
 import {
   initAllSessions, setMessageHandler, setConnectionHandler, sessions,
-  getAllSessions, botEvents, sessionQRs, sessionStatus,
+  getAllSessions, botEvents, sessionQRs, sessionStatus, sessionInfo,
   createSession, deleteSession,
 } from './lib/sessionManager.js';
 import config from './config.js';
@@ -76,6 +77,26 @@ botEvents.on('pairingCodeError', d => broadcast('pairingCodeError', d));
 
 // Helper: strip /api prefix
 function stripApi(p) { return p.replace(/^\/api/, '') || '/'; }
+
+// ── Admin Auth ─────────────────────────────────────────────────────────────
+const ADMIN_PASS = process.env.ADMIN_PASSWORD || '';
+const _AUTH_SECRET = process.env.SESSION_SECRET || 'aa-md-bot-admin-key';
+
+function _makeToken() {
+  return crypto.createHmac('sha256', _AUTH_SECRET).update(ADMIN_PASS).digest('hex');
+}
+function _parseCookies(req) {
+  const out = {};
+  (req.headers.cookie || '').split(';').forEach(c => {
+    const idx = c.indexOf('=');
+    if (idx > 0) out[c.slice(0, idx).trim()] = c.slice(idx + 1).trim();
+  });
+  return out;
+}
+function _isAdmin(req) {
+  if (!ADMIN_PASS) return false;
+  return _parseCookies(req).adminToken === _makeToken();
+}
 
 function printBanner() {
   console.log(chalk.cyan.bold(`
@@ -291,6 +312,139 @@ async function startServer() {
     if (delMatch && req.method === 'DELETE') {
       try {
         await deleteSession(delMatch[1]);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    // ── Auth: login ────────────────────────────────────────
+    if (p === '/auth/login' && req.method === 'POST') {
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', () => {
+        try {
+          const { password } = JSON.parse(body || '{}');
+          if (!ADMIN_PASS) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ ok: false, error: 'ADMIN_PASSWORD not set in .env or Secrets' }));
+          }
+          if (password !== ADMIN_PASS) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ ok: false, error: 'Incorrect password' }));
+          }
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Set-Cookie': `adminToken=${_makeToken()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`,
+          });
+          res.end(JSON.stringify({ ok: true }));
+        } catch { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: 'Bad request' })); }
+      });
+      return;
+    }
+
+    // ── Auth: check ────────────────────────────────────────
+    if (p === '/auth/check') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: _isAdmin(req), passwordSet: !!ADMIN_PASS }));
+      return;
+    }
+
+    // ── Auth: logout ────────────────────────────────────────
+    if (p === '/auth/logout') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': 'adminToken=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
+      });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    // ── Admin: sessions list ────────────────────────────────
+    if (p === '/admin/sessions') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      const all = getAllSessions();
+      const result = all.map(s => ({
+        id:          s.id,
+        phone:       s.phone || s.id,
+        name:        s.name  || null,
+        status:      s.status,
+        connectedAt: s.connectedAt || null,
+        jid:         s.jid   || null,
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ sessions: result, total: result.length, connected: result.filter(s => s.status === 'connected').length }));
+      return;
+    }
+
+    // ── Admin: detailed stats ────────────────────────────────
+    if (p === '/admin/stats') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      const cats = getCategories();
+      const catCounts = {};
+      for (const [cat, cmds] of Object.entries(cats)) catCounts[cat] = cmds.length;
+      const mem = process.memoryUsage();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        uptime:     formatDuration(Date.now() - startTime),
+        uptimeMs:   Date.now() - startTime,
+        plugins:    plugins.size,
+        groups:     Object.keys(db.groups.all()).length,
+        categories: catCounts,
+        ram:        Math.round(mem.heapUsed  / 1024 / 1024),
+        ramTotal:   Math.round(mem.heapTotal / 1024 / 1024),
+        version:    config.version,
+        botName:    config.botName,
+      }));
+      return;
+    }
+
+    // ── Admin: get settings ──────────────────────────────────
+    if (p === '/admin/settings' && req.method === 'GET') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      const sv = k => db.settings.getValue(k);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        prefix:          sv('prefix')          ?? config.prefix          ?? ['.'],
+        botMode:         sv('botMode')         ?? config.botMode         ?? 'public',
+        autoRead:        sv('autoRead')        ?? config.autoRead        ?? true,
+        autoTyping:      sv('autoTyping')      ?? config.autoTyping      ?? true,
+        autoStatusView:  sv('autoStatusView')  ?? config.autoStatusView  ?? true,
+        autoStatusReact: sv('autoStatusReact') ?? config.autoStatusReact ?? true,
+        antiSpam:        sv('antiSpam')        ?? config.antiSpam        ?? true,
+        maintenanceMode: sv('maintenanceMode') ?? config.maintenanceMode ?? false,
+        statusEmoji:     sv('statusEmoji')     ?? config.statusEmoji     ?? '❤️',
+        welcomeMessage:  sv('welcomeMessage')  ?? config.welcomeMessage  ?? true,
+      }));
+      return;
+    }
+
+    // ── Admin: save settings ─────────────────────────────────
+    if (p === '/admin/settings' && req.method === 'POST') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body || '{}');
+          const allowed = ['prefix','botMode','autoRead','autoTyping','autoStatusView','autoStatusReact','antiSpam','maintenanceMode','statusEmoji','welcomeMessage'];
+          for (const key of allowed) { if (key in data) db.settings.setValue(key, data[key]); }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: 'Bad request' })); }
+      });
+      return;
+    }
+
+    // ── Admin: disconnect session ────────────────────────────
+    const admDel = p.match(/^\/admin\/session\/([^/]+)$/);
+    if (admDel && req.method === 'DELETE') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      try {
+        await deleteSession(admDel[1]);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (err) {
