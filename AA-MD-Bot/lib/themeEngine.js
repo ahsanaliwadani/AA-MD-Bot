@@ -30,7 +30,19 @@ export async function initThemes() {
     try {
       const mod = await import(pathToFileURL(path.join(THEMES_DIR, file)).href);
       const theme = mod.default || mod;
-      if (theme?.name) _cache.set(theme.name.toLowerCase(), theme);
+      if (!theme?.name) return;
+
+      // ── Auto-spacer: adds one blank line between every command in all themes ──
+      // Themes opt out by setting  cmdSpacer: ''  (e.g. default, which has its
+      // own built-in │\n spacer already).  All other themes get '\n' appended
+      // after each cmdRow so commands are clearly separated in every theme.
+      if (typeof theme.cmdRow === 'function' && theme.cmdSpacer !== '') {
+        const _orig   = theme.cmdRow.bind(theme);
+        const _spacer = theme.cmdSpacer ?? '\n';
+        theme.cmdRow  = (prefix, cmd, desc) => _orig(prefix, cmd, desc) + _spacer;
+      }
+
+      _cache.set(theme.name.toLowerCase(), theme);
     } catch (e) {
       console.error(`[ThemeEngine] Failed to load ${file}:`, e.message);
     }

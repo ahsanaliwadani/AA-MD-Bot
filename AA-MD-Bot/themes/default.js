@@ -8,6 +8,7 @@ export default {
   preview:     '╭── 🤖 AA MD BOT ──╮',
   emojiSet:    { bullet: '▸', check: '✅', warn: '⚠️' },
   colors:      { primary: '#25D366', secondary: '#128C7E' },
+  cmdSpacer:   '',  // already has │\n spacer built into cmdRow — no extra blank needed
 
   header: (bot, dev) =>
     `╭─────────────────────────────╮\n` +
