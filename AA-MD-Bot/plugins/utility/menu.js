@@ -273,10 +273,6 @@ function buildNewSection(pref, theme) {
     C("habit",       "Habit tracker"),
     C("geoip",       "IP geolocation lookup"),
     C("vcard",       "Generate contact vCard"),
-    L(""),
-    L("🔞 *Adult (18+ — self-chat only)*"),
-    C("xv <search>",    "XVideos search & download"),
-    C("asian <keyword>","Asian content preview"),
   ];
 
   return theme.sectionBox("🆕", "NEW & UPDATED COMMANDS", lines.length, lines);
@@ -316,13 +312,6 @@ function buildFunExtras(pref, theme) {
     C("ppboy",     "Random anime boy PP"),
     C("ppgirl",    "Random anime girl PP"),
     L(`_Aliases: ${pref}ppcp  ${pref}couplepp  ${pref}animepic_`),
-  ]);
-
-  // Adult
-  out += theme.sectionBox("🔞", "ADULT CONTENT  (18+)", 2, [
-    C("xv <search>",     "Search & download XVideos video"),
-    C("asian <keyword>", "Asian content preview clip"),
-    L("_⚠️ Adults only. Use responsibly._"),
   ]);
 
   return out;

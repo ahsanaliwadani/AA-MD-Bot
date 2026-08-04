@@ -60,9 +60,6 @@ export default {
       `╰${'─'.repeat(34)}\n\n` +
 
       `╭─── 💾  *SAVE & DOWNLOAD*\n` +
-      `│  ▸ *${p}statussave* (forward a status)\n` +
-      `│     Save anyone's status\n` +
-      `│\n` +
       `│  ▸ *${p}pp <number>*\n` +
       `│     View anyone's full profile picture\n` +
       `│     Example: ${p}pp 923001234567\n` +
@@ -81,9 +78,6 @@ export default {
       `│\n` +
       `│  ▸ *${p}autoread on/off*\n` +
       `│     Silently read all messages\n` +
-      `│\n` +
-      `│  ▸ *${p}autostatusseen on/off*\n` +
-      `│     Auto-view all statuses\n` +
       `╰${'─'.repeat(34)}\n\n` +
 
       `╭─── 📅  *MESSAGING TOOLS*\n` +

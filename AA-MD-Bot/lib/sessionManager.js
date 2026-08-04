@@ -77,22 +77,6 @@ export const sessionStatus = new Map();
 // Persist last-known session info so dashboard stays stable during reconnects
 export const sessionInfo = new Map();
 
-// ── Status Collection — per session status saver ──────────────────────────────
-// statusCollections: Map<sessionId, Map<msgId, StatusEntry>>
-// StatusEntry: { id, senderJid, senderNum, pushName, buffer, mimetype,
-//               text, isVideo, isAudio, time, msgKey }
-export const statusCollections = new Map();
-const STATUS_COLL_MAX = 100; // keep last 100 statuses per session
-
-export function getStatusCollection(sessionId = 'default') {
-  if (!statusCollections.has(sessionId)) statusCollections.set(sessionId, new Map());
-  return statusCollections.get(sessionId);
-}
-
-export function clearStatusCollection(sessionId = 'default') {
-  statusCollections.set(sessionId, new Map());
-}
-
 // Track reconnect attempts per session for exponential backoff
 const reconnectAttempts = new Map();
 // Track when each session last became stably connected (>30s = stable, reset counter)
@@ -137,9 +121,7 @@ async function handleStatusMessage(sock, msg, sessionId, statusMediaMap) {
       }).catch(() => {});
     }
 
-    // 3) Eagerly download & buffer status media
-    //    a) Into statusMediaMap for antideletestatus (only if that feature is on)
-    //    b) Into statusCollections ALWAYS when statusSave is on (for .statussave command)
+    // 3) Eagerly download & buffer status media for antideletestatus
     if (msg.key.id && !msg.key.fromMe) {
       const m          = msg.message;
       const hasMedia   = !!(m?.imageMessage || m?.videoMessage || m?.audioMessage);
@@ -147,17 +129,11 @@ async function handleStatusMessage(sock, msg, sessionId, statusMediaMap) {
       const senderNum  = senderJid.split('@')[0].split(':')[0];
       const pushName   = msg.pushName || '';
 
-      // ── a) antideletestatus buffer ─────────────────────────────────────
       const adStatusEnabled =
         db.sessionSettings.getValue(sessionId, 'antiDeleteStatus') ??
         db.settings.getValue('antiDeleteStatus') ?? false;
 
-      // ── b) statussave collection ───────────────────────────────────────
-      const statusSaveEnabled =
-        db.sessionSettings.getValue(sessionId, 'statusSave') ??
-        db.settings.getValue('statusSave') ?? false;
-
-      const needsBuffer = (adStatusEnabled || statusSaveEnabled) && hasMedia;
+      const needsBuffer = adStatusEnabled && hasMedia;
 
       let mediaBuf   = null;
       let mimeType   = null;
@@ -195,32 +171,6 @@ async function handleStatusMessage(sock, msg, sessionId, statusMediaMap) {
       if (statusMediaMap && adStatusEnabled && (mediaBuf || statusText)) {
         statusMediaMap.set(msg.key.id, baseEntry);
         if (statusMediaMap.size > 60) statusMediaMap.delete(statusMediaMap.keys().next().value);
-      }
-
-      // Store in statussave collection (always when feature enabled)
-      if (statusSaveEnabled && (mediaBuf || statusText || hasMedia)) {
-        const coll = getStatusCollection(sessionId);
-        coll.set(msg.key.id, baseEntry);
-        if (coll.size > STATUS_COLL_MAX) coll.delete(coll.keys().next().value);
-      }
-    }
-
-    // 4) Auto-Save/Forward: forward the status to owner DM (per-session)
-    const autoSave = eff('autoStatus', config.autoStatus ?? false);
-    if (autoSave) {
-      const ownerNum = (config.ownerNumber?.[0] || '').replace(/\D/g, '');
-      if (!ownerNum) return;
-      const ownerJid = `${ownerNum}@s.whatsapp.net`;
-      const m = msg.message;
-      const caption = `📸 *Status from:* @${senderJid.split('@')[0]}\n🕐 ${new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' })}`;
-
-      if (m?.imageMessage || m?.videoMessage) {
-        await sock.sendMessage(ownerJid, { forward: msg, force: true }).catch(() => {});
-      } else if (m?.conversation || m?.extendedTextMessage?.text) {
-        const text = m.conversation || m.extendedTextMessage?.text;
-        await sock.sendMessage(ownerJid, {
-          text: `📝 *Status Text:*\n${text}\n\n${caption}`,
-        }).catch(() => {});
       }
     }
   } catch (err) {
