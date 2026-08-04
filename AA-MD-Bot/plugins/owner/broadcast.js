@@ -1,59 +1,116 @@
-// AA MD Bot - Broadcast Message to All Groups
+// ============================================
+// AA MD Bot — Broadcast to All Connected Numbers
+// Sends a message (text or image) to every connected
+// number's own self-chat (You). Never sent to groups.
+//
+// Usage:
+//   .broadcast <text>                       — text message
+//   Send/reply image + .broadcast <caption> — image + caption
+// ============================================
+
+import { downloadMediaMessage } from '@whiskeysockets/baileys';
+import { sessions } from '../../lib/sessionManager.js';
+
+const FOOTER = '\n\n> 🤖 *AA MD Bot* | 👨‍💻 *Ahsan Ali Wadani*';
+
 export default {
   command: 'broadcast',
   alias: ['bc', 'bcall', 'broadcastall'],
-  description: 'Broadcast a message to all groups the bot is in',
+  description: 'Broadcast text or image to all connected numbers (self-chat only)',
   category: 'owner',
   ownerOnly: true,
 
-  async execute({ text, sock, jid, reply, react, msg }) {
-    if (!text) {
+  async execute({ text, msg, sock, reply, react }) {
+    const m = msg.message;
+
+    // ── Detect image: current message OR quoted message ──────────────────────
+    const quotedMsg  = m?.extendedTextMessage?.contextInfo?.quotedMessage;
+    const imgMsg     = m?.imageMessage || quotedMsg?.imageMessage || null;
+    const hasImage   = !!imgMsg;
+    const captionText = text?.trim() || '';
+
+    if (!hasImage && !captionText) {
       return reply(
         `📢 *Broadcast*\n\n` +
-        `*Usage:* .broadcast <message>\n\n` +
-        `This will send your message to all groups the bot is in.\n\n` +
-        `> 🤖 *AA MD Bot*`
+        `Sends a message to the *self-chat (You)* of every connected WhatsApp number.\n\n` +
+        `*Text only:*\n` +
+        `  _.broadcast Hello everyone!_\n\n` +
+        `*With image:*\n` +
+        `  Send or reply to an image with _.broadcast <caption>_\n\n` +
+        `📌 Never sent to groups — only to your own self-chat on each number.\n` +
+        FOOTER
       );
     }
 
     await react('⏳');
 
-    let groups;
-    try {
-      groups = await sock.groupFetchAllParticipating();
-    } catch (err) {
-      await react('❌');
-      return reply(`❌ Failed to fetch groups: ${err.message}`);
+    // ── Collect all live connected sessions ──────────────────────────────────
+    const connected = [];
+    for (const [sessionId, s] of sessions.entries()) {
+      if (s?.ws?.readyState === 1 && s?.user?.id) {
+        const ownJid = s.user.id.replace(/:.*@/, '@');
+        const phone  = s.user.id.split('@')[0].split(':')[0];
+        connected.push({ sessionId, sock: s, ownJid, phone });
+      }
     }
 
-    const groupJids = Object.keys(groups || {});
-    if (!groupJids.length) {
+    if (!connected.length) {
       await react('❌');
-      return reply('❌ Bot is not in any groups.');
+      return reply(`❌ No connected sessions found. All numbers are offline.`);
     }
 
-    await reply(`📢 Broadcasting to *${groupJids.length}* group(s)…`);
+    // ── Download image buffer once (if image present) ────────────────────────
+    let imgBuf  = null;
+    let imgMime = 'image/jpeg';
+    if (hasImage) {
+      try {
+        const srcMsg = m?.imageMessage
+          ? msg
+          : { message: { imageMessage: quotedMsg.imageMessage }, key: msg.key };
+        imgBuf  = await downloadMediaMessage(srcMsg, 'buffer', {}, {
+          reuploadRequest: sock.updateMediaMessage,
+        });
+        imgMime = imgMsg.mimetype || 'image/jpeg';
+        if (!imgBuf || imgBuf.length < 500) imgBuf = null;
+      } catch {
+        imgBuf = null;
+      }
+    }
+
+    const header = `📢 *Broadcast*`;
 
     let sent = 0, failed = 0;
-    for (const g of groupJids) {
+
+    for (const { sock: s, ownJid } of connected) {
       try {
-        await sock.sendMessage(g, {
-          text: `📢 *Broadcast from AA MD Bot*\n\n${text}\n\n> 🤖 *AA MD Bot*`,
-        });
+        if (imgBuf) {
+          const caption = captionText
+            ? `${header}\n\n${captionText}${FOOTER}`
+            : `${header}${FOOTER}`;
+          await s.sendMessage(ownJid, {
+            image: imgBuf,
+            mimetype: imgMime,
+            caption,
+          });
+        } else {
+          await s.sendMessage(ownJid, {
+            text: `${header}\n\n${captionText}${FOOTER}`,
+          });
+        }
         sent++;
-        // Delay to avoid ban
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 800));
       } catch {
         failed++;
       }
     }
 
     await react('✅');
-    await reply(
+    return reply(
       `✅ *Broadcast Complete*\n\n` +
-      `• Sent: *${sent}*\n` +
-      `• Failed: *${failed}*\n\n` +
-      `> 🤖 *AA MD Bot*`
+      `${hasImage ? '🖼️ Image' : '📝 Text'} broadcast\n` +
+      `📨 Delivered to self-chat: *${sent}* number(s)\n` +
+      (failed ? `❌ Failed: *${failed}*\n` : '') +
+      FOOTER
     );
   },
 };
