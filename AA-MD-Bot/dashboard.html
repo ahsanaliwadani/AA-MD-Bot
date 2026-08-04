@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AA MD Bot — Admin Panel</title>
+  <title>AA MD Bot — Dashboard</title>
   <meta name="theme-color" content="#25d366"/>
   <link rel="icon" type="image/webp" href="/logo.webp"/>
   <style>
     *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-
     :root {
       --bg:        #060911;
       --surface:   #0c1420;
@@ -27,58 +26,139 @@
       --yellow:    #ffa502;
       --yellow-dim:rgba(255,165,2,.12);
       --blue:      #2196f3;
+      --blue-dim:  rgba(33,150,243,.12);
+      --purple:    #a855f7;
+      --purple-dim:rgba(168,85,247,.12);
       --sidebar-w: 240px;
       --radius:    14px;
       --radius-sm: 9px;
     }
-
-    html, body { height:100%; background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; overflow-x:hidden; }
-
-    /* ── Scrollbar ── */
+    html,body { height:100%; background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; overflow-x:hidden; }
     ::-webkit-scrollbar { width:5px; }
     ::-webkit-scrollbar-track { background:transparent; }
     ::-webkit-scrollbar-thumb { background:var(--border); border-radius:99px; }
 
-    /* ═══════════════════════════════════════════════════════
-       LOGIN SCREEN
-    ═══════════════════════════════════════════════════════ */
-    #loginScreen {
-      min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
-      background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(37,211,102,.07) 0%, transparent 70%);
+    /* ═══════════════════════════════════════════
+       LANDING PAGE (public, no auth)
+    ═══════════════════════════════════════════ */
+    #landingView {
+      min-height:100vh; display:flex; flex-direction:column; align-items:center;
+      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(37,211,102,.09) 0%, transparent 65%);
     }
-    .login-card {
-      background:var(--surface); border:1px solid var(--border); border-radius:20px;
-      padding:44px 40px; width:100%; max-width:400px;
-      box-shadow:0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(37,211,102,.05);
-      animation:fadeIn .35s ease;
+
+    /* ── Nav bar ── */
+    .land-nav {
+      width:100%; display:flex; align-items:center; justify-content:space-between;
+      padding:18px 28px; border-bottom:1px solid var(--border);
+      background:rgba(12,20,32,.85); backdrop-filter:blur(8px);
+      position:sticky; top:0; z-index:10;
     }
-    .login-logo { display:flex; flex-direction:column; align-items:center; gap:14px; margin-bottom:32px; }
-    .login-logo img { width:68px; height:68px; border-radius:50%; border:2px solid var(--green); box-shadow:0 0 24px var(--green-glow); }
-    .login-logo h1 { font-size:1.45rem; font-weight:700; color:#fff; }
-    .login-logo h1 span { color:var(--green); }
-    .login-logo p { font-size:.82rem; color:var(--text2); }
-    .field { margin-bottom:16px; }
-    .field label { display:block; font-size:.78rem; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:7px; }
-    .field input {
+    .land-nav-brand { display:flex; align-items:center; gap:10px; }
+    .land-nav-brand img { width:36px; height:36px; border-radius:50%; border:1.5px solid var(--green); }
+    .land-nav-brand span { font-weight:700; font-size:1rem; }
+    .land-nav-brand span em { color:var(--green); font-style:normal; }
+    .land-nav-right { display:flex; align-items:center; gap:10px; }
+    .badge-online { display:flex; align-items:center; gap:6px; background:var(--green-dim); border:1px solid rgba(37,211,102,.25); border-radius:99px; padding:4px 12px; font-size:.78rem; color:var(--green); font-weight:600; }
+    .badge-online-dot { width:6px; height:6px; border-radius:50%; background:var(--green); animation:pulse 2s infinite; }
+    .btn-admin-nav {
+      display:flex; align-items:center; gap:7px; background:var(--surface2); border:1px solid var(--border);
+      border-radius:var(--radius-sm); padding:7px 14px; font-size:.82rem; font-weight:600; color:var(--text2);
+      cursor:pointer; transition:all .15s; text-decoration:none;
+    }
+    .btn-admin-nav:hover { border-color:var(--green); color:var(--green); background:var(--green-dim); }
+
+    /* ── Hero ── */
+    .land-hero { text-align:center; padding:60px 20px 40px; max-width:640px; margin:0 auto; }
+    .land-hero-logo { width:88px; height:88px; border-radius:50%; border:2.5px solid var(--green); box-shadow:0 0 40px var(--green-glow); margin:0 auto 22px; display:block; }
+    .land-hero h1 { font-size:2.2rem; font-weight:800; color:#fff; line-height:1.15; margin-bottom:10px; }
+    .land-hero h1 span { color:var(--green); }
+    .land-hero p { font-size:.95rem; color:var(--text2); line-height:1.6; }
+
+    /* ── Quick stats ── */
+    .land-stats { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; padding:0 20px 36px; }
+    .land-stat { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 24px; text-align:center; min-width:120px; }
+    .land-stat-num { font-size:1.7rem; font-weight:700; color:#fff; }
+    .land-stat-label { font-size:.75rem; color:var(--text2); margin-top:3px; }
+
+    /* ── Pair section ── */
+    .land-section { width:100%; max-width:560px; padding:0 20px 32px; }
+    .land-section-title { font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text2); margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+    .land-section-title::before { content:''; flex:1; height:1px; background:var(--border); }
+    .land-section-title::after  { content:''; flex:1; height:1px; background:var(--border); }
+    .land-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; }
+    .land-card h3 { font-size:1rem; font-weight:700; margin-bottom:5px; }
+    .land-card p  { font-size:.82rem; color:var(--text2); margin-bottom:18px; line-height:1.55; }
+    .land-input-row { display:flex; gap:8px; margin-bottom:10px; }
+    .land-input {
+      flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm);
+      padding:10px 13px; color:var(--text); font-size:.9rem; outline:none; transition:border-color .2s;
+    }
+    .land-input:focus { border-color:var(--green); box-shadow:0 0 0 3px var(--green-dim); }
+    .btn-green {
+      background:var(--green); color:#000; font-weight:700; padding:10px 20px; border:none;
+      border-radius:var(--radius-sm); cursor:pointer; font-size:.88rem; transition:all .15s;
+      box-shadow:0 3px 14px var(--green-glow); white-space:nowrap;
+    }
+    .btn-green:hover { background:#2ee87a; transform:translateY(-1px); }
+    .btn-green:disabled { background:#1a4a2e; color:#3a7a52; cursor:not-allowed; transform:none; box-shadow:none; }
+
+    .pair-code-box {
+      background:var(--surface2); border:1px solid rgba(37,211,102,.35); border-radius:var(--radius);
+      padding:18px; text-align:center; margin-top:14px; display:none;
+      animation:fadeIn .3s ease;
+    }
+    .pair-code { font-size:2rem; font-weight:800; letter-spacing:.18em; color:var(--green); font-family:monospace; }
+    .pair-code-sub { font-size:.78rem; color:var(--text2); margin-top:6px; line-height:1.5; }
+    .pair-err { font-size:.82rem; color:var(--red); margin-top:8px; display:none; }
+
+    /* ── Sessions mini-grid ── */
+    .mini-sessions { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:14px; }
+    .mini-card { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px 14px; display:flex; align-items:center; gap:10px; }
+    .mini-avatar { width:36px; height:36px; border-radius:50%; background:var(--green-dim); border:1.5px solid var(--green); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.85rem; color:var(--green); flex-shrink:0; }
+    .mini-avatar.dc { background:var(--red-dim); border-color:var(--red); color:var(--red); }
+    .mini-info { flex:1; min-width:0; }
+    .mini-phone { font-size:.85rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .mini-status { font-size:.72rem; color:var(--green); display:flex; align-items:center; gap:4px; }
+    .mini-status.dc { color:var(--red); }
+    .mini-dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+
+    /* ── Admin access divider ── */
+    .admin-access-area { width:100%; max-width:560px; padding:0 20px 40px; }
+    .btn-admin-access {
+      width:100%; display:flex; align-items:center; justify-content:center; gap:10px;
+      background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius);
+      padding:13px 20px; font-size:.9rem; font-weight:600; color:var(--text2);
+      cursor:pointer; transition:all .2s;
+    }
+    .btn-admin-access:hover { border-color:var(--green); color:var(--green); background:var(--green-dim); }
+    .btn-admin-access svg { width:17px; height:17px; transition:transform .2s; }
+    .btn-admin-access.open svg.chevron { transform:rotate(180deg); }
+
+    /* ── Login form (inside landing) ── */
+    #loginBox {
+      display:none; margin-top:12px; background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--radius); padding:28px; animation:slideIn .2s ease;
+    }
+    #loginBox .field { margin-bottom:14px; }
+    #loginBox .field label { display:block; font-size:.75rem; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+    #loginBox .field input {
       width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm);
-      padding:12px 14px; color:var(--text); font-size:.95rem; outline:none; transition:border-color .2s;
+      padding:11px 13px; color:var(--text); font-size:.93rem; outline:none; transition:border-color .2s;
     }
-    .field input:focus { border-color:var(--green); box-shadow:0 0 0 3px var(--green-dim); }
+    #loginBox .field input:focus { border-color:var(--green); box-shadow:0 0 0 3px var(--green-dim); }
+    .login-err { background:var(--red-dim); border:1px solid rgba(255,71,87,.3); border-radius:var(--radius-sm); padding:9px 13px; font-size:.83rem; color:var(--red); margin-bottom:12px; display:none; }
     .btn-primary {
-      width:100%; background:var(--green); color:#000; font-weight:700; font-size:.97rem;
-      padding:13px; border:none; border-radius:var(--radius-sm); cursor:pointer;
-      transition:transform .15s, box-shadow .15s, background .15s;
+      width:100%; background:var(--green); color:#000; font-weight:700; font-size:.95rem;
+      padding:12px; border:none; border-radius:var(--radius-sm); cursor:pointer;
+      transition:transform .15s,box-shadow .15s,background .15s;
       box-shadow:0 4px 20px var(--green-glow);
     }
-    .btn-primary:hover { background:#2ee87a; transform:translateY(-1px); box-shadow:0 8px 28px var(--green-glow); }
-    .btn-primary:active { transform:translateY(0); }
+    .btn-primary:hover { background:#2ee87a; transform:translateY(-1px); }
     .btn-primary:disabled { background:#1a4a2e; color:#3a7a52; cursor:not-allowed; transform:none; box-shadow:none; }
-    .login-err { background:var(--red-dim); border:1px solid rgba(255,71,87,.3); border-radius:var(--radius-sm); padding:10px 14px; font-size:.84rem; color:var(--red); margin-bottom:14px; display:none; }
-    .login-warn { background:var(--yellow-dim); border:1px solid rgba(255,165,2,.3); border-radius:var(--radius-sm); padding:10px 14px; font-size:.84rem; color:var(--yellow); margin-bottom:14px; }
 
-    /* ═══════════════════════════════════════════════════════
-       ADMIN APP LAYOUT
-    ═══════════════════════════════════════════════════════ */
+    /* ═══════════════════════════════════════════
+       ADMIN APP
+    ═══════════════════════════════════════════ */
     #app { display:none; height:100vh; overflow:hidden; }
     #app.visible { display:flex; animation:fadeIn .3s ease; }
 
@@ -87,237 +167,295 @@
       width:var(--sidebar-w); min-width:var(--sidebar-w); height:100vh; background:var(--surface);
       border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden;
     }
-    .sb-brand { padding:20px 16px 16px; display:flex; align-items:center; gap:11px; border-bottom:1px solid var(--border); }
-    .sb-brand img { width:40px; height:40px; border-radius:50%; border:1.5px solid var(--green); }
+    .sb-brand { padding:18px 14px 14px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border); }
+    .sb-brand img { width:38px; height:38px; border-radius:50%; border:1.5px solid var(--green); }
     .sb-brand-text { flex:1; min-width:0; }
-    .sb-brand-name { font-weight:700; font-size:.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .sb-brand-ver { font-size:.73rem; color:var(--text2); }
-
-    .sb-nav { flex:1; padding:10px 8px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; }
-    .sb-section { font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text3); padding:14px 10px 6px; }
+    .sb-brand-name { font-weight:700; font-size:.93rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sb-brand-ver  { font-size:.7rem; color:var(--text2); }
+    .sb-nav { flex:1; padding:8px 6px; display:flex; flex-direction:column; gap:1px; overflow-y:auto; }
+    .sb-section { font-size:.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text3); padding:12px 10px 5px; }
     .nav-item {
-      display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:var(--radius-sm);
-      cursor:pointer; font-size:.88rem; font-weight:500; color:var(--text2); transition:all .15s;
+      display:flex; align-items:center; gap:9px; padding:8px 11px; border-radius:var(--radius-sm);
+      cursor:pointer; font-size:.86rem; font-weight:500; color:var(--text2); transition:all .15s;
     }
     .nav-item:hover { background:var(--surface2); color:var(--text); }
     .nav-item.active { background:var(--green-dim); color:var(--green); }
-    .nav-item svg { width:17px; height:17px; flex-shrink:0; }
-    .nav-badge { margin-left:auto; background:var(--green); color:#000; font-size:.7rem; font-weight:700; padding:2px 7px; border-radius:99px; }
+    .nav-item svg { width:16px; height:16px; flex-shrink:0; }
+    .nav-badge { margin-left:auto; background:var(--green); color:#000; font-size:.68rem; font-weight:700; padding:1px 7px; border-radius:99px; }
     .nav-badge.red { background:var(--red); color:#fff; }
-
-    .sb-footer { padding:12px 8px; border-top:1px solid var(--border); }
-    .bot-status { display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--surface2); border-radius:var(--radius-sm); margin-bottom:6px; }
-    .status-dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); flex-shrink:0; animation:pulse 2s infinite; }
+    .sb-footer { padding:10px 6px; border-top:1px solid var(--border); }
+    .bot-status { display:flex; align-items:center; gap:8px; padding:8px 11px; background:var(--surface2); border-radius:var(--radius-sm); margin-bottom:6px; }
+    .status-dot { width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); flex-shrink:0; animation:pulse 2s infinite; }
     .status-dot.red { background:var(--red); box-shadow:0 0 6px var(--red); }
-    .status-label { font-size:.8rem; color:var(--text2); flex:1; }
-    .status-uptime { font-size:.73rem; color:var(--text3); }
-    .btn-logout { width:100%; display:flex; align-items:center; justify-content:center; gap:8px; padding:9px; background:transparent; border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text2); font-size:.84rem; cursor:pointer; transition:all .15s; }
+    .status-label { font-size:.78rem; color:var(--text2); flex:1; }
+    .status-uptime { font-size:.7rem; color:var(--text3); }
+    .btn-logout {
+      width:100%; display:flex; align-items:center; justify-content:center; gap:7px;
+      padding:8px; background:transparent; border:1px solid var(--border); border-radius:var(--radius-sm);
+      color:var(--text2); font-size:.82rem; cursor:pointer; transition:all .15s;
+    }
     .btn-logout:hover { border-color:var(--red); color:var(--red); background:var(--red-dim); }
 
-    /* Main content */
+    /* Main */
     #main { flex:1; height:100vh; overflow-y:auto; display:flex; flex-direction:column; }
-    .page-header { padding:24px 28px 0; }
-    .page-title { font-size:1.35rem; font-weight:700; color:#fff; }
-    .page-sub { font-size:.84rem; color:var(--text2); margin-top:3px; }
-    .content-area { padding:20px 28px 32px; flex:1; }
-
-    /* ── Pages ── */
+    .page-header { padding:22px 26px 0; }
+    .page-title { font-size:1.3rem; font-weight:700; color:#fff; }
+    .page-sub   { font-size:.82rem; color:var(--text2); margin-top:2px; }
+    .content-area { padding:18px 26px 32px; flex:1; }
     .page { display:none; }
     .page.active { display:block; animation:slideIn .2s ease; }
 
-    /* ── Stats grid ── */
-    .stats-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; margin-bottom:22px; }
-    .stat-card {
-      background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-      padding:18px; transition:border-color .2s;
-    }
+    /* Stats grid */
+    .stats-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(165px,1fr)); gap:12px; margin-bottom:20px; }
+    .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; transition:border-color .2s; }
     .stat-card:hover { border-color:var(--green); }
-    .stat-icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:12px; }
-    .stat-icon.green { background:var(--green-dim); color:var(--green); }
-    .stat-icon.blue { background:rgba(33,150,243,.12); color:var(--blue); }
+    .stat-icon { width:36px; height:36px; border-radius:9px; display:flex; align-items:center; justify-content:center; margin-bottom:10px; }
+    .stat-icon.green  { background:var(--green-dim);  color:var(--green);  }
+    .stat-icon.blue   { background:var(--blue-dim);   color:var(--blue);   }
     .stat-icon.yellow { background:var(--yellow-dim); color:var(--yellow); }
-    .stat-icon.red { background:var(--red-dim); color:var(--red); }
-    .stat-icon svg { width:20px; height:20px; }
-    .stat-num { font-size:1.8rem; font-weight:700; color:#fff; line-height:1; }
-    .stat-label { font-size:.78rem; color:var(--text2); margin-top:4px; }
+    .stat-icon.red    { background:var(--red-dim);    color:var(--red);    }
+    .stat-icon.purple { background:var(--purple-dim); color:var(--purple); }
+    .stat-icon svg { width:18px; height:18px; }
+    .stat-num   { font-size:1.7rem; font-weight:700; color:#fff; line-height:1; }
+    .stat-label { font-size:.75rem; color:var(--text2); margin-top:3px; }
 
-    /* ── Section header ── */
-    .section-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
-    .section-title { font-size:1rem; font-weight:600; color:#fff; }
-    .section-meta { font-size:.8rem; color:var(--text2); }
+    /* Section header */
+    .section-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .section-title { font-size:.97rem; font-weight:600; color:#fff; }
+    .section-meta  { font-size:.78rem; color:var(--text2); }
 
-    /* ── Session cards ── */
-    .sessions-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+    /* Session cards */
+    .sessions-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:12px; }
     .session-card {
       background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-      padding:18px; transition:all .2s; position:relative; overflow:hidden;
+      padding:16px; transition:all .2s; position:relative; overflow:hidden;
     }
     .session-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--green); transform:scaleX(0); transition:transform .2s; }
     .session-card:hover { border-color:rgba(37,211,102,.3); }
     .session-card:hover::before { transform:scaleX(1); }
-    .session-card.disconnected { border-color:var(--border); opacity:.7; }
+    .session-card.disconnected { opacity:.7; }
     .session-card.disconnected::before { background:var(--red); }
-    .sc-top { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
-    .sc-avatar {
-      width:44px; height:44px; border-radius:50%; background:var(--green-dim); border:1.5px solid var(--green);
-      display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.05rem; color:var(--green); flex-shrink:0;
-    }
-    .sc-avatar.disconnected { background:var(--red-dim); border-color:var(--red); color:var(--red); }
+    .sc-top { display:flex; align-items:center; gap:11px; margin-bottom:12px; }
+    .sc-avatar { width:42px; height:42px; border-radius:50%; background:var(--green-dim); border:1.5px solid var(--green); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1rem; color:var(--green); flex-shrink:0; }
+    .sc-avatar.dc { background:var(--red-dim); border-color:var(--red); color:var(--red); }
     .sc-info { flex:1; min-width:0; }
-    .sc-phone { font-weight:700; font-size:.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .sc-name { font-size:.8rem; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
-    .sc-badge {
-      display:inline-flex; align-items:center; gap:5px; padding:3px 10px;
-      border-radius:99px; font-size:.73rem; font-weight:600;
-    }
-    .sc-badge.connected { background:var(--green-dim); color:var(--green); }
-    .sc-badge.connecting { background:var(--yellow-dim); color:var(--yellow); }
+    .sc-phone { font-weight:700; font-size:.93rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sc-name  { font-size:.78rem; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px; }
+    .sc-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 9px; border-radius:99px; font-size:.71rem; font-weight:600; }
+    .sc-badge.connected    { background:var(--green-dim);  color:var(--green); }
+    .sc-badge.connecting,
     .sc-badge.reconnecting { background:var(--yellow-dim); color:var(--yellow); }
-    .sc-badge.disconnected { background:var(--red-dim); color:var(--red); }
+    .sc-badge.disconnected { background:var(--red-dim);    color:var(--red); }
     .sc-badge-dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
-    .sc-meta { display:flex; align-items:center; justify-content:space-between; margin-top:12px; }
-    .sc-time { font-size:.76rem; color:var(--text2); }
-    .btn-disconnect {
-      background:var(--red-dim); color:var(--red); border:1px solid rgba(255,71,87,.25);
-      border-radius:var(--radius-sm); padding:5px 12px; font-size:.78rem; font-weight:600;
-      cursor:pointer; transition:all .15s;
-    }
+    .sc-meta { display:flex; align-items:center; justify-content:space-between; margin-top:10px; }
+    .sc-time { font-size:.74rem; color:var(--text2); }
+    .btn-disconnect { background:var(--red-dim); color:var(--red); border:1px solid rgba(255,71,87,.25); border-radius:var(--radius-sm); padding:4px 11px; font-size:.76rem; font-weight:600; cursor:pointer; transition:all .15s; }
     .btn-disconnect:hover { background:var(--red); color:#fff; }
     .btn-disconnect:disabled { opacity:.4; cursor:not-allowed; }
-    .empty-state { text-align:center; padding:48px 20px; color:var(--text2); }
-    .empty-state svg { width:48px; height:48px; color:var(--text3); margin-bottom:14px; }
-    .empty-state p { font-size:.9rem; }
+    .empty-state { text-align:center; padding:44px 20px; color:var(--text2); }
+    .empty-state svg { width:44px; height:44px; color:var(--text3); margin-bottom:12px; }
+    .empty-state p { font-size:.88rem; }
 
-    /* ── Settings ── */
-    .settings-form { display:grid; gap:22px; max-width:600px; }
-    .settings-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; }
-    .settings-card-title { font-weight:600; font-size:.93rem; margin-bottom:16px; color:#fff; display:flex; align-items:center; gap:8px; }
-    .settings-card-title svg { width:16px; height:16px; color:var(--green); }
-    .setting-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border); }
-    .setting-row:last-child { border-bottom:none; padding-bottom:0; }
-    .setting-label { font-size:.88rem; color:var(--text); }
-    .setting-sub { font-size:.76rem; color:var(--text2); margin-top:2px; }
-
-    /* Toggle */
-    .toggle { position:relative; width:42px; height:23px; flex-shrink:0; }
-    .toggle input { opacity:0; width:0; height:0; position:absolute; }
-    .toggle-slider {
-      position:absolute; inset:0; background:var(--surface3); border-radius:99px; cursor:pointer;
-      transition:background .2s; border:1px solid var(--border);
-    }
-    .toggle-slider::after {
-      content:''; position:absolute; left:3px; top:50%; transform:translateY(-50%);
-      width:15px; height:15px; border-radius:50%; background:var(--text2); transition:all .2s;
-    }
-    .toggle input:checked + .toggle-slider { background:var(--green); border-color:var(--green); }
-    .toggle input:checked + .toggle-slider::after { left:calc(100% - 18px); background:#fff; }
-
-    /* Mode radio */
-    .mode-radios { display:flex; gap:8px; flex-wrap:wrap; }
-    .mode-radio input { display:none; }
-    .mode-radio label {
-      padding:6px 14px; border-radius:var(--radius-sm); border:1px solid var(--border);
-      font-size:.82rem; font-weight:500; cursor:pointer; color:var(--text2); transition:all .15s;
-    }
-    .mode-radio input:checked + label { background:var(--green-dim); border-color:var(--green); color:var(--green); }
-
-    /* Prefix input */
-    .prefix-input { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 12px; color:var(--text); font-size:.9rem; width:100px; outline:none; }
-    .prefix-input:focus { border-color:var(--green); }
-
-    .btn-save {
-      background:var(--green); color:#000; font-weight:700; padding:11px 28px; border:none;
-      border-radius:var(--radius-sm); cursor:pointer; font-size:.9rem; transition:all .15s;
-      box-shadow:0 4px 16px var(--green-glow);
-    }
-    .btn-save:hover { background:#2ee87a; transform:translateY(-1px); }
-    .save-toast { display:none; align-items:center; gap:6px; padding:7px 14px; background:var(--green-dim); border:1px solid rgba(37,211,102,.3); border-radius:var(--radius-sm); font-size:.83rem; color:var(--green); }
-    .save-toast svg { width:15px; height:15px; }
-
-    /* ── Pair tab ── */
-    .pair-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:480px; }
-    .pair-card h3 { font-size:1rem; font-weight:600; margin-bottom:6px; }
-    .pair-card p { font-size:.84rem; color:var(--text2); margin-bottom:18px; }
-    .pair-form { display:flex; flex-direction:column; gap:12px; }
-    .pair-input {
-      background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm);
-      padding:11px 14px; color:var(--text); font-size:.93rem; outline:none; transition:border-color .2s;
-    }
-    .pair-input:focus { border-color:var(--green); }
-    .pair-code-box {
-      background:var(--surface2); border:1px solid rgba(37,211,102,.3); border-radius:var(--radius);
-      padding:20px; text-align:center; margin-top:14px; display:none;
-    }
-    .pair-code { font-size:2.2rem; font-weight:700; letter-spacing:.15em; color:var(--green); font-family:monospace; }
-    .pair-code-sub { font-size:.8rem; color:var(--text2); margin-top:6px; }
-
-    /* ── Category pills ── */
-    .cat-grid { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
-    .cat-pill { background:var(--surface2); border:1px solid var(--border); border-radius:99px; padding:4px 12px; font-size:.78rem; color:var(--text2); display:flex; align-items:center; gap:5px; }
+    /* Category pills */
+    .cat-grid { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
+    .cat-pill { background:var(--surface2); border:1px solid var(--border); border-radius:99px; padding:3px 11px; font-size:.75rem; color:var(--text2); display:flex; align-items:center; gap:5px; }
     .cat-pill strong { color:var(--text); }
 
-    /* ── Animations ── */
-    @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
-    @keyframes slideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
-    @keyframes spin { to { transform:rotate(360deg); } }
+    /* Settings */
+    .settings-form { display:grid; gap:18px; max-width:600px; }
+    .settings-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px; }
+    .settings-card-title { font-weight:600; font-size:.9rem; margin-bottom:14px; color:#fff; display:flex; align-items:center; gap:7px; }
+    .settings-card-title svg { width:15px; height:15px; color:var(--green); }
+    .setting-row { display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--border); }
+    .setting-row:last-child { border-bottom:none; padding-bottom:0; }
+    .setting-label { font-size:.86rem; color:var(--text); }
+    .setting-sub   { font-size:.74rem; color:var(--text2); margin-top:2px; }
+    .toggle { position:relative; width:40px; height:22px; flex-shrink:0; }
+    .toggle input { opacity:0; width:0; height:0; position:absolute; }
+    .toggle-slider { position:absolute; inset:0; background:var(--surface3); border-radius:99px; cursor:pointer; transition:background .2s; border:1px solid var(--border); }
+    .toggle-slider::after { content:''; position:absolute; left:3px; top:50%; transform:translateY(-50%); width:14px; height:14px; border-radius:50%; background:var(--text2); transition:all .2s; }
+    .toggle input:checked + .toggle-slider { background:var(--green); border-color:var(--green); }
+    .toggle input:checked + .toggle-slider::after { left:calc(100% - 17px); background:#fff; }
+    .mode-radios { display:flex; gap:7px; flex-wrap:wrap; }
+    .mode-radio input { display:none; }
+    .mode-radio label { padding:5px 13px; border-radius:var(--radius-sm); border:1px solid var(--border); font-size:.8rem; font-weight:500; cursor:pointer; color:var(--text2); transition:all .15s; }
+    .mode-radio input:checked + label { background:var(--green-dim); border-color:var(--green); color:var(--green); }
+    .short-input { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:7px 11px; color:var(--text); font-size:.88rem; width:90px; outline:none; }
+    .short-input:focus { border-color:var(--green); }
+    .btn-save { background:var(--green); color:#000; font-weight:700; padding:10px 24px; border:none; border-radius:var(--radius-sm); cursor:pointer; font-size:.88rem; transition:all .15s; box-shadow:0 3px 14px var(--green-glow); }
+    .btn-save:hover { background:#2ee87a; transform:translateY(-1px); }
+    .save-toast { display:none; align-items:center; gap:5px; padding:6px 12px; background:var(--green-dim); border:1px solid rgba(37,211,102,.3); border-radius:var(--radius-sm); font-size:.81rem; color:var(--green); }
+    .save-toast svg { width:14px; height:14px; }
 
-    .spinner { width:18px; height:18px; border:2px solid rgba(255,255,255,.2); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; display:inline-block; }
+    /* Pair */
+    .pair-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; max-width:480px; }
+    .pair-card h3 { font-size:.97rem; font-weight:600; margin-bottom:5px; }
+    .pair-card p  { font-size:.82rem; color:var(--text2); margin-bottom:16px; }
+    .pair-form { display:flex; flex-direction:column; gap:10px; }
+    .pair-input { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 13px; color:var(--text); font-size:.9rem; outline:none; transition:border-color .2s; }
+    .pair-input:focus { border-color:var(--green); }
+    .admin-pair-code-box { background:var(--surface2); border:1px solid rgba(37,211,102,.3); border-radius:var(--radius); padding:18px; text-align:center; margin-top:12px; display:none; }
+    .admin-pair-code { font-size:2rem; font-weight:700; letter-spacing:.15em; color:var(--green); font-family:monospace; }
+    .pair-code-sub { font-size:.78rem; color:var(--text2); margin-top:5px; }
 
-    /* ── Mobile ── */
+    /* ── LOGS ── */
+    .log-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+    .log-filter { flex:1; min-width:180px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:7px 11px; color:var(--text); font-size:.84rem; outline:none; }
+    .log-filter:focus { border-color:var(--green); }
+    .btn-sm { padding:7px 14px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--surface2); color:var(--text2); font-size:.8rem; font-weight:600; cursor:pointer; transition:all .15s; }
+    .btn-sm:hover { border-color:var(--green); color:var(--green); }
+    .btn-sm.active { background:var(--green-dim); border-color:var(--green); color:var(--green); }
+    .log-box { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; font-family:'Courier New',Courier,monospace; font-size:.75rem; height:460px; overflow-y:auto; line-height:1.55; }
+    .log-line { padding:1px 0; white-space:pre-wrap; word-break:break-all; }
+    .log-line.info  { color:#7ec8a0; }
+    .log-line.warn  { color:var(--yellow); }
+    .log-line.error { color:var(--red); }
+    .log-line.debug { color:var(--text3); }
+    .log-line.plain { color:var(--text2); }
+    .log-line .log-ts { color:var(--text3); font-size:.7rem; margin-right:6px; }
+    .log-auto-scroll { display:flex; align-items:center; gap:5px; font-size:.78rem; color:var(--text2); cursor:pointer; user-select:none; }
+    .log-auto-scroll input { accent-color:var(--green); }
+
+    /* ── BROADCAST ── */
+    .bc-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; max-width:780px; }
+    @media(max-width:640px) { .bc-grid { grid-template-columns:1fr; } }
+    .bc-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; }
+    .bc-card h3 { font-size:.95rem; font-weight:600; margin-bottom:4px; }
+    .bc-card p  { font-size:.8rem; color:var(--text2); margin-bottom:14px; }
+    .bc-textarea { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:11px 13px; color:var(--text); font-size:.88rem; outline:none; resize:vertical; min-height:120px; transition:border-color .2s; font-family:inherit; }
+    .bc-textarea:focus { border-color:var(--green); }
+    .bc-select { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:9px 11px; color:var(--text); font-size:.87rem; outline:none; margin-bottom:10px; }
+    .bc-result { margin-top:12px; padding:10px 13px; border-radius:var(--radius-sm); font-size:.83rem; display:none; }
+    .bc-result.ok  { background:var(--green-dim);  border:1px solid rgba(37,211,102,.3); color:var(--green); }
+    .bc-result.err { background:var(--red-dim);    border:1px solid rgba(255,71,87,.3);  color:var(--red); }
+
+    /* History table */
+    .history-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-top:18px; max-width:780px; }
+    .history-card h3 { font-size:.92rem; font-weight:600; margin-bottom:12px; }
+    .history-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+    .history-table th { text-align:left; padding:6px 10px; color:var(--text2); font-weight:600; border-bottom:1px solid var(--border); }
+    .history-table td { padding:7px 10px; border-bottom:1px solid rgba(26,45,64,.5); color:var(--text); }
+    .history-table tr:last-child td { border-bottom:none; }
+    .bc-badge { display:inline-flex; align-items:center; padding:1px 8px; border-radius:99px; font-size:.7rem; font-weight:600; }
+    .bc-badge.sent { background:var(--green-dim); color:var(--green); }
+    .bc-badge.fail { background:var(--red-dim);   color:var(--red); }
+
+    /* Mobile */
     .sb-toggle { display:none; }
-    @media (max-width: 700px) {
+    @media(max-width:700px) {
       #sidebar { position:fixed; left:-100%; top:0; bottom:0; z-index:100; transition:left .25s; box-shadow:4px 0 20px rgba(0,0,0,.6); }
       #sidebar.open { left:0; }
-      .sb-toggle { display:flex; align-items:center; justify-content:center; width:38px; height:38px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; flex-shrink:0; }
-      .sb-toggle svg { width:20px; height:20px; }
+      .sb-toggle { display:flex; align-items:center; justify-content:center; width:36px; height:36px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; flex-shrink:0; }
+      .sb-toggle svg { width:18px; height:18px; }
       .sb-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:99; }
       .sb-overlay.visible { display:block; }
       #main { width:100%; }
-      .page-header { padding:16px 16px 0; display:flex; align-items:center; gap:12px; }
-      .content-area { padding:16px 16px 32px; }
+      .page-header { padding:14px 14px 0; display:flex; align-items:center; gap:10px; }
+      .content-area { padding:14px 14px 32px; }
       .stats-grid { grid-template-columns:1fr 1fr; }
       .sessions-grid { grid-template-columns:1fr; }
     }
+
+    /* Animations */
+    @keyframes fadeIn  { from { opacity:0; }             to { opacity:1; }             }
+    @keyframes slideIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulse   { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+    @keyframes spin    { to { transform:rotate(360deg); } }
+    .spinner { width:16px; height:16px; border:2px solid rgba(255,255,255,.2); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; display:inline-block; vertical-align:middle; }
   </style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════ LOGIN ═══ -->
-<div id="loginScreen">
-  <div class="login-card">
-    <div class="login-logo">
-      <img src="/logo.webp" alt="AA MD Bot" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22><circle cx=%2220%22 cy=%2220%22 r=%2220%22 fill=%22%230d1421%22/><text x=%2250%%25%22 y=%2256%%25%22 text-anchor=%22middle%22 font-size=%2218%22 fill=%22%2325d366%22>🤖</text></svg>'"/>
-      <div style="text-align:center">
-        <h1>AA MD <span>Bot</span></h1>
-        <p>Admin Panel — Secure Access</p>
+<!-- ═══════════════════════════════════════════════════════════════
+     LANDING VIEW  (public — no auth required)
+═══════════════════════════════════════════════════════════════ -->
+<div id="landingView">
+
+  <!-- Nav -->
+  <nav class="land-nav">
+    <div class="land-nav-brand">
+      <img src="/logo.webp" alt="AA MD Bot" onerror="this.style.display='none'"/>
+      <span>AA MD <em>Bot</em></span>
+    </div>
+    <div class="land-nav-right">
+      <div class="badge-online"><span class="badge-online-dot"></span> Online</div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <div class="land-hero">
+    <img class="land-hero-logo" src="/logo.webp" alt="AA MD Bot" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 88 88%22><circle cx=%2244%22 cy=%2244%22 r=%2244%22 fill=%22%230d1421%22/><text x=%2250%%25%22 y=%2257%%25%22 text-anchor=%22middle%22 font-size=%2236%22 fill=%22%2325d366%22>🤖</text></svg>'"/>
+    <h1>AA MD <span>Bot</span></h1>
+    <p>Multi-Device WhatsApp Bot — Connect your numbers, manage sessions and control the bot from one place.</p>
+  </div>
+
+  <!-- Quick stats -->
+  <div class="land-stats">
+    <div class="land-stat"><div class="land-stat-num" id="lConnected">—</div><div class="land-stat-label">Connected</div></div>
+    <div class="land-stat"><div class="land-stat-num" id="lPlugins">—</div><div class="land-stat-label">Plugins</div></div>
+    <div class="land-stat"><div class="land-stat-num" id="lUptime">—</div><div class="land-stat-label">Uptime</div></div>
+  </div>
+
+  <!-- Pair new number -->
+  <div class="land-section">
+    <div class="land-section-title">Connect a Number</div>
+    <div class="land-card">
+      <h3>📱 Pair via Code</h3>
+      <p>Enter your phone number with country code to get a pairing code, then link it in WhatsApp → Settings → Linked Devices.</p>
+      <div class="land-input-row">
+        <input class="land-input" id="lPhone" placeholder="923001234567" inputmode="tel"/>
+        <button class="btn-green" id="lPairBtn" onclick="landPair()">Get Code</button>
+      </div>
+      <div class="pair-err" id="lPairErr"></div>
+      <div class="pair-code-box" id="lPairBox">
+        <div class="pair-code" id="lPairCode"></div>
+        <div class="pair-code-sub">Enter this code in WhatsApp → Settings → Linked Devices → Link with phone number</div>
       </div>
     </div>
-    <div id="loginWarn" class="login-warn" style="display:none"></div>
-    <div id="loginErr" class="login-err"></div>
-    <form onsubmit="doLogin();return false;">
-      <div class="field">
-        <label>Admin Password</label>
-        <input type="password" id="pwInput" placeholder="Enter your ADMIN_PASSWORD" autocomplete="current-password"/>
-      </div>
-      <button type="submit" class="btn-primary" id="loginBtn">
-        <span id="loginBtnText">Sign In</span>
-      </button>
-    </form>
   </div>
-</div>
 
-<!-- ═══════════════════════════════════════════════════════ APP ═══ -->
+  <!-- Live sessions mini-grid -->
+  <div class="land-section">
+    <div class="land-section-title">Connected Sessions</div>
+    <div id="lSessions"><div style="color:var(--text2);font-size:.84rem;text-align:center;padding:16px">Loading sessions…</div></div>
+  </div>
+
+  <!-- Admin Panel access -->
+  <div class="admin-access-area">
+    <button class="btn-admin-access" id="adminToggleBtn" onclick="toggleAdminBox()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      🛡️ Admin Panel
+      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+
+    <div id="loginBox">
+      <div id="loginErr" class="login-err"></div>
+      <form onsubmit="doLogin();return false;">
+        <div class="field">
+          <label>Admin Password</label>
+          <input type="password" id="pwInput" placeholder="Enter admin password" autocomplete="current-password"/>
+        </div>
+        <button type="submit" class="btn-primary" id="loginBtn">
+          <span id="loginBtnText">Sign In to Admin Panel</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+</div><!-- /landingView -->
+
+<!-- ═══════════════════════════════════════════════════════════════
+     ADMIN APP
+═══════════════════════════════════════════════════════════════ -->
 <div id="app">
   <div id="sbOverlay" class="sb-overlay" onclick="closeSidebar()"></div>
 
-  <!-- Sidebar -->
   <aside id="sidebar">
     <div class="sb-brand">
       <img src="/logo.webp" alt="Bot" onerror="this.style.display='none'"/>
       <div class="sb-brand-text">
         <div class="sb-brand-name" id="sbBotName">AA MD Bot</div>
-        <div class="sb-brand-ver" id="sbVer">v3.0.0</div>
+        <div class="sb-brand-ver"  id="sbVer">v3.0.0</div>
       </div>
     </div>
 
@@ -333,9 +471,19 @@
         <span class="nav-badge" id="sessionBadge">0</span>
       </div>
 
+      <div class="sb-section">Tools</div>
+      <div class="nav-item" data-page="broadcast" onclick="showPage('broadcast',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        Broadcast
+      </div>
+      <div class="nav-item" data-page="logs" onclick="showPage('logs',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Live Logs
+      </div>
+
       <div class="sb-section">Bot</div>
       <div class="nav-item" data-page="settings" onclick="showPage('settings',this)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
         Settings
       </div>
       <div class="nav-item" data-page="pair" onclick="showPage('pair',this)">
@@ -347,19 +495,18 @@
     <div class="sb-footer">
       <div class="bot-status">
         <div class="status-dot" id="botStatusDot"></div>
-        <div class="flex-col" style="flex:1;min-width:0">
+        <div style="flex:1;min-width:0">
           <div class="status-label" id="botStatusLabel">Online</div>
           <div class="status-uptime" id="uptimeTicker">—</div>
         </div>
       </div>
       <button class="btn-logout" onclick="doLogout()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         Logout
       </button>
     </div>
   </aside>
 
-  <!-- Main Content -->
   <main id="main">
     <div class="page-header">
       <button class="sb-toggle" onclick="openSidebar()">
@@ -367,7 +514,7 @@
       </button>
       <div>
         <div class="page-title" id="pageTitle">Overview</div>
-        <div class="page-sub" id="pageSub">Welcome to AA MD Bot Admin Panel</div>
+        <div class="page-sub"   id="pageSub">Bot stats and sessions at a glance</div>
       </div>
     </div>
     <div class="content-area">
@@ -376,24 +523,28 @@
       <div class="page active" id="page-overview">
         <div class="stats-grid">
           <div class="stat-card">
-            <div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
-            <div class="stat-num" id="ovConnected">—</div>
-            <div class="stat-label">Connected Numbers</div>
+            <div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+            <div class="stat-num" id="ovConnected">—</div><div class="stat-label">Connected</div>
           </div>
           <div class="stat-card">
             <div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
-            <div class="stat-num" id="ovPlugins">—</div>
-            <div class="stat-label">Active Plugins</div>
+            <div class="stat-num" id="ovPlugins">—</div><div class="stat-label">Plugins</div>
           </div>
           <div class="stat-card">
             <div class="stat-icon yellow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
-            <div class="stat-num" id="ovRam">—</div>
-            <div class="stat-label">RAM Used (MB)</div>
+            <div class="stat-num" id="ovRam">—</div><div class="stat-label">RAM (MB)</div>
           </div>
           <div class="stat-card">
             <div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-            <div class="stat-num" id="ovUptime" style="font-size:1.1rem">—</div>
-            <div class="stat-label">Uptime</div>
+            <div class="stat-num" id="ovUptime" style="font-size:1rem;line-height:1.3">—</div><div class="stat-label">Uptime</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
+            <div class="stat-num" id="ovGroups">—</div><div class="stat-label">Groups</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+            <div class="stat-num" id="ovRamTotal">—</div><div class="stat-label">Heap Total (MB)</div>
           </div>
         </div>
 
@@ -403,7 +554,7 @@
         </div>
         <div class="cat-grid" id="ovCats"></div>
 
-        <div class="section-hdr" style="margin-top:24px">
+        <div class="section-hdr" style="margin-top:22px">
           <div class="section-title">Connected Sessions</div>
           <div class="section-meta" id="ovSessionMeta"></div>
         </div>
@@ -412,22 +563,80 @@
 
       <!-- ── SESSIONS ── -->
       <div class="page" id="page-sessions">
-        <div class="section-hdr" style="margin-bottom:16px">
-          <div class="section-meta" id="sessionsSubtitle" style="font-size:.84rem;color:var(--text2)">Loading…</div>
-          <button class="btn-save" style="padding:7px 16px;font-size:.82rem" onclick="refreshSessions()">↻ Refresh</button>
+        <div class="section-hdr" style="margin-bottom:14px">
+          <div class="section-meta" id="sessionsSubtitle" style="font-size:.83rem;color:var(--text2)">Loading…</div>
+          <button class="btn-save" style="padding:6px 14px;font-size:.8rem" onclick="refreshSessions()">↻ Refresh</button>
         </div>
         <div class="sessions-grid" id="sessionsGrid"></div>
+      </div>
+
+      <!-- ── BROADCAST ── -->
+      <div class="page" id="page-broadcast">
+        <div class="bc-grid">
+          <div class="bc-card">
+            <h3>📢 Send Broadcast</h3>
+            <p>Send a message to all connected sessions or a specific one. The message is delivered to the owner's chat.</p>
+            <select class="bc-select" id="bcTarget">
+              <option value="">All connected sessions</option>
+            </select>
+            <textarea class="bc-textarea" id="bcMessage" placeholder="Type your broadcast message here…"></textarea>
+            <div style="margin-top:10px">
+              <button class="btn-save" id="bcBtn" onclick="sendBroadcast()">
+                <span id="bcBtnText">Send Broadcast</span>
+              </button>
+            </div>
+            <div id="bcResult" class="bc-result"></div>
+          </div>
+
+          <div class="bc-card">
+            <h3>💡 Tips</h3>
+            <p>About broadcast messages:</p>
+            <ul style="font-size:.82rem;color:var(--text2);line-height:1.9;list-style:none;padding:0">
+              <li>✅ Messages are sent to the <strong style="color:var(--text)">owner's self-chat</strong> for each session.</li>
+              <li>✅ Only <strong style="color:var(--text)">connected sessions</strong> receive messages.</li>
+              <li>✅ Disconnected sessions are automatically skipped.</li>
+              <li>⚠️ Large broadcasts may take a few seconds.</li>
+              <li>⚠️ Don't spam — wait for result before sending again.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="history-card">
+          <h3>📋 Broadcast History</h3>
+          <table class="history-table">
+            <thead><tr><th>Time</th><th>Message</th><th>Sent</th><th>Failed</th></tr></thead>
+            <tbody id="bcHistory"><tr><td colspan="4" style="color:var(--text2);text-align:center;padding:20px">No broadcasts yet this session.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── LIVE LOGS ── -->
+      <div class="page" id="page-logs">
+        <div class="log-toolbar">
+          <input class="log-filter" id="logFilter" placeholder="Filter logs…" oninput="filterLogs()"/>
+          <button class="btn-sm" id="logLvlAll"  onclick="setLogLevel('all')"   >All</button>
+          <button class="btn-sm" id="logLvlInfo" onclick="setLogLevel('info')"  >Info</button>
+          <button class="btn-sm" id="logLvlWarn" onclick="setLogLevel('warn')"  >Warn</button>
+          <button class="btn-sm" id="logLvlErr"  onclick="setLogLevel('error')" >Error</button>
+          <button class="btn-sm" onclick="clearLogs()">Clear</button>
+          <label class="log-auto-scroll">
+            <input type="checkbox" id="logAutoScroll" checked onchange="toggleAutoScroll()"/> Auto-scroll
+          </label>
+        </div>
+        <div class="log-box" id="logBox"></div>
+        <div style="margin-top:8px;font-size:.74rem;color:var(--text3)" id="logStatus">Connecting…</div>
       </div>
 
       <!-- ── SETTINGS ── -->
       <div class="page" id="page-settings">
         <div class="settings-form">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+            <button class="btn-save" onclick="saveSettings()">Save Changes</button>
             <div id="saveToast" class="save-toast">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
               Settings saved!
             </div>
-            <button class="btn-save" onclick="saveSettings()">Save Changes</button>
+            <button class="btn-sm" style="margin-left:auto" onclick="confirmRestart()">⚡ Restart Bot</button>
           </div>
 
           <!-- Bot Behavior -->
@@ -438,19 +647,23 @@
             </div>
             <div class="setting-row">
               <div><div class="setting-label">Command Prefix</div><div class="setting-sub">Character to trigger commands (e.g. .menu)</div></div>
-              <input class="prefix-input" id="setPrefixInput" value="." maxlength="3"/>
+              <input class="short-input" id="setPrefixInput" value="." maxlength="3"/>
             </div>
             <div class="setting-row">
               <div><div class="setting-label">Bot Mode</div><div class="setting-sub">Who can use the bot</div></div>
               <div class="mode-radios">
                 <label class="mode-radio"><input type="radio" name="botMode" value="public" id="modePub"/><label for="modePub">Public</label></label>
-                <label class="mode-radio"><input type="radio" name="botMode" value="self" id="modeSelf"/><label for="modeSelf">Self</label></label>
-                <label class="mode-radio"><input type="radio" name="botMode" value="group" id="modeGrp"/><label for="modeGrp">Group</label></label>
+                <label class="mode-radio"><input type="radio" name="botMode" value="self"   id="modeSelf"/><label for="modeSelf">Self</label></label>
+                <label class="mode-radio"><input type="radio" name="botMode" value="group"  id="modeGrp"/><label for="modeGrp">Group</label></label>
               </div>
             </div>
             <div class="setting-row">
               <div><div class="setting-label">Maintenance Mode</div><div class="setting-sub">Block all commands temporarily</div></div>
               <label class="toggle"><input type="checkbox" id="setMaintenance"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Status Reaction Emoji</div><div class="setting-sub">Emoji for auto status reactions</div></div>
+              <input class="short-input" id="setStatusEmoji" value="❤️" style="width:72px;text-align:center;font-size:1.1rem"/>
             </div>
           </div>
 
@@ -477,7 +690,7 @@
               <label class="toggle"><input type="checkbox" id="setAutoStatusReact"/><span class="toggle-slider"></span></label>
             </div>
             <div class="setting-row">
-              <div><div class="setting-label">Welcome Message</div><div class="setting-sub">Send welcome when new members join</div></div>
+              <div><div class="setting-label">Welcome Message</div><div class="setting-sub">Send welcome when new members join groups</div></div>
               <label class="toggle"><input type="checkbox" id="setWelcome"/><span class="toggle-slider"></span></label>
             </div>
           </div>
@@ -493,79 +706,152 @@
               <label class="toggle"><input type="checkbox" id="setAntiSpam"/><span class="toggle-slider"></span></label>
             </div>
             <div class="setting-row">
-              <div><div class="setting-label">Status Emoji</div><div class="setting-sub">Emoji used for auto status reactions</div></div>
-              <input class="prefix-input" id="setStatusEmoji" value="❤️" style="width:80px;text-align:center;font-size:1.2rem"/>
+              <div><div class="setting-label">Anti-Call</div><div class="setting-sub">Auto-reject incoming WhatsApp calls</div></div>
+              <label class="toggle"><input type="checkbox" id="setAntiCall"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Anti-Delete</div><div class="setting-sub">Forward deleted messages to owner</div></div>
+              <label class="toggle"><input type="checkbox" id="setAntiDelete"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Anti View-Once</div><div class="setting-sub">Auto-save view-once media before it disappears</div></div>
+              <label class="toggle"><input type="checkbox" id="setAntiViewOnce"/><span class="toggle-slider"></span></label>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- ── PAIR ── -->
+      <!-- ── ADD NUMBER ── -->
       <div class="page" id="page-pair">
         <div class="pair-card">
           <h3>Add WhatsApp Number</h3>
-          <p>Enter a phone number with country code to connect it to the bot via pairing code.</p>
+          <p>Enter a phone number with country code to connect it via pairing code.</p>
           <div class="pair-form">
-            <input class="pair-input" id="pairSessionId" placeholder="Session ID (e.g. 923001234567)" />
-            <input class="pair-input" id="pairPhone" placeholder="Phone number (e.g. 923001234567)" />
-            <button class="btn-primary" id="pairBtn" onclick="doPair()" style="width:auto;padding:11px 24px">
+            <input class="pair-input" id="pairSessionId" placeholder="Session ID (e.g. 923001234567)"/>
+            <input class="pair-input" id="pairPhone"     placeholder="Phone number with country code"/>
+            <button class="btn-save" id="pairBtn" onclick="doPair()" style="align-self:start;padding:10px 22px">
               <span id="pairBtnText">Get Pairing Code</span>
             </button>
           </div>
-          <div class="pair-code-box" id="pairCodeBox">
-            <div class="pair-code" id="pairCodeVal"></div>
+          <div class="admin-pair-code-box" id="pairCodeBox">
+            <div class="admin-pair-code" id="pairCodeVal"></div>
             <div class="pair-code-sub">Enter this code in WhatsApp → Settings → Linked Devices → Link with phone number</div>
           </div>
-          <div id="pairErr" style="margin-top:12px;font-size:.84rem;color:var(--red);display:none"></div>
+          <div id="pairErr" style="margin-top:10px;font-size:.83rem;color:var(--red);display:none"></div>
         </div>
-
-        <div style="margin-top:24px">
-          <div class="section-hdr">
-            <div class="section-title">All Sessions</div>
-          </div>
+        <div style="margin-top:22px">
+          <div class="section-hdr"><div class="section-title">All Sessions</div></div>
           <div class="sessions-grid" id="pairSessions"></div>
         </div>
       </div>
 
     </div><!-- /content-area -->
   </main>
-</div>
+</div><!-- /app -->
 
 <script>
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 //  STATE
-// ══════════════════════════════════════════════════════════════
-let _sessions = [];
-let _stats    = {};
-let _settings = {};
-let _startMs  = 0;
-let _uptimeInterval = null;
-let _sseSource = null;
+// ══════════════════════════════════════════════════════════
+let _sessions = [], _stats = {}, _settings = {}, _startMs = 0;
+let _uptimeInterval = null, _sseSource = null;
+let _logAutoScroll = true, _logLevel = 'all', _logLastTs = 0, _logInterval = null;
+let _allLogLines = [];
+let _bcHistory = [];
 
 const PAGE_META = {
-  overview: ['Overview', 'Bot stats and connected sessions at a glance'],
-  sessions: ['Sessions', 'Manage all connected WhatsApp numbers'],
-  settings: ['Settings', 'Configure bot behavior and features'],
-  pair:     ['Add Number', 'Connect a new WhatsApp number via pairing code'],
+  overview:  ['Overview',   'Bot stats and sessions at a glance'],
+  sessions:  ['Sessions',   'Manage all connected WhatsApp numbers'],
+  broadcast: ['Broadcast',  'Send messages to connected sessions'],
+  logs:      ['Live Logs',  'Real-time bot log stream'],
+  settings:  ['Settings',   'Configure bot behavior and features'],
+  pair:      ['Add Number', 'Connect a new WhatsApp number via pairing code'],
 };
 
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 //  INIT
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', async () => {
-  document.getElementById('pwInput').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
-  const r = await fetch('/auth/check').then(r=>r.json()).catch(()=>({ok:false,passwordSet:true}));
-  if (!r.passwordSet) {
-    const w = document.getElementById('loginWarn');
-    w.textContent = '⚠️ ADMIN_PASSWORD is not set. Add it to your .env or Replit Secrets to secure the panel.';
-    w.style.display = 'block';
-  }
-  if (r.ok) { showApp(); } else { document.getElementById('loginScreen').style.display='flex'; }
+  // Always load public stats for landing
+  loadLandingStats();
+  loadLandingSessions();
+  startLandingSSE();
+
+  // Check if already logged in
+  const r = await fetch('/auth/check').then(r=>r.json()).catch(()=>({ok:false}));
+  if (r.ok) showApp();
 });
 
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+//  LANDING PAGE
+// ══════════════════════════════════════════════════════════
+async function loadLandingStats() {
+  try {
+    const d = await fetch('/api').then(r=>r.json());
+    document.getElementById('lConnected').textContent = d.sessions ?? '—';
+    document.getElementById('lPlugins').textContent   = d.plugins  ?? '—';
+    document.getElementById('lUptime').textContent    = d.uptime   ?? '—';
+  } catch {}
+}
+
+async function loadLandingSessions() {
+  try {
+    const d = await fetch('/status').then(r=>r.json());
+    const sessions = d.sessions || [];
+    const el = document.getElementById('lSessions');
+    if (!sessions.length) { el.innerHTML='<div style="color:var(--text2);font-size:.84rem;text-align:center;padding:16px">No sessions connected yet.</div>'; return; }
+    el.innerHTML = `<div class="mini-sessions">${sessions.map(s=>{
+      const dc = s.status!=='connected';
+      const init = (s.phone||s.id||'?').replace(/\D/g,'').slice(-2)||'??';
+      return `<div class="mini-card">
+        <div class="mini-avatar ${dc?'dc':''}">${init}</div>
+        <div class="mini-info">
+          <div class="mini-phone">+${s.phone||s.id}</div>
+          <div class="mini-status ${dc?'dc':''}"><span class="mini-dot"></span>${s.status}</div>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  } catch { document.getElementById('lSessions').innerHTML='<div style="color:var(--text2);font-size:.84rem;text-align:center;padding:16px">Could not load sessions.</div>'; }
+}
+
+function startLandingSSE() {
+  const es = new EventSource('/events');
+  es.addEventListener('pairingCode', e => {
+    const {code} = JSON.parse(e.data);
+    document.getElementById('lPairCode').textContent = code;
+    document.getElementById('lPairBox').style.display = 'block';
+    document.getElementById('lPairBtn').disabled = false;
+    document.getElementById('lPairBtn').textContent = 'Get Code';
+  });
+  es.addEventListener('status', () => { loadLandingSessions(); loadLandingStats(); });
+  es.onerror = () => { setTimeout(startLandingSSE, 6000); es.close(); };
+}
+
+async function landPair() {
+  const phone = document.getElementById('lPhone').value.trim().replace(/\D/g,'');
+  const errEl = document.getElementById('lPairErr');
+  errEl.style.display='none';
+  document.getElementById('lPairBox').style.display='none';
+  if (!phone || phone.length<7) { errEl.textContent='Please enter a valid phone number'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('lPairBtn');
+  btn.textContent='Getting…'; btn.disabled=true;
+  const r = await fetch('/session/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:phone,method:'pairing',phoneNumber:phone})}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  if (!r.ok) { errEl.textContent=r.error||'Failed'; errEl.style.display='block'; btn.textContent='Get Code'; btn.disabled=false; }
+  // Code arrives via SSE
+}
+
+function toggleAdminBox() {
+  const box = document.getElementById('loginBox');
+  const btn = document.getElementById('adminToggleBtn');
+  const open = box.style.display === 'block';
+  box.style.display = open ? 'none' : 'block';
+  btn.classList.toggle('open', !open);
+  if (!open) document.getElementById('pwInput').focus();
+}
+
+// ══════════════════════════════════════════════════════════
 //  AUTH
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 async function doLogin() {
   const btn = document.getElementById('loginBtn');
   const txt = document.getElementById('loginBtnText');
@@ -577,7 +863,7 @@ async function doLogin() {
   btn.disabled = true;
   const r = await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
   if (r.ok) { showApp(); }
-  else { showErr(err, r.error||'Login failed'); txt.textContent='Sign In'; btn.disabled=false; }
+  else { showErr(err, r.error||'Incorrect password'); txt.textContent='Sign In to Admin Panel'; btn.disabled=false; }
 }
 
 async function doLogout() {
@@ -587,11 +873,11 @@ async function doLogout() {
 
 function showErr(el,msg) { el.textContent=msg; el.style.display='block'; }
 
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 //  APP
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 async function showApp() {
-  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('landingView').style.display='none';
   const app = document.getElementById('app');
   app.style.display='flex';
   app.classList.add('visible');
@@ -619,9 +905,8 @@ async function loadSessions() {
   try {
     const d = await fetch('/admin/sessions').then(r=>r.json());
     _sessions = d.sessions||[];
-    const connected = _sessions.filter(s=>s.status==='connected').length;
-    document.getElementById('sessionBadge').textContent = connected;
-    document.getElementById('sessionBadge').className = 'nav-badge' + (connected===0?' red':'');
+    updateSessionBadge();
+    updateBcTargetSelect();
   } catch {}
 }
 
@@ -633,9 +918,9 @@ async function loadSettings() {
   } catch {}
 }
 
-// ══════════════════════════════════════════════════════════════
-//  SSE — real-time updates
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+//  SSE
+// ══════════════════════════════════════════════════════════
 function connectSSE() {
   if (_sseSource) _sseSource.close();
   _sseSource = new EventSource('/events');
@@ -644,16 +929,13 @@ function connectSSE() {
     const idx = _sessions.findIndex(s=>s.id===sessionId);
     if (idx>=0) _sessions[idx].status = status;
     else _sessions.push({id:sessionId,phone:sessionId,status});
-    const connected = _sessions.filter(s=>s.status==='connected').length;
-    document.getElementById('sessionBadge').textContent = connected;
-    document.getElementById('sessionBadge').className = 'nav-badge'+(connected===0?' red':'');
-    document.getElementById('ovConnected').textContent = connected;
-    renderSessionCard(sessionId);
+    updateSessionBadge();
+    updateBcTargetSelect();
     if (document.getElementById('page-sessions').classList.contains('active')) renderSessions();
     if (document.getElementById('page-overview').classList.contains('active')) renderOverviewSessions();
   });
   _sseSource.addEventListener('pairingCode', e => {
-    const {sessionId,code} = JSON.parse(e.data);
+    const {code} = JSON.parse(e.data);
     if (document.getElementById('page-pair').classList.contains('active')) {
       document.getElementById('pairCodeVal').textContent = code;
       document.getElementById('pairCodeBox').style.display='block';
@@ -662,27 +944,32 @@ function connectSSE() {
   _sseSource.onerror = () => { setTimeout(connectSSE, 5000); };
 }
 
-// ══════════════════════════════════════════════════════════════
+function updateSessionBadge() {
+  const connected = _sessions.filter(s=>s.status==='connected').length;
+  const badge = document.getElementById('sessionBadge');
+  badge.textContent = connected;
+  badge.className   = 'nav-badge'+(connected===0?' red':'');
+}
+
+// ══════════════════════════════════════════════════════════
 //  RENDER
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 function renderOverview() {
   const connected = _sessions.filter(s=>s.status==='connected').length;
   document.getElementById('ovConnected').textContent = connected;
-  document.getElementById('ovPlugins').textContent   = _stats.plugins||0;
-  document.getElementById('ovRam').textContent       = _stats.ram||0;
-  document.getElementById('ovUptime').textContent    = _stats.uptime||'—';
+  document.getElementById('ovPlugins').textContent   = _stats.plugins   || 0;
+  document.getElementById('ovRam').textContent       = _stats.ram       || 0;
+  document.getElementById('ovRamTotal').textContent  = _stats.ramTotal  || 0;
+  document.getElementById('ovGroups').textContent    = _stats.groups    || 0;
+  document.getElementById('ovUptime').textContent    = _stats.uptime    || '—';
   document.getElementById('ovTotalPlugins').textContent = `${_stats.plugins||0} total`;
-
-  // Category pills
   const catsEl = document.getElementById('ovCats');
   catsEl.innerHTML = '';
   for (const [cat,count] of Object.entries(_stats.categories||{})) {
-    const pill = document.createElement('div');
-    pill.className='cat-pill';
+    const pill=document.createElement('div'); pill.className='cat-pill';
     pill.innerHTML=`<strong>${count}</strong> ${cat}`;
     catsEl.appendChild(pill);
   }
-
   renderOverviewSessions();
 }
 
@@ -690,92 +977,79 @@ function renderOverviewSessions() {
   const connected = _sessions.filter(s=>s.status==='connected');
   const el = document.getElementById('ovSessions');
   document.getElementById('ovSessionMeta').textContent = `${connected.length} of ${_sessions.length} online`;
-  if (!connected.length) {
-    el.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>No numbers connected yet.<br/>Use <em>Add Number</em> to pair your first number.</p></div>';
-    return;
-  }
-  el.innerHTML = connected.map(s=>sessionCardHTML(s)).join('');
+  if (!connected.length) { el.innerHTML=emptyState('No connected numbers. Use <em>Add Number</em> to get started.'); return; }
+  el.innerHTML = connected.map(sessionCardHTML).join('');
 }
 
 function renderSessions() {
   const el = document.getElementById('sessionsGrid');
-  document.getElementById('sessionsSubtitle').textContent = `${_sessions.filter(s=>s.status==='connected').length} connected · ${_sessions.length} total`;
-  if (!_sessions.length) {
-    el.innerHTML='<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>No sessions found. Add a number to get started.</p></div>';
-    return;
-  }
-  el.innerHTML = _sessions.map(s=>sessionCardHTML(s)).join('');
-}
-
-function renderSessionCard(sessionId) {
-  const s = _sessions.find(x=>x.id===sessionId);
-  if (!s) return;
-  // update in-place in overview and sessions grids
-  ['ovSessions','sessionsGrid','pairSessions'].forEach(gridId=>{
-    const grid=document.getElementById(gridId);
-    const existing=grid.querySelector(`[data-session="${s.id}"]`);
-    if (existing) existing.outerHTML = sessionCardHTML(s);
-  });
-}
-
-function sessionCardHTML(s) {
-  const isConnected = s.status==='connected';
-  const initials = (s.phone||s.id||'?').replace(/\D/g,'').slice(-2)||'??';
-  const phoneDisplay = s.phone ? '+'+s.phone : s.id;
-  const name = s.name||'WhatsApp';
-  const time = s.connectedAt ? timeSince(s.connectedAt) : '—';
-  const badgeClass = isConnected?'connected': (s.status==='connecting'||s.status==='reconnecting'?'reconnecting':'disconnected');
-  const avatarClass = isConnected?'':'disconnected';
-  return `<div class="session-card ${isConnected?'':'disconnected'}" data-session="${s.id}">
-    <div class="sc-top">
-      <div class="sc-avatar ${avatarClass}">${initials}</div>
-      <div class="sc-info">
-        <div class="sc-phone">${phoneDisplay}</div>
-        <div class="sc-name">${escHtml(name)}</div>
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <span class="sc-badge ${badgeClass}"><span class="sc-badge-dot"></span>${s.status||'unknown'}</span>
-      ${s.id?`<span style="font-size:.72rem;color:var(--text3);font-family:monospace">${escHtml(s.id)}</span>`:''}
-    </div>
-    <div class="sc-meta">
-      <span class="sc-time">${isConnected?'Connected '+time:s.status}</span>
-      <button class="btn-disconnect" onclick="disconnectSession('${escHtml(s.id)}')" ${!isConnected?'disabled':''}>Disconnect</button>
-    </div>
-  </div>`;
+  const connected = _sessions.filter(s=>s.status==='connected').length;
+  document.getElementById('sessionsSubtitle').textContent = `${connected} connected · ${_sessions.length} total`;
+  if (!_sessions.length) { el.innerHTML=emptyState('No sessions. Add a number to get started.'); return; }
+  el.innerHTML = _sessions.map(sessionCardHTML).join('');
 }
 
 function renderPairSessions() {
   const el = document.getElementById('pairSessions');
-  if (!_sessions.length) { el.innerHTML='<div style="color:var(--text2);font-size:.85rem">No sessions yet.</div>'; return; }
-  el.innerHTML = _sessions.map(s=>sessionCardHTML(s)).join('');
+  if (!_sessions.length) { el.innerHTML='<div style="color:var(--text2);font-size:.84rem">No sessions yet.</div>'; return; }
+  el.innerHTML = _sessions.map(sessionCardHTML).join('');
 }
 
-// ══════════════════════════════════════════════════════════════
+function sessionCardHTML(s) {
+  const ok    = s.status==='connected';
+  const init  = (s.phone||s.id||'?').replace(/\D/g,'').slice(-2)||'??';
+  const phone = s.phone ? '+'+s.phone : s.id;
+  const name  = s.name||'WhatsApp';
+  const time  = s.connectedAt ? timeSince(s.connectedAt) : '—';
+  const bc    = ok?'connected':(s.status==='connecting'||s.status==='reconnecting'?'reconnecting':'disconnected');
+  return `<div class="session-card ${ok?'':'disconnected'}" data-session="${s.id}">
+    <div class="sc-top">
+      <div class="sc-avatar ${ok?'':'dc'}">${init}</div>
+      <div class="sc-info">
+        <div class="sc-phone">${escHtml(phone)}</div>
+        <div class="sc-name">${escHtml(name)}</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+      <span class="sc-badge ${bc}"><span class="sc-badge-dot"></span>${s.status||'unknown'}</span>
+      <span style="font-size:.7rem;color:var(--text3);font-family:monospace">${escHtml(s.id)}</span>
+    </div>
+    <div class="sc-meta">
+      <span class="sc-time">${ok?'Connected '+time:s.status}</span>
+      <button class="btn-disconnect" onclick="disconnectSession('${escHtml(s.id)}')" ${!ok?'disabled':''}>Disconnect</button>
+    </div>
+  </div>`;
+}
+
+function emptyState(msg) {
+  return `<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:44px;height:44px;color:var(--text3);margin-bottom:12px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>${msg}</p></div>`;
+}
+
+// ══════════════════════════════════════════════════════════
 //  SETTINGS
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 function applySettingsToForm(d) {
   const prefix = Array.isArray(d.prefix)?d.prefix[0]:(d.prefix||'.');
   document.getElementById('setPrefixInput').value = prefix;
-  const mode = d.botMode||'public';
-  const modeInput = document.querySelector(`input[name="botMode"][value="${mode}"]`);
-  if (modeInput) modeInput.checked=true;
-  document.getElementById('setMaintenance').checked  = !!d.maintenanceMode;
-  document.getElementById('setAutoRead').checked     = !!d.autoRead;
-  document.getElementById('setAutoTyping').checked   = !!d.autoTyping;
-  document.getElementById('setAutoStatusView').checked  = !!d.autoStatusView;
-  document.getElementById('setAutoStatusReact').checked = !!d.autoStatusReact;
-  document.getElementById('setWelcome').checked      = !!d.welcomeMessage;
-  document.getElementById('setAntiSpam').checked     = !!d.antiSpam;
-  document.getElementById('setStatusEmoji').value    = d.statusEmoji||'❤️';
+  const modeEl = document.querySelector(`input[name="botMode"][value="${d.botMode||'public'}"]`);
+  if (modeEl) modeEl.checked = true;
+  document.getElementById('setMaintenance').checked    = !!d.maintenanceMode;
+  document.getElementById('setAutoRead').checked       = !!d.autoRead;
+  document.getElementById('setAutoTyping').checked     = !!d.autoTyping;
+  document.getElementById('setAutoStatusView').checked = !!d.autoStatusView;
+  document.getElementById('setAutoStatusReact').checked= !!d.autoStatusReact;
+  document.getElementById('setWelcome').checked        = !!d.welcomeMessage;
+  document.getElementById('setAntiSpam').checked       = !!d.antiSpam;
+  document.getElementById('setAntiCall').checked       = !!d.antiCall;
+  document.getElementById('setAntiDelete').checked     = !!d.antiDelete;
+  document.getElementById('setAntiViewOnce').checked   = !!d.antiViewOnce;
+  document.getElementById('setStatusEmoji').value      = d.statusEmoji||'❤️';
 }
 
 async function saveSettings() {
-  const prefix = document.getElementById('setPrefixInput').value||'.';
-  const mode   = document.querySelector('input[name="botMode"]:checked')?.value||'public';
   const body = {
-    prefix:          [prefix],
-    botMode:         mode,
+    prefix:          [document.getElementById('setPrefixInput').value||'.'],
+    botMode:         document.querySelector('input[name="botMode"]:checked')?.value||'public',
     maintenanceMode: document.getElementById('setMaintenance').checked,
     autoRead:        document.getElementById('setAutoRead').checked,
     autoTyping:      document.getElementById('setAutoTyping').checked,
@@ -783,51 +1057,185 @@ async function saveSettings() {
     autoStatusReact: document.getElementById('setAutoStatusReact').checked,
     welcomeMessage:  document.getElementById('setWelcome').checked,
     antiSpam:        document.getElementById('setAntiSpam').checked,
+    antiCall:        document.getElementById('setAntiCall').checked,
+    antiDelete:      document.getElementById('setAntiDelete').checked,
+    antiViewOnce:    document.getElementById('setAntiViewOnce').checked,
     statusEmoji:     document.getElementById('setStatusEmoji').value||'❤️',
   };
   const r = await fetch('/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>({ok:false}));
-  const toast = document.getElementById('saveToast');
-  if (r.ok) { toast.style.display='inline-flex'; setTimeout(()=>toast.style.display='none',3000); }
+  if (r.ok) {
+    const toast = document.getElementById('saveToast');
+    toast.style.display='inline-flex';
+    setTimeout(()=>toast.style.display='none', 3000);
+  }
 }
 
-// ══════════════════════════════════════════════════════════════
+async function confirmRestart() {
+  if (!confirm('Restart the bot process?\n\nThe bot will be offline for a few seconds during restart.')) return;
+  const r = await fetch('/admin/restart',{method:'POST'}).then(r=>r.json()).catch(()=>({ok:false}));
+  if (r.ok) alert('Bot is restarting — page will auto-reload in 5s.');
+  setTimeout(()=>location.reload(), 5000);
+}
+
+// ══════════════════════════════════════════════════════════
 //  SESSIONS ACTIONS
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 async function disconnectSession(id) {
-  if (!confirm(`Disconnect +${id}?\n\nThis will remove this number from the bot. You can re-add it later.`)) return;
+  if (!confirm(`Disconnect this session?\n\nThis removes it from the bot. You can re-add it later.`)) return;
   const r = await fetch(`/admin/session/${encodeURIComponent(id)}`,{method:'DELETE'}).then(r=>r.json()).catch(()=>({ok:false}));
-  if (r.ok) { _sessions = _sessions.filter(s=>s.id!==id); renderSessions(); renderOverviewSessions(); renderPairSessions(); }
-  else alert('Failed to disconnect: '+(r.error||'Unknown error'));
+  if (r.ok) { _sessions = _sessions.filter(s=>s.id!==id); renderSessions(); renderOverviewSessions(); renderPairSessions(); updateBcTargetSelect(); }
+  else alert('Failed: '+(r.error||'Unknown error'));
 }
 
-async function refreshSessions() {
-  await loadSessions();
-  renderSessions();
+async function refreshSessions() { await loadSessions(); renderSessions(); }
+
+// ══════════════════════════════════════════════════════════
+//  BROADCAST
+// ══════════════════════════════════════════════════════════
+function updateBcTargetSelect() {
+  const sel = document.getElementById('bcTarget');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All connected sessions</option>';
+  for (const s of _sessions.filter(x=>x.status==='connected')) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = `+${s.phone||s.id} (${s.name||s.id})`;
+    sel.appendChild(opt);
+  }
+  sel.value = cur;
 }
 
-// ══════════════════════════════════════════════════════════════
+async function sendBroadcast() {
+  const msg = document.getElementById('bcMessage').value.trim();
+  const target = document.getElementById('bcTarget').value;
+  const resultEl = document.getElementById('bcResult');
+  const btn = document.getElementById('bcBtn');
+  const txt = document.getElementById('bcBtnText');
+  resultEl.style.display = 'none';
+  if (!msg) { resultEl.textContent='Please enter a message.'; resultEl.className='bc-result err'; resultEl.style.display='block'; return; }
+  txt.innerHTML = '<span class="spinner"></span> Sending…'; btn.disabled=true;
+  const r = await fetch('/admin/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,targetSession:target||undefined})}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  txt.textContent='Send Broadcast'; btn.disabled=false;
+  if (r.ok) {
+    resultEl.textContent = `✅ Sent to ${r.sent} session(s)${r.failed?`, ${r.failed} failed`:''}`;
+    resultEl.className = 'bc-result ok';
+    addBcHistory(msg, r.sent, r.failed||0);
+    document.getElementById('bcMessage').value = '';
+  } else {
+    resultEl.textContent = '❌ '+(r.error||'Failed to send');
+    resultEl.className = 'bc-result err';
+  }
+  resultEl.style.display = 'block';
+}
+
+function addBcHistory(msg, sent, failed) {
+  const now = new Date().toLocaleTimeString();
+  _bcHistory.unshift({ time:now, msg:msg.slice(0,60)+(msg.length>60?'…':''), sent, failed });
+  if (_bcHistory.length > 20) _bcHistory.pop();
+  renderBcHistory();
+}
+
+function renderBcHistory() {
+  const tbody = document.getElementById('bcHistory');
+  if (!_bcHistory.length) { tbody.innerHTML='<tr><td colspan="4" style="color:var(--text2);text-align:center;padding:20px">No broadcasts yet.</td></tr>'; return; }
+  tbody.innerHTML = _bcHistory.map(h=>`<tr>
+    <td style="color:var(--text2);white-space:nowrap">${h.time}</td>
+    <td>${escHtml(h.msg)}</td>
+    <td><span class="bc-badge sent">${h.sent}</span></td>
+    <td>${h.failed?`<span class="bc-badge fail">${h.failed}</span>`:'-'}</td>
+  </tr>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════
+//  LIVE LOGS
+// ══════════════════════════════════════════════════════════
+function setLogLevel(lvl) {
+  _logLevel = lvl;
+  ['all','info','warn','error'].forEach(l=>{
+    const el = document.getElementById(`logLvl${l.charAt(0).toUpperCase()+l.slice(1)}`);
+    if (el) el.classList.toggle('active', l===lvl);
+  });
+  renderLogs();
+}
+
+function filterLogs() { renderLogs(); }
+function clearLogs()  { _allLogLines=[]; renderLogs(); }
+function toggleAutoScroll() { _logAutoScroll = document.getElementById('logAutoScroll').checked; }
+
+function parseLogLevel(line) {
+  if (/"level":"(WARN|WARN )"|level.*warn|\bWARN\b/i.test(line))  return 'warn';
+  if (/"level":"(ERROR|ERR)"|level.*error|\bERROR\b|\bERR\b/i.test(line))  return 'error';
+  if (/"level":"(DEBUG|TRACE)"|level.*debug|\bDEBUG\b/i.test(line)) return 'debug';
+  if (/"level":"INFO"|level.*info|\bINFO\b|✅|🚀|📦|📡|🌐|🎂|👁️/i.test(line)) return 'info';
+  if (/⚠️|WARNING/i.test(line)) return 'warn';
+  if (/❌|ERROR|FATAL/i.test(line)) return 'error';
+  return 'plain';
+}
+
+function renderLogs() {
+  const filter = (document.getElementById('logFilter')?.value||'').toLowerCase();
+  const box = document.getElementById('logBox');
+  const lines = _allLogLines.filter(l=>{
+    if (_logLevel!=='all' && l.level!==_logLevel) return false;
+    if (filter && !l.line.toLowerCase().includes(filter)) return false;
+    return true;
+  });
+  box.innerHTML = lines.map(l=>{
+    let ts = '';
+    try { ts=`<span class="log-ts">${new Date(l.ts).toLocaleTimeString()}</span>`; } catch {}
+    return `<div class="log-line ${l.level}">${ts}${escHtml(l.line)}</div>`;
+  }).join('');
+  if (_logAutoScroll) box.scrollTop = box.scrollHeight;
+}
+
+async function pollLogs() {
+  try {
+    const url = `/admin/logs?limit=150&since=${_logLastTs}`;
+    const d = await fetch(url).then(r=>r.json());
+    if (d.logs && d.logs.length) {
+      for (const l of d.logs) {
+        _allLogLines.push({ ts:l.ts, line:l.line, level:parseLogLevel(l.line) });
+      }
+      if (_allLogLines.length > 500) _allLogLines = _allLogLines.slice(-500);
+      _logLastTs = d.lastTs || _logLastTs;
+      renderLogs();
+    }
+    document.getElementById('logStatus').textContent = `Last update: ${new Date().toLocaleTimeString()} · ${_allLogLines.length} lines`;
+  } catch { document.getElementById('logStatus').textContent = 'Connection error — retrying…'; }
+}
+
+function startLogPolling() {
+  if (_logInterval) clearInterval(_logInterval);
+  _logLastTs = 0; _allLogLines = [];
+  pollLogs();
+  _logInterval = setInterval(pollLogs, 3000);
+}
+
+function stopLogPolling() {
+  if (_logInterval) { clearInterval(_logInterval); _logInterval=null; }
+}
+
+// ══════════════════════════════════════════════════════════
 //  PAIR
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 async function doPair() {
-  const btn      = document.getElementById('pairBtn');
-  const btnTxt   = document.getElementById('pairBtnText');
-  const phone    = document.getElementById('pairPhone').value.trim().replace(/\D/g,'');
-  const sid      = document.getElementById('pairSessionId').value.trim() || phone;
-  const errEl    = document.getElementById('pairErr');
+  const phone  = document.getElementById('pairPhone').value.trim().replace(/\D/g,'');
+  const sid    = document.getElementById('pairSessionId').value.trim() || phone;
+  const errEl  = document.getElementById('pairErr');
   errEl.style.display='none';
   document.getElementById('pairCodeBox').style.display='none';
-  if (!phone || phone.length<7) { errEl.textContent='Please enter a valid phone number'; errEl.style.display='block'; return; }
-  btnTxt.innerHTML='<span class="spinner"></span> Getting code…';
-  btn.disabled=true;
+  if (!phone||phone.length<7) { errEl.textContent='Please enter a valid phone number'; errEl.style.display='block'; return; }
+  document.getElementById('pairBtnText').innerHTML='<span class="spinner"></span> Getting code…';
+  document.getElementById('pairBtn').disabled=true;
   const r = await fetch('/session/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,method:'pairing',phoneNumber:phone})}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
-  btnTxt.textContent='Get Pairing Code';
-  btn.disabled=false;
+  document.getElementById('pairBtnText').textContent='Get Pairing Code';
+  document.getElementById('pairBtn').disabled=false;
   if (!r.ok) { errEl.textContent=r.error||'Failed to create session'; errEl.style.display='block'; }
 }
 
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 //  NAVIGATION
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 function showPage(name, el) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
@@ -836,18 +1244,21 @@ function showPage(name, el) {
   const meta = PAGE_META[name]||[name,''];
   document.getElementById('pageTitle').textContent = meta[0];
   document.getElementById('pageSub').textContent   = meta[1];
-  if (name==='sessions') renderSessions();
-  if (name==='pair')     renderPairSessions();
-  if (name==='overview') renderOverview();
+  if (name==='sessions')  renderSessions();
+  if (name==='pair')      renderPairSessions();
+  if (name==='overview')  renderOverview();
+  if (name==='broadcast') { updateBcTargetSelect(); renderBcHistory(); }
+  if (name==='logs')      startLogPolling();
+  else                    stopLogPolling();
   closeSidebar();
 }
 
 function openSidebar()  { document.getElementById('sidebar').classList.add('open'); document.getElementById('sbOverlay').classList.add('visible'); }
 function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sbOverlay').classList.remove('visible'); }
 
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 //  UPTIME TICKER
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 function startUptimeTicker() {
   if (_uptimeInterval) clearInterval(_uptimeInterval);
   _uptimeInterval = setInterval(()=>{
@@ -855,11 +1266,11 @@ function startUptimeTicker() {
     const ms = Date.now()-_startMs;
     document.getElementById('uptimeTicker').textContent = fmtDuration(ms);
     document.getElementById('ovUptime').textContent = fmtDuration(ms);
-  }, 1000);
+  },1000);
 }
 
 function fmtDuration(ms) {
-  const s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60), d=Math.floor(h/24);
+  const s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);
   if (d>0) return `${d}d ${h%24}h ${m%60}m`;
   if (h>0) return `${h}h ${m%60}m ${s%60}s`;
   if (m>0) return `${m}m ${s%60}s`;
@@ -867,16 +1278,13 @@ function fmtDuration(ms) {
 }
 
 function timeSince(ts) {
-  const ms = Date.now()-ts, s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60), d=Math.floor(h/24);
+  const ms=Date.now()-ts,s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);
   if (d>0) return `${d}d ago`;
   if (h>0) return `${h}h ago`;
   if (m>0) return `${m}m ago`;
   return 'just now';
 }
 
-// ══════════════════════════════════════════════════════════════
-//  UTILS
-// ══════════════════════════════════════════════════════════════
 function escHtml(str) {
   return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

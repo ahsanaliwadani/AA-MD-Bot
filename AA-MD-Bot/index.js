@@ -44,6 +44,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const startTime = Date.now();
 const dashboardPath = path.join(__dirname, 'dashboard.html');
 
+// ── Log ring buffer (captures stdout for /admin/logs) ───────────────────────
+const _logBuffer = [];
+const _origStdoutWrite = process.stdout.write.bind(process.stdout);
+process.stdout.write = function (chunk, ...args) {
+  try {
+    const line = (Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk)).trim();
+    if (line) {
+      _logBuffer.push({ ts: Date.now(), line });
+      if (_logBuffer.length > 300) _logBuffer.shift();
+    }
+  } catch {}
+  return _origStdoutWrite(chunk, ...args);
+};
+
 // Flush pending MongoDB writes before crashing so no settings are lost.
 // flushAll is imported lazily to avoid circular import at module init time.
 async function _emergencyFlush(label, err) {
@@ -451,6 +465,62 @@ async function startServer() {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: err.message }));
       }
+      return;
+    }
+
+    // ── Admin: log viewer ───────────────────────────────────
+    if (p === '/admin/logs') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '150', 10), 300);
+      const since = parseInt(url.searchParams.get('since') || '0', 10);
+      const logs  = _logBuffer.filter(l => l.ts > since).slice(-limit);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ logs, lastTs: _logBuffer.length ? _logBuffer[_logBuffer.length - 1].ts : 0 }));
+      return;
+    }
+
+    // ── Admin: broadcast message ─────────────────────────────
+    if (p === '/admin/broadcast' && req.method === 'POST') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', async () => {
+        try {
+          const { message, targetSession } = JSON.parse(body || '{}');
+          if (!message?.trim()) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ ok: false, error: 'message is required' }));
+          }
+          const targets = targetSession ? [targetSession] : [...sessions.keys()];
+          let sent = 0, failed = 0;
+          for (const sid of targets) {
+            const sock = sessions.get(sid);
+            if (!sock || sessionStatus.get(sid) !== 'connected') { failed++; continue; }
+            try {
+              const ownerRaw = db.settings.getValue(`owner_${sid}`) || db.settings.getValue('owner') || sock.user?.id || '';
+              const jid = ownerRaw.includes('@') ? ownerRaw : `${ownerRaw.replace(/\D/g, '')}@s.whatsapp.net`;
+              if (jid && jid.length > 10) {
+                await sock.sendMessage(jid, { text: `📢 *Admin Broadcast*\n\n${message.trim()}` });
+                sent++;
+              } else failed++;
+            } catch { failed++; }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, sent, failed, total: targets.length }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message || 'Bad request' }));
+        }
+      });
+      return;
+    }
+
+    // ── Admin: restart hint (safe — just signals process to re-init) ─────────
+    if (p === '/admin/restart' && req.method === 'POST') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, message: 'Bot process will restart in 2s' }));
+      setTimeout(() => process.exit(0), 2000);
       return;
     }
 
