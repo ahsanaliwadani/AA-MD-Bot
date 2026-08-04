@@ -78,6 +78,15 @@ export default {
       `│\n` +
       `│  ▸ *${p}autoread on/off*\n` +
       `│     Silently read all messages\n` +
+      `│\n` +
+      `│  ▸ *${p}autostatusseen on/off*\n` +
+      `│     Auto-view all statuses silently\n` +
+      `│\n` +
+      `│  ▸ *${p}statusreact on/off*\n` +
+      `│     Auto-react to statuses with emoji\n` +
+      `│\n` +
+      `│  ▸ *${p}statusemoji 🔥*\n` +
+      `│     Change the status reaction emoji\n` +
       `╰${'─'.repeat(34)}\n\n` +
 
       `╭─── 📅  *MESSAGING TOOLS*\n` +
