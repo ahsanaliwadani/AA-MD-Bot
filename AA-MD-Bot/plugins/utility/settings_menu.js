@@ -81,7 +81,6 @@ export default {
       `👁️ Anti-ViewOnce: ${bool(s.antiViewOnce)}\n` +
       `📊 Status View : ${bool(s.autoStatusView, config.autoStatusView)}\n` +
       `❤️ Status React : ${bool(s.autoStatusReact, config.autoStatusReact)}\n` +
-      `📤 Auto Status : ${bool(s.autoStatus, config.autoStatus)}\n` +
       `🔧 Maintenance : ${bool(s.maintenanceMode)}\n` +
       `🛡️ Anti-Spam   : ${bool(s.antiSpam, config.antiSpam)}\n\n` +
 
