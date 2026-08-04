@@ -330,15 +330,23 @@ export const db = {
 
   reminders: {
     get: (id) => cache.reminders[id] || null,
+    all: () => cache.reminders,
     set: (id, data) => { cache.reminders[id] = data; scheduleSave('reminders'); },
     delete: (id) => { delete cache.reminders[id]; scheduleSave('reminders'); },
-    all: () => cache.reminders,
+  },
+
+  birthdays: {
+    all: () => cache.birthdays || {},
+    get: (id) => (cache.birthdays || {})[id] || null,
+    set: (id, data) => { if (!cache.birthdays) cache.birthdays = {}; cache.birthdays[id] = data; scheduleSave('birthdays'); },
+    delete: (id) => { if (cache.birthdays) { delete cache.birthdays[id]; scheduleSave('birthdays'); } },
   },
 
   reload: () => reloadDatabase(),
 
   notes: {
     get: (jid) => cache.notes[jid] || {},
+    all: () => cache.notes,
     setNote: (jid, name, data) => {
       if (!cache.notes[jid]) cache.notes[jid] = {};
       cache.notes[jid][name] = data;

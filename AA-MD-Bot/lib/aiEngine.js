@@ -211,14 +211,17 @@ export async function chatAI(jid, userMsg, systemPrompt) {
 
   let reply = null;
 
-  // 1. pollinations POST — primary (multi-turn context, openai-fast model)
-  reply = await tryPollinationsPost(messages).catch(() => null);
+  // 1. Race DC APIs (confirmed working) + ABZTech + ABLlama in parallel (max 13s)
+  reply = await raceSuccess([
+    tryDCGemini(userMsg).catch(() => null),
+    tryDCGpt5(userMsg).catch(() => null),
+    tryDCGrok(userMsg).catch(() => null),
+    tryABZTechGemini(userMsg).catch(() => null),
+    tryABLlama(userMsg).catch(() => null),
+  ], 13000);
 
-  // 2. ABZTech Gemini — fast free GET fallback
-  if (!reply) reply = await tryABZTechGemini(userMsg).catch(() => null);
-
-  // 3. AB Llama — fast free GET fallback
-  if (!reply) reply = await tryABLlama(userMsg).catch(() => null);
+  // 2. pollinations POST — multi-turn context fallback
+  if (!reply) reply = await tryPollinationsPost(messages).catch(() => null);
 
   // 4. pollinations GET — single-turn fallback
   if (!reply) {
@@ -269,12 +272,14 @@ export async function chatAIFast(jid, userMsg, systemPrompt) {
   let reply = null;
 
   // Phase 1: race all fast GET APIs in parallel — take whichever wins first (max 13s)
+  // DC APIs work best with just the user message (they have their own defaults).
+  // ABZTech/ABLlama can handle the full getPrompt (compact sys + context).
   reply = await raceSuccess([
     tryABZTechGemini(getPrompt).catch(() => null),
     tryABLlama(getPrompt).catch(() => null),
-    tryDCGemini(getPrompt).catch(() => null),
-    tryDCGpt5(getPrompt).catch(() => null),
-    tryDCGrok(getPrompt).catch(() => null),
+    tryDCGemini(userMsg).catch(() => null),
+    tryDCGpt5(userMsg).catch(() => null),
+    tryDCGrok(userMsg).catch(() => null),
   ], 13000);
 
   // Phase 2: pollinations POST with full system prompt + conversation history

@@ -19,7 +19,7 @@ const config = {
   tempDir: './temp',
   mediaDir: './media',
   maxFileSize: 50 * 1024 * 1024,
-  autoRead: true,
+  autoRead: false,
   autoTyping: true,
   antiSpam: true,
   spamInterval: 5,

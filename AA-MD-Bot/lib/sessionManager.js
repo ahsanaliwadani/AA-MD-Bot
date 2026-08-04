@@ -500,7 +500,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         const msg     = { key: update.key, message: content };
 
         // ── ViewOnce reveal ──────────────────────────────────────────────
-        await handleViewOnceMessage(msg, sock, sessionId);
+        try { await handleViewOnceMessage(msg, sock, sessionId); } catch {}
 
         // ── Anti-Edit: detect message edit via messages.update ───────────
         // Baileys delivers edits here as content.editedMessage OR content.protocolMessage (type 14)

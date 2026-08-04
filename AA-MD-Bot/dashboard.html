@@ -317,6 +317,31 @@
     .log-auto-scroll input { accent-color:var(--green); }
 
     /* ── BROADCAST ── */
+    /* ── Database panel ── */
+    .db-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+    .db-col-select { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 11px; color:var(--text); font-size:.86rem; outline:none; }
+    .db-col-select:focus { border-color:var(--green); }
+    .db-search { flex:1; min-width:160px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 11px; color:var(--text); font-size:.86rem; outline:none; }
+    .db-search:focus { border-color:var(--green); }
+    .db-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+    .db-table th { background:var(--surface2); color:var(--text2); font-weight:600; text-align:left; padding:9px 12px; border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; }
+    .db-table td { padding:8px 12px; border-bottom:1px solid var(--border); vertical-align:top; word-break:break-all; }
+    .db-table tr:hover td { background:var(--surface2); }
+    .db-key { font-family:monospace; color:var(--green); font-size:.8rem; }
+    .db-val { font-family:monospace; color:var(--text2); max-height:72px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; }
+    .db-btn { background:none; border:1px solid var(--border); border-radius:var(--radius-sm); padding:3px 9px; cursor:pointer; font-size:.75rem; color:var(--text2); transition:all .15s; }
+    .db-btn:hover { border-color:var(--green); color:var(--green); }
+    .db-btn.del:hover { border-color:var(--red); color:var(--red); }
+    /* DB modal */
+    .db-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); backdrop-filter:blur(4px); z-index:1000; align-items:center; justify-content:center; }
+    .db-modal-overlay.open { display:flex; }
+    .db-modal { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:560px; width:90%; }
+    .db-modal h3 { font-size:.95rem; font-weight:700; margin-bottom:14px; }
+    .db-modal label { font-size:.78rem; color:var(--text2); display:block; margin-bottom:4px; margin-top:12px; }
+    .db-modal input, .db-modal textarea { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:9px 11px; color:var(--text); font-size:.85rem; outline:none; font-family:monospace; }
+    .db-modal textarea { min-height:140px; resize:vertical; }
+    .db-modal input:focus, .db-modal textarea:focus { border-color:var(--green); }
+    .db-modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
     .bc-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; max-width:780px; }
     @media(max-width:640px) { .bc-grid { grid-template-columns:1fr; } }
     .bc-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; }
@@ -457,6 +482,10 @@
       <div class="nav-item" data-page="broadcast" onclick="showPage('broadcast',this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
         Broadcast
+      </div>
+      <div class="nav-item" data-page="database" onclick="showPage('database',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        Database
       </div>
       <div class="nav-item" data-page="logs" onclick="showPage('logs',this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
@@ -652,6 +681,31 @@
         </div>
       </div>
 
+      <!-- ── DATABASE ── -->
+      <div class="page" id="page-database">
+        <div class="db-toolbar">
+          <select class="db-col-select" id="dbCollection" onchange="loadDbCollection()">
+            <option value="settings">settings</option>
+            <option value="groups">groups</option>
+            <option value="sessionSettings">sessionSettings</option>
+            <option value="notes">notes</option>
+            <option value="sessions">sessions</option>
+            <option value="birthdays">birthdays</option>
+            <option value="reminders">reminders</option>
+          </select>
+          <input class="db-search" id="dbSearch" placeholder="🔍 Filter keys…" oninput="renderDbTable()"/>
+          <button class="btn-sm" onclick="loadDbCollection()" title="Refresh">⟳ Refresh</button>
+          <button class="btn-sm" style="color:var(--green)" onclick="openDbAdd()">＋ Add</button>
+        </div>
+        <div id="dbStatus" style="font-size:.8rem;color:var(--text3);margin-bottom:8px"></div>
+        <div style="overflow-x:auto">
+          <table class="db-table" id="dbTable">
+            <thead><tr><th>Key</th><th>Value</th><th style="width:100px">Actions</th></tr></thead>
+            <tbody id="dbBody"><tr><td colspan="3" style="text-align:center;color:var(--text2);padding:30px">Select a collection to load data.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- ── LIVE LOGS ── -->
       <div class="page" id="page-logs">
         <div class="log-toolbar">
@@ -791,6 +845,22 @@
   </main>
 </div><!-- /app -->
 
+<!-- ── DB Edit Modal ── -->
+<div class="db-modal-overlay" id="dbModalOverlay" onclick="if(event.target===this)closeDbModal()">
+  <div class="db-modal">
+    <h3 id="dbModalTitle">Edit Entry</h3>
+    <label>Key</label>
+    <input type="text" id="dbModalKey" placeholder="key"/>
+    <label>Value (JSON)</label>
+    <textarea id="dbModalValue" placeholder='e.g. true, "text", 42, {"a":1}'></textarea>
+    <div id="dbModalError" style="color:var(--red);font-size:.78rem;margin-top:6px;display:none"></div>
+    <div class="db-modal-actions">
+      <button class="btn-sm" onclick="closeDbModal()">Cancel</button>
+      <button class="btn-sm" style="background:var(--green);color:#000;border-color:var(--green)" onclick="saveDbEntry()">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ══════════════════════════════════════════════════════════
 //  STATE
@@ -805,6 +875,7 @@ const PAGE_META = {
   overview:  ['Overview',   'Bot stats and sessions at a glance'],
   sessions:  ['Sessions',   'Manage all connected WhatsApp numbers'],
   broadcast: ['Broadcast',  'Send messages to connected sessions'],
+  database:  ['Database',   'View and manage all bot database collections'],
   logs:      ['Live Logs',  'Real-time bot log stream'],
   settings:  ['Settings',   'Configure bot behavior and features'],
   pair:      ['Add Number', 'Connect a new WhatsApp number via pairing code'],
@@ -1279,6 +1350,100 @@ function renderBcHistory() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  DATABASE PANEL
+// ══════════════════════════════════════════════════════════
+let _dbData = {}, _dbCollection = 'settings', _dbEditKey = null;
+
+async function loadDbCollection() {
+  const col = document.getElementById('dbCollection').value;
+  _dbCollection = col;
+  document.getElementById('dbStatus').textContent = 'Loading…';
+  document.getElementById('dbBody').innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text2);padding:24px">Loading…</td></tr>';
+  try {
+    const r = await fetch(`/admin/db?collection=${encodeURIComponent(col)}`).then(r=>r.json());
+    if (!r.ok) throw new Error(r.error || 'Failed');
+    _dbData = r.data || {};
+    const keys = Object.keys(_dbData);
+    document.getElementById('dbStatus').textContent = `${keys.length} entr${keys.length===1?'y':'ies'} in ${col}`;
+    renderDbTable();
+  } catch(e) {
+    document.getElementById('dbStatus').textContent = '⚠️ ' + e.message;
+    document.getElementById('dbBody').innerHTML = `<tr><td colspan="3" style="text-align:center;color:var(--red);padding:24px">${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderDbTable() {
+  const filter = (document.getElementById('dbSearch')?.value || '').toLowerCase();
+  const keys = Object.keys(_dbData).filter(k => !filter || k.toLowerCase().includes(filter) || JSON.stringify(_dbData[k]).toLowerCase().includes(filter));
+  const tbody = document.getElementById('dbBody');
+  if (!keys.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text2);padding:24px">No entries found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = keys.map(k => {
+    const valStr = JSON.stringify(_dbData[k], null, 1);
+    return `<tr>
+      <td><span class="db-key">${escHtml(k)}</span></td>
+      <td><span class="db-val">${escHtml(valStr)}</span></td>
+      <td style="white-space:nowrap">
+        <button class="db-btn" onclick="openDbEdit(${JSON.stringify(k)})">Edit</button>
+        <button class="db-btn del" onclick="deleteDbEntry(${JSON.stringify(k)})">Del</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openDbEdit(key) {
+  _dbEditKey = key;
+  document.getElementById('dbModalTitle').textContent = 'Edit Entry';
+  document.getElementById('dbModalKey').value = key;
+  document.getElementById('dbModalKey').readOnly = true;
+  document.getElementById('dbModalValue').value = JSON.stringify(_dbData[key], null, 2);
+  document.getElementById('dbModalError').style.display = 'none';
+  document.getElementById('dbModalOverlay').classList.add('open');
+}
+
+function openDbAdd() {
+  _dbEditKey = null;
+  document.getElementById('dbModalTitle').textContent = 'Add Entry';
+  document.getElementById('dbModalKey').value = '';
+  document.getElementById('dbModalKey').readOnly = false;
+  document.getElementById('dbModalValue').value = '';
+  document.getElementById('dbModalError').style.display = 'none';
+  document.getElementById('dbModalOverlay').classList.add('open');
+}
+
+function closeDbModal() {
+  document.getElementById('dbModalOverlay').classList.remove('open');
+  _dbEditKey = null;
+}
+
+async function saveDbEntry() {
+  const key = document.getElementById('dbModalKey').value.trim();
+  const rawVal = document.getElementById('dbModalValue').value.trim();
+  const errEl = document.getElementById('dbModalError');
+  errEl.style.display = 'none';
+  if (!key) { errEl.textContent = 'Key is required.'; errEl.style.display='block'; return; }
+  let value;
+  try { value = JSON.parse(rawVal); } catch { errEl.textContent = 'Value must be valid JSON (e.g. true, 42, "text", {}, [])'; errEl.style.display='block'; return; }
+  try {
+    const r = await fetch('/admin/db/set', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ collection: _dbCollection, key, value }) }).then(r=>r.json());
+    if (!r.ok) throw new Error(r.error || 'Save failed');
+    closeDbModal();
+    await loadDbCollection();
+  } catch(e) { errEl.textContent = '⚠️ ' + e.message; errEl.style.display='block'; }
+}
+
+async function deleteDbEntry(key) {
+  if (!confirm(`Delete key "${key}" from ${_dbCollection}?\n\nThis cannot be undone.`)) return;
+  try {
+    const r = await fetch('/admin/db/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ collection: _dbCollection, key }) }).then(r=>r.json());
+    if (!r.ok) throw new Error(r.error || 'Delete failed');
+    await loadDbCollection();
+  } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════
 //  LIVE LOGS
 // ══════════════════════════════════════════════════════════
 function setLogLevel(lvl) {
@@ -1380,6 +1545,7 @@ function showPage(name, el) {
   if (name==='pair')      renderPairSessions();
   if (name==='overview')  { renderOverview(); loadStorage(); }
   if (name==='broadcast') { updateBcTargetSelect(); renderBcHistory(); }
+  if (name==='database')  { loadDbCollection(); }
   if (name==='logs')      startLogPolling();
   else                    stopLogPolling();
   closeSidebar();

@@ -573,8 +573,14 @@ async function startServer() {
             const sock = sessions.get(sid);
             if (!sock || sessionStatus.get(sid) !== 'connected') { failed++; continue; }
             try {
-              const ownerRaw = db.settings.getValue(`owner_${sid}`) || db.settings.getValue('owner') || sock.user?.id || '';
-              const jid = ownerRaw.includes('@') ? ownerRaw : `${ownerRaw.replace(/\D/g, '')}@s.whatsapp.net`;
+              // Use sock.user.id directly (same as working .broadcast plugin) — it has the
+              // correct device suffix (e.g. 923316041183:0@s.whatsapp.net) for self-chat.
+              // Fall back to owner number from DB if sock.user.id is somehow missing.
+              const selfId  = sock.user?.id || '';
+              const ownerRaw = db.settings.getValue(`owner_${sid}`) || db.settings.getValue('owner') || '';
+              const jid = selfId
+                ? selfId
+                : (ownerRaw.includes('@') ? ownerRaw : `${ownerRaw.replace(/\D/g, '')}@s.whatsapp.net`);
               if (jid && jid.length > 10) {
                 if (imgBuf) {
                   const caption = message.trim()
@@ -594,6 +600,102 @@ async function startServer() {
         } catch (err) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: err.message || 'Bad request' }));
+        }
+      });
+      return;
+    }
+
+    // ── Admin: database management ───────────────────────────────────────────
+    if (p === '/admin/db' && req.method === 'GET') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      const col = new URL(req.url, 'http://localhost').searchParams.get('collection');
+      const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'birthdays', 'sessions', 'reminders'];
+      if (!col || !ALLOWED_COLS.includes(col)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: true, collections: ALLOWED_COLS }));
+      }
+      let data;
+      if (col === 'settings') data = db.settings.get();
+      else if (col === 'sessionSettings') data = db.sessionSettings.all();
+      else if (col === 'groups') data = db.groups.all();
+      else if (col === 'sessions') data = db.sessions.all();
+      else if (col === 'notes') { try { data = db.notes.all(); } catch { data = {}; } }
+      else if (col === 'birthdays') { try { data = db.birthdays?.all?.() || {}; } catch { data = {}; } }
+      else if (col === 'reminders') { try { data = db.reminders?.all?.() || {}; } catch { data = {}; } }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, collection: col, data: data || {} }));
+    }
+
+    if (p === '/admin/db/set' && req.method === 'POST') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', () => {
+        try {
+          const { collection, key, value } = JSON.parse(body || '{}');
+          const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'sessions'];
+          if (!ALLOWED_COLS.includes(collection)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'Invalid collection' })); }
+          const val = typeof value === 'string' ? JSON.parse(value) : value;
+          if (collection === 'settings') {
+            if (!key) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: 'key required' })); }
+            db.settings.setValue(key, val);
+          } else if (collection === 'sessions') {
+            db.sessions.set(key, val);
+          } else if (collection === 'groups') {
+            // key format: "sessionId|groupId"
+            const [sId, gId] = key.split('|');
+            if (!gId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: 'key must be sessionId|groupId' })); }
+            db.groups.set(sId, gId, val);
+          } else if (collection === 'sessionSettings') {
+            const [sId, k] = key.split('|');
+            if (!k) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: 'key must be sessionId|field' })); }
+            db.sessionSettings.setValue(sId, k, val);
+          } else if (collection === 'notes') {
+            // key format: "jid|noteName"
+            const [jid, noteName] = key.split('|');
+            if (!noteName) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: 'key must be jid|noteName' })); }
+            db.notes.setNote(jid, noteName, val);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      });
+      return;
+    }
+
+    if (p === '/admin/db/delete' && req.method === 'POST') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', () => {
+        try {
+          const { collection, key } = JSON.parse(body || '{}');
+          const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'sessions'];
+          if (!ALLOWED_COLS.includes(collection)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'Invalid collection' })); }
+          if (collection === 'settings') {
+            const d = db.settings.get(); delete d[key]; db.settings.set({});
+            // Re-apply all remaining keys
+            Object.keys(d).forEach(k => db.settings.setValue(k, d[k]));
+          } else if (collection === 'groups') {
+            const [sId, gId] = key.split('|');
+            if (gId) db.groups.delete(sId, gId);
+          } else if (collection === 'sessions') {
+            db.sessions.delete(key);
+          } else if (collection === 'notes') {
+            const [jid, noteName] = key.split('|');
+            if (noteName) db.notes.delNote(jid, noteName); else db.notes.clear(jid);
+          } else if (collection === 'sessionSettings') {
+            const [sId] = key.split('|');
+            db.sessionSettings.delete(sId);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
         }
       });
       return;
