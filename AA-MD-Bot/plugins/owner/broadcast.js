@@ -18,7 +18,7 @@ export default {
   alias: ['bc', 'bcall', 'broadcastall'],
   description: 'Broadcast text or image to all connected numbers (self-chat only)',
   category: 'owner',
-  ownerOnly: true,
+  superOwnerOnly: true,
 
   async execute({ text, msg, sock, reply, react }) {
     const m = msg.message;

@@ -30,7 +30,8 @@ export default {
       `▸ *${p}mode* public/private   — Access mode\n` +
       `▸ *${p}maintenance* on/off    — Lock the bot\n` +
       `▸ *${p}restart*               — Reboot bot\n` +
-      `▸ *${p}broadcast* [msg]       — Blast to all groups\n` +
+      `▸ *${p}broadcast* [msg/img]   — Send to all numbers self-chat\n` +
+      `▸ *${p}update* [msg/img]     — Announcement to all numbers self-chat\n` +
       `▸ *${p}reload*                — Hot-reload all plugins\n` +
       `▸ *${p}setprefix* [char]      — Change prefix\n\n` +
 
