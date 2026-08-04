@@ -396,24 +396,6 @@
     <div class="land-stat"><div class="land-stat-num" id="lUptime">—</div><div class="land-stat-label">Uptime</div></div>
   </div>
 
-  <!-- Pair new number -->
-  <div class="land-section">
-    <div class="land-section-title">Connect a Number</div>
-    <div class="land-card">
-      <h3>📱 Pair via Code</h3>
-      <p>Enter your phone number with country code to get a pairing code, then link it in WhatsApp → Settings → Linked Devices.</p>
-      <div class="land-input-row">
-        <input class="land-input" id="lPhone" placeholder="923001234567" inputmode="tel"/>
-        <button class="btn-green" id="lPairBtn" onclick="landPair()">Get Code</button>
-      </div>
-      <div class="pair-err" id="lPairErr"></div>
-      <div class="pair-code-box" id="lPairBox">
-        <div class="pair-code" id="lPairCode"></div>
-        <div class="pair-code-sub">Enter this code in WhatsApp → Settings → Linked Devices → Link with phone number</div>
-      </div>
-    </div>
-  </div>
-
   <!-- Live sessions mini-grid -->
   <div class="land-section">
     <div class="land-section-title">Connected Sessions</div>
@@ -548,6 +530,14 @@
           </div>
         </div>
 
+        <!-- Server info bar -->
+        <div id="ovServerBar" style="display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.82rem;color:var(--text2)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;flex-shrink:0;color:var(--green)"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          <span>Server ID:</span>
+          <span id="ovServerId" style="color:var(--text);font-weight:600;font-family:monospace">—</span>
+          <span style="margin-left:auto;color:var(--text3)" id="ovBotVer">—</span>
+        </div>
+
         <div class="section-hdr">
           <div class="section-title">Plugin Categories</div>
           <div class="section-meta" id="ovTotalPlugins"></div>
@@ -575,12 +565,29 @@
         <div class="bc-grid">
           <div class="bc-card">
             <h3>📢 Send Broadcast</h3>
-            <p>Send a message to all connected sessions or a specific one. The message is delivered to the owner's chat.</p>
+            <p>Send a message (text + optional image) to all connected sessions or a specific one.</p>
             <select class="bc-select" id="bcTarget">
               <option value="">All connected sessions</option>
             </select>
             <textarea class="bc-textarea" id="bcMessage" placeholder="Type your broadcast message here…"></textarea>
+
+            <!-- Image upload -->
             <div style="margin-top:10px">
+              <label style="font-size:.82rem;color:var(--text2);display:block;margin-bottom:6px">📷 Attach Image <span style="color:var(--text3)">(optional)</span></label>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <label class="btn-sm" style="cursor:pointer;padding:7px 14px">
+                  Choose Image
+                  <input type="file" id="bcImage" accept="image/*" style="display:none" onchange="onBcImageChange(event)"/>
+                </label>
+                <span id="bcImageName" style="font-size:.8rem;color:var(--text2)">No image selected</span>
+                <button class="btn-sm" id="bcImageClear" onclick="clearBcImage()" style="display:none;color:var(--red)">✕ Remove</button>
+              </div>
+              <div id="bcImagePreview" style="display:none;margin-top:8px">
+                <img id="bcImagePreviewImg" style="max-width:100%;max-height:160px;border-radius:var(--radius-sm);border:1px solid var(--border)"/>
+              </div>
+            </div>
+
+            <div style="margin-top:12px">
               <button class="btn-save" id="bcBtn" onclick="sendBroadcast()">
                 <span id="bcBtnText">Send Broadcast</span>
               </button>
@@ -595,6 +602,7 @@
               <li>✅ Messages are sent to the <strong style="color:var(--text)">owner's self-chat</strong> for each session.</li>
               <li>✅ Only <strong style="color:var(--text)">connected sessions</strong> receive messages.</li>
               <li>✅ Disconnected sessions are automatically skipped.</li>
+              <li>✅ Images are supported — attach any JPG/PNG/WEBP.</li>
               <li>⚠️ Large broadcasts may take a few seconds.</li>
               <li>⚠️ Don't spam — wait for result before sending again.</li>
             </ul>
@@ -962,6 +970,8 @@ function renderOverview() {
   document.getElementById('ovRamTotal').textContent  = _stats.ramTotal  || 0;
   document.getElementById('ovGroups').textContent    = _stats.groups    || 0;
   document.getElementById('ovUptime').textContent    = _stats.uptime    || '—';
+  if (_stats.serverId) document.getElementById('ovServerId').textContent = _stats.serverId;
+  if (_stats.version)  document.getElementById('ovBotVer').textContent   = 'v' + _stats.version;
   document.getElementById('ovTotalPlugins').textContent = `${_stats.plugins||0} total`;
   const catsEl = document.getElementById('ovCats');
   catsEl.innerHTML = '';
@@ -1105,6 +1115,35 @@ function updateBcTargetSelect() {
   sel.value = cur;
 }
 
+// ── Broadcast image helpers ──────────────────────────────────────────────────
+let _bcImageBase64 = null;
+let _bcImageMime   = null;
+
+function onBcImageChange(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const dataUrl = ev.target.result;
+    _bcImageBase64 = dataUrl.split(',')[1];
+    _bcImageMime   = file.type || 'image/jpeg';
+    document.getElementById('bcImageName').textContent = file.name;
+    document.getElementById('bcImagePreviewImg').src = dataUrl;
+    document.getElementById('bcImagePreview').style.display = 'block';
+    document.getElementById('bcImageClear').style.display = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearBcImage() {
+  _bcImageBase64 = null;
+  _bcImageMime   = null;
+  document.getElementById('bcImage').value = '';
+  document.getElementById('bcImageName').textContent = 'No image selected';
+  document.getElementById('bcImagePreview').style.display = 'none';
+  document.getElementById('bcImageClear').style.display = 'none';
+}
+
 async function sendBroadcast() {
   const msg = document.getElementById('bcMessage').value.trim();
   const target = document.getElementById('bcTarget').value;
@@ -1112,15 +1151,18 @@ async function sendBroadcast() {
   const btn = document.getElementById('bcBtn');
   const txt = document.getElementById('bcBtnText');
   resultEl.style.display = 'none';
-  if (!msg) { resultEl.textContent='Please enter a message.'; resultEl.className='bc-result err'; resultEl.style.display='block'; return; }
+  if (!msg && !_bcImageBase64) { resultEl.textContent='Please enter a message or attach an image.'; resultEl.className='bc-result err'; resultEl.style.display='block'; return; }
   txt.innerHTML = '<span class="spinner"></span> Sending…'; btn.disabled=true;
-  const r = await fetch('/admin/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,targetSession:target||undefined})}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  const payload = { message: msg, targetSession: target || undefined };
+  if (_bcImageBase64) { payload.image = _bcImageBase64; payload.imageMime = _bcImageMime; }
+  const r = await fetch('/admin/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
   txt.textContent='Send Broadcast'; btn.disabled=false;
   if (r.ok) {
     resultEl.textContent = `✅ Sent to ${r.sent} session(s)${r.failed?`, ${r.failed} failed`:''}`;
     resultEl.className = 'bc-result ok';
-    addBcHistory(msg, r.sent, r.failed||0);
+    addBcHistory(msg||'[image]', r.sent, r.failed||0);
     document.getElementById('bcMessage').value = '';
+    clearBcImage();
   } else {
     resultEl.textContent = '❌ '+(r.error||'Failed to send');
     resultEl.className = 'bc-result err';

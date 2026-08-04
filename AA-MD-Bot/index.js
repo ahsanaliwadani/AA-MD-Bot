@@ -412,6 +412,7 @@ async function startServer() {
         ramTotal:   Math.round(mem.heapTotal / 1024 / 1024),
         version:    config.version,
         botName:    config.botName,
+        serverId:   process.env.SERVER_ID || 'server-1',
       }));
       return;
     }
@@ -486,11 +487,18 @@ async function startServer() {
       req.on('data', d => body += d);
       req.on('end', async () => {
         try {
-          const { message, targetSession } = JSON.parse(body || '{}');
-          if (!message?.trim()) {
+          const { message, targetSession, image, imageMime } = JSON.parse(body || '{}');
+          if (!message?.trim() && !image) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ ok: false, error: 'message is required' }));
+            return res.end(JSON.stringify({ ok: false, error: 'message or image is required' }));
           }
+          // Convert base64 image to buffer if present
+          let imgBuf = null;
+          let imgMime = imageMime || 'image/jpeg';
+          if (image) {
+            try { imgBuf = Buffer.from(image, 'base64'); if (imgBuf.length < 100) imgBuf = null; } catch { imgBuf = null; }
+          }
+          const header = `📢 *Admin Broadcast*`;
           const targets = targetSession ? [targetSession] : [...sessions.keys()];
           let sent = 0, failed = 0;
           for (const sid of targets) {
@@ -500,8 +508,16 @@ async function startServer() {
               const ownerRaw = db.settings.getValue(`owner_${sid}`) || db.settings.getValue('owner') || sock.user?.id || '';
               const jid = ownerRaw.includes('@') ? ownerRaw : `${ownerRaw.replace(/\D/g, '')}@s.whatsapp.net`;
               if (jid && jid.length > 10) {
-                await sock.sendMessage(jid, { text: `📢 *Admin Broadcast*\n\n${message.trim()}` });
+                if (imgBuf) {
+                  const caption = message?.trim()
+                    ? `${header}\n\n${message.trim()}`
+                    : header;
+                  await sock.sendMessage(jid, { image: imgBuf, mimetype: imgMime, caption });
+                } else {
+                  await sock.sendMessage(jid, { text: `${header}\n\n${message.trim()}` });
+                }
                 sent++;
+                await new Promise(r => setTimeout(r, 600));
               } else failed++;
             } catch { failed++; }
           }

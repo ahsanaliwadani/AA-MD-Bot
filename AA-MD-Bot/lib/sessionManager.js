@@ -515,12 +515,15 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
               : (settings.antiedit ?? false);
 
             if (aeEnabled) {
-              // Baileys source (process-message.js MESSAGE_EDIT case) emits:
-              //   update.key.id          = ORIGINAL message ID (Baileys swaps the key)
-              //   update.update.message  = { editedMessage: { message: <new content> } }
-              // So the original ID is on update.key, not inside editWrapper.
+              // Baileys delivers edits in two shapes via messages.update:
+              //   Shape A: content.editedMessage.message = { conversation: 'new text' }
+              //   Shape B: content.protocolMessage = { type:14, editedMessage: { conversation: 'new text' } }
+              // original message ID is always on update.key.id (Baileys keeps the original key)
               const originalId = update.key?.id;
-              const ewMsg      = (content.editedMessage?.message) || {};
+              const ewMsg      =
+                content.editedMessage?.message      // Shape A
+                || content.protocolMessage?.editedMessage  // Shape B
+                || {};
               const newText    =
                 ewMsg.conversation ||
                 ewMsg.extendedTextMessage?.text ||
@@ -710,15 +713,13 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
             : (settings.antiedit ?? false);
 
           if (aeEnabled) {
-            // messages.upsert editedMessage can arrive in two shapes:
+            // messages.upsert editedMessage arrives in two shapes:
             // Shape A (Baileys normalised): editedMessage.message = { conversation: "new" }
-            //   originalId from editedMessage.message.protocolMessage.key.id (if present)
-            // Shape B (raw protocolMessage re-emitted): editedMessage.message.protocolMessage
-            //   exists with type=MESSAGE_EDIT — get text from protocolMessage.editedMessage
+            // Shape B (raw re-emitted):     editedMessage.message.protocolMessage.editedMessage has text
             const ewMsg      = editWrapper.message || {};
             const proto2     = ewMsg.protocolMessage || {};
             const editedBody = proto2.editedMessage || {};
-            // Original message ID is in the protocolMessage key for upsert path
+            // Original message ID: from the protocolMessage key first, then the msg key
             const originalId = proto2.key?.id || msg.key?.id;
 
             const newText =
@@ -726,6 +727,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
               ewMsg.extendedTextMessage?.text ||
               editedBody.conversation ||
               editedBody.extendedTextMessage?.text ||
+              // Also check if editWrapper itself has the text directly (some Baileys builds)
+              editWrapper.conversation ||
+              editWrapper.extendedTextMessage?.text ||
               '[non-text edit]';
 
             const editorJid = msg.key.participant || msg.key.remoteJid;
