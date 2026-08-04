@@ -9,7 +9,7 @@
 // ============================================
 
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
-import { sessions } from '../../lib/sessionManager.js';
+import { sessions, sessionStatus } from '../../lib/sessionManager.js';
 
 const FOOTER = '\n\n> 🤖 *AA MD Bot* | 👨‍💻 *Ahsan Ali Wadani*';
 
@@ -47,7 +47,7 @@ export default {
     // ── Collect all live connected sessions ──────────────────────────────────
     const connected = [];
     for (const [sessionId, s] of sessions.entries()) {
-      if (s?.ws?.readyState === 1 && s?.user?.id) {
+      if (sessionStatus.get(sessionId) === 'connected' && s?.user?.id) {
         const ownJid = s.user.id.replace(/:.*@/, '@');
         const phone  = s.user.id.split('@')[0].split(':')[0];
         connected.push({ sessionId, sock: s, ownJid, phone });
