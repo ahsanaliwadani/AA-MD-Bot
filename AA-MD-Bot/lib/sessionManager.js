@@ -4,6 +4,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   isJidBroadcast,
   downloadMediaMessage,
+  Browsers,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -141,6 +142,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, silentLogger),
     },
+    browser: Browsers.ubuntu('Chrome'),
     printQRInTerminal: !usePairingCode,
     logger: silentLogger,
     generateHighQualityLinkPreview: true,

@@ -32,7 +32,7 @@
     "@fantox01/search-it": "^1.0.0",
     "@gradio/client": "^2.3.1",
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "7.0.0-rc13",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "archiver": "^8.0.0",
     "axios": "^1.7.0",
     "canvacord": "^6.0.4",
