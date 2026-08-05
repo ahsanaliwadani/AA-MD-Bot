@@ -1,0 +1,50 @@
+Standard antiedit.js Plugin CodeAap is code ko direct copy karke apni us repo ke plugins/ folder mein antiedit.js ke naam se save kar sakte hain, yeh un sabhi multi-device repositories ke command architecture ke sath match kar jayega:javascript// ==========================================
+// Plugin Name: Anti-Edit System (antiedit.js)
+// Framework Compatibility: Modular JS Bots
+// ==========================================
+
+let handler = m => m;
+
+handler.before = async function (m, { conn, isBotAdmin, isAdmin }) {
+    // 1. WhatsApp protocol check karein (Type 14 = Message Edit Event)
+    if (m.mtype === 'protocolMessage' && m.message?.protocolMessage?.type === 14) {
+        
+        const protocolMsg = m.message.protocolMessage;
+        const key = protocolMsg.key;
+        const chatJid = key.remoteJid;
+        
+        // 2. Naya text content extract karein layers se
+        const editedText = protocolMsg.editedMessage?.conversation 
+            || protocolMsg.editedMessage?.extendedTextMessage?.text 
+            || protocolMsg.editedMessage?.imageMessage?.caption;
+
+        // Agar text blank hai ya koi aur metadata update hai toh skip karein
+        if (!editedText) return true;
+
+        // 3. Sender info compile karein (Group vs DM)
+        const sender = key.participant || chatJid;
+
+        // 4. Alert UI Text Layout
+        let alertReport = `*⚠️ ANTI-EDIT LOGGED ⚠️*\n\n`;
+        alertReport += `👤 *User:* @${sender.split('@')[0]}\n`;
+        alertReport += `💬 *New Message:* ${editedText}\n\n`;
+        alertReport += `_Note: Yeh message edit event track kiya gaya hai._`;
+
+        // 5. Chat mein details respond karein
+        await conn.sendMessage(chatJid, {
+            text: alertReport,
+            mentions: [sender]
+        }, { quoted: m });
+    }
+    return true;
+};
+
+// Custom variables (Taki handler globally automatic activate rahe)
+handler.customPrefix = /.*/;
+handler.command = new RegExp;
+
+module.exports = handler;
+Use code with caution.Isko Dynamic Kaise Banayein (With Configuration)?Agar aap chahte hain ke yeh feature sirf tabhi chale jab aap bot ko command dein (jaise .antiedit on), toh aap handler.before ke shuru mein yeh check daal sakte hain:javascript// Chat ki database settings check karne ke liye
+let chat = global.db.data.chats[m.chat];
+if (chat && !chat.antiedit) return true; 
+Use code with caution.

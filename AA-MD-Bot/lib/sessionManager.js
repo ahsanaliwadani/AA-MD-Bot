@@ -492,8 +492,67 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     try {
       if (!msg.message) return;
 
-      // ── Anti-Delete: detect protocolMessage REVOKE ────────────
+      // ── Anti-Edit: detect protocolMessage type 14 (MESSAGE_EDIT) ─────────────
+      // Edits arrive here FIRST as raw protocolMessage.type===14 BEFORE Baileys
+      // converts them to messages.update. This is the authoritative handler.
       const proto = msg.message?.protocolMessage;
+      if (proto?.type === 14) {
+        try {
+          // proto.key has the ORIGINAL message's key (remoteJid, id, participant)
+          const editKey   = proto.key || {};
+          // For groups, chatJid is in proto.key.remoteJid (group JID)
+          // For DMs, it's the sender's JID
+          const chatJid   = editKey.remoteJid || msg.key.remoteJid;
+          const isGroup   = chatJid?.endsWith('@g.us');
+          const settings  = db.settings.get();
+          const aeEnabled = isGroup
+            ? (db.groups.get(sessionId, chatJid)?.antiedit ?? settings.antiedit ?? false)
+            : (settings.antiedit ?? false);
+
+          if (aeEnabled && chatJid && !editKey.fromMe) {
+            // New text from the edited message
+            const editedMsg = proto.editedMessage || {};
+            const newText   = editedMsg.conversation
+              || editedMsg.extendedTextMessage?.text
+              || editedMsg.imageMessage?.caption
+              || '[non-text edit]';
+
+            const originalId = editKey.id;
+            // Editor: in groups it's proto.key.participant, in DMs it's proto.key.remoteJid
+            const editorJid = editKey.participant || editKey.remoteJid || msg.key.remoteJid;
+            const editorNum = editorJid?.split('@')[0]?.split(':')[0] || '?';
+            const selfNum   = sock.user?.id?.split('@')[0]?.split(':')[0];
+            const selfJid   = selfNum ? `${selfNum}@s.whatsapp.net` : null;
+            const now       = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
+
+            if (selfJid) {
+              const original = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
+              const origText = original?.message?.conversation
+                || original?.message?.extendedTextMessage?.text
+                || '[original not in cache]';
+              const name    = original?.pushName || msg.pushName || editorNum;
+
+              await sock.sendMessage(selfJid, {
+                text:
+                  `✏️ *Message Edited*\n\n` +
+                  `👤 By: *${name}* (+${editorNum})\n` +
+                  `📍 Where: ${isGroup ? 'Group' : 'DM'}\n` +
+                  `🕐 Time: ${now}\n\n` +
+                  `📄 *Before:* ${origText.slice(0, 300)}\n` +
+                  `📝 *After:*  ${newText.slice(0, 300)}`,
+              }).catch(() => {});
+
+              // Forward original message so owner sees it in native WhatsApp format
+              if (original) {
+                await sock.sendMessage(selfJid, { forward: original, force: true }).catch(() => {});
+              }
+            }
+          }
+        } catch {}
+        return; // protocolMessage — not a regular chat message
+      }
+
+      // ── Anti-Delete: detect protocolMessage REVOKE ────────────
       if (proto?.type === 0) { // type 0 = REVOKE (message deleted)
         try {
           const deletedKey = proto.key;
