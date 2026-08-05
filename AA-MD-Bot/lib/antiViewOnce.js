@@ -466,8 +466,20 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       ? "emoji-trigger"
       : `keyword(${voKeyword})`;
 
-    // ── Exact stanzaId lookup (works when owner used WhatsApp Reply) ──────────
+    // ── Safety: emoji trigger MUST be a proper reply to a message ────────────
+    // If there is no contextInfo at all the user just typed 4 emojis in free-air
+    // (not replying to anything).  We cannot know which viewonce they mean, so we
+    // abort here instead of guessing — prevents false triggers and wrong reveals.
     const ctxInfo = extractContextInfo(msg.message);
+    const ctxInfoDirect0 =
+      msg.message?.extendedTextMessage?.contextInfo ||
+      msg.message?.imageMessage?.contextInfo ||
+      msg.message?.videoMessage?.contextInfo ||
+      null;
+    const hasReply = !!(ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || ctxInfoDirect0?.quotedMessage);
+    if (!hasReply) return; // not a reply — ignore safely
+
+    // ── Exact stanzaId lookup (works when owner used WhatsApp Reply) ──────────
     const stanzaId = ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || null;
 
     let stored = stanzaId ? viewOnceStore.get(stanzaId) : null;
@@ -481,35 +493,22 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       }
     }
 
-    // ── chatJid fallback scan ─────────────────────────────────────────────────
-    // Used when:
-    //  (a) stanzaId didn't match (ID format mismatch between devices), OR
-    //  (b) no stanzaId (owner typed keyword/emoji without using WhatsApp Reply)
-    if (!stored) {
+    // ── chatJid fallback scan (same chat only, stanzaId required) ────────────
+    // ONLY runs when: the user properly replied (stanzaId present) but the store
+    // entry wasn't found yet (timing race between messages.update handlers).
+    // NEVER does a global scan — that risks revealing a different person's content.
+    if (!stored && stanzaId) {
       const chatJid = msg.key.remoteJid;
-      const hadStanzaId = !!(ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId);
-      const TTL = 60 * 60 * 1000; // 60-min in-memory TTL
-
-      if (viewOnceStore.size > 0) {
-        let newest = null;
-
-        // Pass 1: prefer entries from same chat
-        for (const [, entry] of viewOnceStore) {
-          if (entry.chatJid === chatJid) {
-            if (!newest || entry.timestamp > newest.timestamp) newest = entry;
-          }
+      const TTL = 60 * 60 * 1000;
+      let newest = null;
+      for (const [, entry] of viewOnceStore) {
+        if (entry.chatJid === chatJid) {
+          if (!newest || entry.timestamp > newest.timestamp) newest = entry;
         }
-
-        // Pass 2: global scan — when no stanzaId or same-chat scan found nothing
-        if (!newest || !hadStanzaId) {
-          for (const [, entry] of viewOnceStore) {
-            if (!newest || entry.timestamp > newest.timestamp) newest = entry;
-          }
-        }
-
-        if (newest && Date.now() - newest.timestamp < TTL) stored = newest;
       }
+      if (newest && Date.now() - newest.timestamp < TTL) stored = newest;
     }
+    // If stanzaId was null (no proper reply quote) we do NOT scan — abort below.
 
     const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
     const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
@@ -636,8 +635,9 @@ export async function handleManualReveal(msgId, sock, replyJid) {
   const stored = viewOnceStore.get(id);
 
   if (!stored) {
+    // ⚠️ Always send errors to owner's self-chat only — never to the group/DM
     await sock
-      .sendMessage(replyJid, {
+      .sendMessage(selfJid, {
         text:
           `❌ *View-Once not found*\n\n` +
           `Message ID not in cache.\n` +
