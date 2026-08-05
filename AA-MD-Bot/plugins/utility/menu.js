@@ -53,7 +53,7 @@ const CAT_CFG = {
   media:    { e: "🎨",  n: "MEDIA TOOLS",  max:  0 },  // show all
   fun:      { e: "🎮",  n: "FUN & GAMES",  max:  0 },  // show all
   group:    { e: "👥",  n: "GROUP",         max:  0 },  // show all
-  admin:    { e: "🛡️",  n: "GROUP ADMIN",  max:  0 },  // show all (incl. new antiedit/antideletestatus)
+  admin:    { e: "🛡️",  n: "GROUP ADMIN",  max:  0 },
   tools:    { e: "🔧",  n: "TOOLS",         max:  0 },  // show all
   utility:  { e: "🛠️",  n: "UTILITY",      max:  0 },  // show all (incl. theme)
   gb:       { e: "📱",  n: "GB FEATURES",  max:  0 },  // show all
@@ -159,9 +159,8 @@ function buildOwnerSection(pref, isSuperOwnerUser, theme) {
     C("stripfwd",                "Re-send without 'Forwarded' & Channel tags"),
     C("aj",                      "Delete all my messages in this chat"),
     L(""),
-    L("🗑️ *Anti-Delete / Anti-Edit*"),
+    L("🗑️ *Anti-Delete*"),
     C("antidelete on/off",       "Recover deleted msgs → (You) chat"),
-    C("antiedit on/off",         "Catch edited messages → (You) chat"),
     L(""),
     L("🤖 *Auto Features*"),
     C("autoread on/off",         "Silent read all messages"),

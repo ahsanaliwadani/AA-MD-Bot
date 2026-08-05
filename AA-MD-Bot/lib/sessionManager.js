@@ -439,46 +439,6 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         // ── ViewOnce reveal ──────────────────────────────────────────────
         try { await handleViewOnceMessage(msg, sock, sessionId); } catch {}
 
-        // ── Anti-Edit: detect edit via messages.update (type 14) ─────────
-        // Shape A: content.editedMessage  |  Shape B: content.protocolMessage.type===14
-        const editWrapper = content.editedMessage
-          || (content.protocolMessage?.type === 14 ? content : null);
-        if (editWrapper && chatJid && !update.key?.fromMe) {
-          try {
-            const isGroup  = chatJid.endsWith('@g.us');
-            const settings = db.settings.get();
-            const aeOn     = isGroup
-              ? (db.groups.get(sessionId, chatJid)?.antiedit ?? settings.antiedit ?? false)
-              : (settings.antiedit ?? false);
-            if (aeOn) {
-              const ewMsg    = content.editedMessage?.message
-                || content.protocolMessage?.editedMessage || {};
-              const newText  = ewMsg.conversation
-                || ewMsg.extendedTextMessage?.text
-                || ewMsg.imageMessage?.caption || '[non-text edit]';
-              const origId   = update.key?.id;
-              const editorJid = update.key?.participant || chatJid;
-              const editorNum = editorJid?.split('@')[0]?.split(':')[0] || '?';
-              const selfNum  = sock.user?.id?.split('@')[0]?.split(':')[0];
-              const selfJid  = selfNum ? `${selfNum}@s.whatsapp.net` : null;
-              const now      = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
-              if (selfJid) {
-                const original = origId ? _msgCache.get(chatJid)?.get(origId) : null;
-                const origText = original?.message?.conversation
-                  || original?.message?.extendedTextMessage?.text || '[not in cache]';
-                const name    = original?.pushName || editorNum;
-                await sock.sendMessage(selfJid, {
-                  text: `✏️ *Message Edited*\n\n` +
-                    `👤 By: *${name}* (+${editorNum})\n` +
-                    `📍 Where: ${isGroup ? 'Group' : 'DM'}\n` +
-                    `🕐 Time: ${now}\n\n` +
-                    `📄 *Before:* ${origText.slice(0, 300)}\n` +
-                    `📝 *After:*  ${newText.slice(0, 300)}`,
-                }).catch(() => {});
-              }
-            }
-          } catch {}
-        }
       } catch {}
     }
   });
@@ -492,65 +452,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     try {
       if (!msg.message) return;
 
-      // ── Anti-Edit: detect protocolMessage type 14 (MESSAGE_EDIT) ─────────────
-      // Edits arrive here FIRST as raw protocolMessage.type===14 BEFORE Baileys
-      // converts them to messages.update. This is the authoritative handler.
+      // ── Skip protocolMessage type 14 (MESSAGE_EDIT) — not a real chat message ──
       const proto = msg.message?.protocolMessage;
-      if (proto?.type === 14) {
-        try {
-          // proto.key has the ORIGINAL message's key (remoteJid, id, participant)
-          const editKey   = proto.key || {};
-          // For groups, chatJid is in proto.key.remoteJid (group JID)
-          // For DMs, it's the sender's JID
-          const chatJid   = editKey.remoteJid || msg.key.remoteJid;
-          const isGroup   = chatJid?.endsWith('@g.us');
-          const settings  = db.settings.get();
-          const aeEnabled = isGroup
-            ? (db.groups.get(sessionId, chatJid)?.antiedit ?? settings.antiedit ?? false)
-            : (settings.antiedit ?? false);
-
-          if (aeEnabled && chatJid && !editKey.fromMe) {
-            // New text from the edited message
-            const editedMsg = proto.editedMessage || {};
-            const newText   = editedMsg.conversation
-              || editedMsg.extendedTextMessage?.text
-              || editedMsg.imageMessage?.caption
-              || '[non-text edit]';
-
-            const originalId = editKey.id;
-            // Editor: in groups it's proto.key.participant, in DMs it's proto.key.remoteJid
-            const editorJid = editKey.participant || editKey.remoteJid || msg.key.remoteJid;
-            const editorNum = editorJid?.split('@')[0]?.split(':')[0] || '?';
-            const selfNum   = sock.user?.id?.split('@')[0]?.split(':')[0];
-            const selfJid   = selfNum ? `${selfNum}@s.whatsapp.net` : null;
-            const now       = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
-
-            if (selfJid) {
-              const original = originalId ? _msgCache.get(chatJid)?.get(originalId) : null;
-              const origText = original?.message?.conversation
-                || original?.message?.extendedTextMessage?.text
-                || '[original not in cache]';
-              const name    = original?.pushName || msg.pushName || editorNum;
-
-              await sock.sendMessage(selfJid, {
-                text:
-                  `✏️ *Message Edited*\n\n` +
-                  `👤 By: *${name}* (+${editorNum})\n` +
-                  `📍 Where: ${isGroup ? 'Group' : 'DM'}\n` +
-                  `🕐 Time: ${now}\n\n` +
-                  `📄 *Before:* ${origText.slice(0, 300)}\n` +
-                  `📝 *After:*  ${newText.slice(0, 300)}`,
-              }).catch(() => {});
-
-              // Forward original message so owner sees it in native WhatsApp format
-              if (original) {
-                await sock.sendMessage(selfJid, { forward: original, force: true }).catch(() => {});
-              }
-            }
-          }
-        } catch {}
-        return; // protocolMessage — not a regular chat message
-      }
+      if (proto?.type === 14) return;
 
       // ── Anti-Delete: detect protocolMessage REVOKE ────────────
       if (proto?.type === 0) { // type 0 = REVOKE (message deleted)
@@ -614,50 +518,6 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
           }
         } catch {}
         return; // stop processing this message (it's a deletion event, not a real message)
-      }
-
-      // ── Anti-Edit: editedMessage via messages.upsert (Baileys re-emit) ──────
-      const editWrap2 = msg.message?.editedMessage;
-      if (editWrap2) {
-        try {
-          const chatJid2  = msg.key.remoteJid;
-          const isGroup2  = chatJid2?.endsWith('@g.us');
-          const settings2 = db.settings.get();
-          const aeOn2     = isGroup2
-            ? (db.groups.get(sessionId, chatJid2)?.antiedit ?? settings2.antiedit ?? false)
-            : (settings2.antiedit ?? false);
-          if (aeOn2) {
-            const ewMsg2    = editWrap2.message || {};
-            const proto2    = ewMsg2.protocolMessage || {};
-            const editBody2 = proto2.editedMessage || {};
-            const origId2   = proto2.key?.id || msg.key?.id;
-            const newText2  = ewMsg2.conversation || ewMsg2.extendedTextMessage?.text
-              || editBody2.conversation || editBody2.extendedTextMessage?.text
-              || editWrap2.conversation || '[non-text edit]';
-            const editorJid2 = msg.key.participant || msg.key.remoteJid;
-            const editorNum2 = editorJid2?.split('@')[0]?.split(':')[0] || '?';
-            const selfNum4   = sock.user?.id?.split('@')[0]?.split(':')[0];
-            const selfJid4   = selfNum4 ? `${selfNum4}@s.whatsapp.net` : null;
-            const now2       = new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' });
-            if (selfJid4) {
-              const original2 = origId2 ? _msgCache.get(chatJid2)?.get(origId2) : null;
-              const origText2 = original2?.message?.conversation
-                || original2?.message?.extendedTextMessage?.text || '[not in cache]';
-              const name2    = original2?.pushName || editorNum2;
-              await sock.sendMessage(selfJid4, {
-                text: `✏️ *Message Edited*\n\n` +
-                  `👤 By: *${name2}* (+${editorNum2})\n` +
-                  `📍 Where: ${isGroup2 ? 'Group' : 'DM'}\n` +
-                  `🕐 Time: ${now2}\n\n` +
-                  `📄 *Before:* ${origText2.slice(0, 300)}\n` +
-                  `📝 *After:*  ${newText2.slice(0, 300)}`,
-              }).catch(() => {});
-              if (original2) {
-                await sock.sendMessage(selfJid4, { forward: original2, force: true }).catch(() => {});
-              }
-            }
-          }
-        } catch {}
       }
 
       // Cache this message for potential anti-delete recovery
