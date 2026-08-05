@@ -1050,8 +1050,21 @@ function connectSSE() {
   _sseSource.addEventListener('pairingCode', e => {
     const {code} = JSON.parse(e.data);
     if (document.getElementById('page-pair').classList.contains('active')) {
+      document.getElementById('pairBtnText').textContent='Get Pairing Code';
+      document.getElementById('pairBtn').disabled=false;
       document.getElementById('pairCodeVal').textContent = code;
       document.getElementById('pairCodeBox').style.display='block';
+      document.getElementById('pairErr').style.display='none';
+    }
+  });
+  _sseSource.addEventListener('pairingCodeError', e => {
+    const {error} = JSON.parse(e.data);
+    if (document.getElementById('page-pair').classList.contains('active')) {
+      document.getElementById('pairBtnText').textContent='Get Pairing Code';
+      document.getElementById('pairBtn').disabled=false;
+      const errEl = document.getElementById('pairErr');
+      errEl.innerHTML = `⚠️ ${error||'Pairing failed'} — <a href="#" onclick="doPair();return false;" style="color:inherit;text-decoration:underline">Tap to retry</a>`;
+      errEl.style.display='block';
     }
   });
   _sseSource.onerror = () => { setTimeout(connectSSE, 5000); };
@@ -1522,12 +1535,26 @@ async function doPair() {
   errEl.style.display='none';
   document.getElementById('pairCodeBox').style.display='none';
   if (!phone||phone.length<7) { errEl.textContent='Please enter a valid phone number'; errEl.style.display='block'; return; }
-  document.getElementById('pairBtnText').innerHTML='<span class="spinner"></span> Getting code…';
+  document.getElementById('pairBtnText').innerHTML='<span class="spinner"></span> Connecting…';
   document.getElementById('pairBtn').disabled=true;
   const r = await fetch('/session/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,method:'pairing',phoneNumber:phone})}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
-  document.getElementById('pairBtnText').textContent='Get Pairing Code';
-  document.getElementById('pairBtn').disabled=false;
-  if (!r.ok) { errEl.textContent=r.error||'Failed to create session'; errEl.style.display='block'; }
+  if (!r.ok) {
+    document.getElementById('pairBtnText').textContent='Get Pairing Code';
+    document.getElementById('pairBtn').disabled=false;
+    errEl.textContent=r.error||'Failed to create session';
+    errEl.style.display='block';
+    return;
+  }
+  // Session created — code arrives via SSE (pairingCode event).
+  // Keep button disabled & show waiting text; SSE handler re-enables on success/error.
+  document.getElementById('pairBtnText').innerHTML='<span class="spinner"></span> Waiting for code…';
+  // Safety fallback: re-enable after 30s in case SSE is missed
+  setTimeout(()=>{
+    if(document.getElementById('pairBtn').disabled){
+      document.getElementById('pairBtnText').textContent='Get Pairing Code';
+      document.getElementById('pairBtn').disabled=false;
+    }
+  }, 30000);
 }
 
 // ══════════════════════════════════════════════════════════

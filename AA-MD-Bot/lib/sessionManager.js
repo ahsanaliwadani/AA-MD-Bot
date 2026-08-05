@@ -129,7 +129,22 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     return sessions.get(sessionId);
   }
 
-  const { state, saveCreds } = await useMongoAuthState(sessionId);
+  let { state, saveCreds } = await useMongoAuthState(sessionId);
+
+  // ── Fresh auth for new pairing attempts ──────────────────────────────────
+  // If a previous pairing failed (e.g. timed out, user didn't enter the code),
+  // the old noiseKey + signedIdentityKey are still in MongoDB/memory.
+  // WhatsApp already saw those keys and won't accept a new pairing with the
+  // same identity → "could not link device". Fix: wipe stale auth state and
+  // generate brand-new keys for every fresh pairing session.
+  if (usePairingCode && !state.creds.registered) {
+    await deleteMongoAuthState(sessionId).catch(() => {});
+    const fresh = await useMongoAuthState(sessionId);
+    state    = fresh.state;
+    saveCreds = fresh.saveCreds;
+    logger.info({ sessionId }, '🔑 Fresh auth keys generated for new pairing attempt');
+  }
+
   const { version } = await fetchLatestBaileysVersion();
   const silentLogger = pino({ level: 'silent' });
 
@@ -787,26 +802,37 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
   sessions.set(sessionId, sock);
   logger.info({ sessionId }, '🔌 Session initialized');
 
-  // Pairing code mode — wait for the WebSocket + noise handshake to finish before requesting.
-  // Background: Baileys emits 'connecting' via process.nextTick (before WS even opens), so
-  // any fixed delay from that event races against the actual noise handshake. Instead we
-  // wait for waitForSocketOpen() (TCP/TLS done) then add 1500 ms for the noise round-trip.
+  // Pairing code mode — wait for WebSocket + noise handshake before requesting.
+  // Retries up to 3× with increasing backoff so transient WA server errors
+  // don't permanently block pairing.
   if (usePairingCode && phoneNumber && !state.creds.registered) {
     (async () => {
-      try {
-        const cleanPhone = String(phoneNumber).replace(/\D/g, '');
-        // Wait until the WebSocket TCP connection is established
-        await sock.waitForSocketOpen();
-        // Give the noise handshake (server hello → client finish → finishInit) time to
-        // complete. 1500 ms covers worst-case latency to WA servers from any region.
-        await new Promise(r => setTimeout(r, 1500));
-        const code = await sock.requestPairingCode(cleanPhone);
-        botEvents.emit('pairingCode', { sessionId, code, phoneNumber });
-        logger.info({ sessionId, code }, '📲 Pairing code generated');
-      } catch (err) {
-        botEvents.emit('pairingCodeError', { sessionId, error: err.message });
-        logger.error({ err: err.message }, 'Pairing code error');
+      const cleanPhone = String(phoneNumber).replace(/\D/g, '');
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          // Wait for TCP/TLS WebSocket connection to be established
+          await sock.waitForSocketOpen();
+          // Allow noise handshake round-trip to complete.
+          // Add 500 ms per retry to give the server more breathing room.
+          await new Promise(r => setTimeout(r, 1500 + (attempt - 1) * 500));
+          // Abort if socket closed during the wait
+          if (!sock.ws?.isOpen) throw new Error('Socket closed during noise wait');
+          const code = await sock.requestPairingCode(cleanPhone);
+          botEvents.emit('pairingCode', { sessionId, code, phoneNumber });
+          logger.info({ sessionId, code, attempt }, '📲 Pairing code generated');
+          return; // ✅ success — stop retrying
+        } catch (err) {
+          lastErr = err;
+          logger.warn({ err: err.message, attempt, sessionId }, `Pairing attempt ${attempt}/3 failed`);
+          if (attempt < 3 && sessions.has(sessionId)) {
+            // Exponential back-off before retry: 2 s, 4 s
+            await new Promise(r => setTimeout(r, 2000 * attempt));
+          }
+        }
       }
+      botEvents.emit('pairingCodeError', { sessionId, error: lastErr?.message || 'Pairing failed after 3 attempts' });
+      logger.error({ err: lastErr?.message, sessionId }, '❌ Pairing code failed after 3 attempts');
     })();
   }
 
