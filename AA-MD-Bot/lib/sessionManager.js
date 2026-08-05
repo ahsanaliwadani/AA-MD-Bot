@@ -142,7 +142,8 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, silentLogger),
     },
-    browser: Browsers.ubuntu('Chrome'),
+    // 'AA MD Bot (AA Mods)' shown in WhatsApp → Settings → Linked Devices
+    browser: ['AA Mods', 'AA MD Bot', '3.0.0'],
     printQRInTerminal: !usePairingCode,
     logger: silentLogger,
     generateHighQualityLinkPreview: true,
