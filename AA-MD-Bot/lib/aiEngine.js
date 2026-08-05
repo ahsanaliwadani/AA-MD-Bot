@@ -257,41 +257,35 @@ export async function chatAI(jid, userMsg, systemPrompt) {
     ...getHistory(jid),
   ];
 
+  // Build compact context for GET APIs (last 3 exchanges embedded in prompt)
+  const hist = getHistory(jid).slice(-6).filter(m => m.role !== 'system');
+  const ctxStr = hist.length
+    ? hist.map(m => `${m.role === 'user' ? 'User' : 'Bot'}: ${m.content}`).join('\n') + '\n'
+    : '';
+  const sys = (systemPrompt || DEFAULT_SYSTEM).slice(0, 300);
+  const getPrompt = `${sys}\n\n${ctxStr}User: ${userMsg}\nBot:`;
+
   let reply = null;
 
-  // 1. Race DC APIs + ABZTech + ABLlama + Mistral in parallel (max 13s)
+  // Phase 1: Race ALL backends simultaneously — GET + POST together (max 13s)
+  // Whichever responds first wins. POST has full context; GET has compact context.
   reply = await raceSuccess([
     tryDCGemini(userMsg).catch(() => null),
     tryDCGpt5(userMsg).catch(() => null),
     tryDCGrok(userMsg).catch(() => null),
     tryDCClaude(userMsg).catch(() => null),
-    tryABZTechGemini(userMsg).catch(() => null),
-    tryABLlama(userMsg).catch(() => null),
+    tryABZTechGemini(getPrompt).catch(() => null),
+    tryABLlama(getPrompt).catch(() => null),
     tryPollinationsMistral(userMsg).catch(() => null),
+    tryPollinationsPost(messages, 'openai-fast').catch(() => null),
   ], 13000);
 
-  // 2. pollinations POST — multi-turn context fallback
-  if (!reply) reply = await tryPollinationsPost(messages).catch(() => null);
-
-  // 3. pollinations GET — single-turn fallback
+  // Phase 2: Pollinations GET flat context
   if (!reply) {
-    const flatCtx = messages
-      .filter(m => m.role !== 'system')
-      .slice(-4)
-      .map(m => `${m.role === 'user' ? 'User' : 'Bot'}: ${m.content}`)
-      .join('\n') + '\nUser: ' + userMsg;
-    reply = await tryPollinationsGet(flatCtx).catch(() => null);
+    reply = await tryPollinationsGet(getPrompt).catch(() => null);
   }
 
-  // 4. pollinations alternate models
-  if (!reply) {
-    for (const model of ['mistral', 'openai-large', 'claude-sonnet-4-5']) {
-      reply = await tryPollinationsModel(messages, model).catch(() => null);
-      if (reply) break;
-    }
-  }
-
-  // 5. ch.at — last resort
+  // Phase 3: ch.at last resort
   if (!reply) {
     reply = await tryChAt(userMsg).catch(() => null);
   }

@@ -12,7 +12,7 @@ export default {
   description: 'Powerful AI chat — multi-model, memory, smart formatting',
   category: 'search',
 
-  async execute({ text, reply, react, jid, prefix }) {
+  async execute({ text, reply, react, jid, sock, msg, prefix }) {
     if (!text) return reply(
       `🤖 *AA MD Bot AI — Powered*\n\n` +
       `*Usage:* ${prefix}ai <your question>\n\n` +
@@ -37,11 +37,16 @@ export default {
     }
 
     await react('🤖');
+    // Show typing indicator — user sees "typing..." immediately (same as .gf)
+    await sock.sendPresenceUpdate('composing', jid).catch(() => {});
+
     try {
       const response = await chatAI(jid, text);
+      await sock.sendPresenceUpdate('available', jid).catch(() => {});
       await react('✅').catch(() => {});
       await reply(`🤖 *AI*\n\n${response}\n\n> 🤖 *AA MD Bot*`);
     } catch (e) {
+      await sock.sendPresenceUpdate('available', jid).catch(() => {});
       await react('❌').catch(() => {});
       await reply(`❌ *AI Error:* ${e.message}\n\nTry again in a few seconds.\n\n> 🤖 *AA MD Bot*`);
     }
