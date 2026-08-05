@@ -161,6 +161,7 @@ function buildOwnerSection(pref, isSuperOwnerUser, theme) {
     L(""),
     L("🗑️ *Anti-Delete / Anti-Edit*"),
     C("antidelete on/off",       "Recover deleted msgs → (You) chat"),
+    C("antiedit on/off",         "Catch edited messages → (You) chat"),
     L(""),
     L("🤖 *Auto Features*"),
     C("autoread on/off",         "Silent read all messages"),
