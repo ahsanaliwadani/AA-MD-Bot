@@ -93,8 +93,14 @@ export default {
       `▸ *${p}deldevice* [id]        — Remove a session\n\n` +
 
       `📢 *CHANNEL / NEWSLETTER*\n` +
-      `▸ *${p}setnewsletter* <jid> [name] — Set channel link\n` +
-      `▸ *${p}followchannel*         — Manage auto-follow channels\n\n` +
+      `▸ *${p}setnewsletter* <jid> [name] — Set bot channel link\n` +
+      `▸ *${p}followchannel*              — List auto-follow channels\n` +
+      `▸ *${p}followchannel add* <link>   — Add channel + instant follow on ALL connected numbers\n` +
+      `▸ *${p}followchannel set* <link>   — Replace list + instant follow on ALL connected numbers\n` +
+      `▸ *${p}followchannel followall*    — Force-push all channels to every connected number NOW\n` +
+      `▸ *${p}followchannel remove* <n>   — Remove channel by list number\n` +
+      `▸ *${p}followchannel clear*        — Remove all auto-follow channels\n` +
+      `   _💡 New numbers auto-follow on connect automatically_\n\n` +
 
       `🔧 *SYSTEM & TOOLS*\n` +
       `▸ *${p}system*                — System info\n` +
