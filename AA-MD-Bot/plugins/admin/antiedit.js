@@ -1,52 +1,65 @@
-// ── Anti-Edit Plugin ──────────────────────────────────────────────────────────
-// Catches edited messages and forwards them silently to owner's self-chat only.
-// Group members never see the alert — completely private.
-import { db } from '../../lib/database.js';
+// ============================================
+// AA MD Bot - Anti Edit Plugin
+// Developer: Ahsan Ali | AA Mods
+// Works in groups (per-group) and DM (global for owner)
+// Edited messages are forwarded silently to owner's (You) self-chat only.
+// ============================================
+
+import { saveNow } from '../../lib/database.js';
 
 export default {
   command:     'antiedit',
+  alias:       ['noedit', 'catchedit'],
+  description: 'Catch edited messages → forwarded silently to (You) chat',
   category:    'admin',
-  description: 'Catch edited messages → silently forwarded to (You) chat',
   usage:       '.antiedit on/off',
-  isOwner:     true,
 
-  async execute({ sock, msg, args, reply, sessionId }) {
-    const jid     = msg.key.remoteJid;
-    const isGroup = jid?.endsWith('@g.us');
-    const arg     = (args[0] || '').toLowerCase();
+  async execute({ reply, jid, args, isOwner, isGroupMsg, db }) {
+    const toggle = args[0]?.toLowerCase();
 
-    if (!['on', 'off'].includes(arg)) {
-      const cur = isGroup
-        ? (db.groups.get(sessionId, jid)?.antiedit ?? db.settings.get()?.antiedit ?? false)
-        : (db.settings.get()?.antiedit ?? false);
+    const currentVal = isGroupMsg
+      ? (db.groups.get(jid)?.antiedit ?? db.settings.getValue('antiedit') ?? false)
+      : (db.settings.getValue('antiedit') ?? false);
+
+    if (!toggle || !['on', 'off'].includes(toggle)) {
       return reply(
-        `✏️ *Anti-Edit*\n\n` +
-        `Status: *${cur ? '✅ ON' : '❌ OFF'}*\n\n` +
-        `Usage: *.antiedit on* or *.antiedit off*\n\n` +
-        `_Edited messages are caught and forwarded silently to your (You) chat._\n\n` +
-        `> ✏️ *AA MD Bot*`
+        `✏️ *Anti Edit* is currently *${currentVal ? 'ON ✅' : 'OFF ❌'}*\n\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `*.antiedit on*  — Catch edited messages silently\n` +
+        `*.antiedit off* — Stop catching edits\n\n` +
+        (isGroupMsg
+          ? `📌 Applies to *this group only*`
+          : `📌 From DM → applies *globally* to all groups & DMs`) +
+        `\n\n_Edited messages are forwarded to your (You) chat — group never sees the alert._`
       );
     }
 
-    const enable = arg === 'on';
+    const value = toggle === 'on';
 
-    if (isGroup) {
-      const grp = db.groups.get(sessionId, jid) || {};
-      grp.antiedit = enable;
-      db.groups.set(sessionId, jid, grp);
-    } else {
-      const settings = db.settings.get();
-      settings.antiedit = enable;
-      db.settings.set(settings);
+    if (isGroupMsg) {
+      const group = db.groups.get(jid) || {};
+      db.groups.set(jid, { ...group, antiedit: value });
+      await saveNow('groups');
+      return reply(
+        `✏️ *Anti Edit* is now *${value ? 'ON ✅' : 'OFF ❌'}* for this group.\n` +
+        (value
+          ? 'Edited messages will be silently forwarded to your (You) chat.'
+          : 'Edited messages will no longer be tracked.')
+      );
     }
 
+    // DM — owner only for global toggle
+    if (!isOwner) {
+      return reply('⚠️ Only the bot owner can set global anti-edit from DM.');
+    }
+
+    db.settings.setValue('antiedit', value);
+    await saveNow('settings');
     return reply(
-      `✏️ *Anti-Edit ${enable ? 'Enabled' : 'Disabled'}*\n\n` +
-      `${enable
-        ? '✅ Edited messages will now be silently forwarded to your (You) chat.'
-        : '❌ Anti-Edit is now off.'
-      }\n\n` +
-      `> ✏️ *AA MD Bot*`
+      `✏️ *Anti Edit* globally set to *${value ? 'ON ✅' : 'OFF ❌'}*.\n` +
+      (value
+        ? 'All edited messages (groups + DMs) will be forwarded to your (You) chat.'
+        : 'Anti Edit is now disabled globally.')
     );
   },
 };
