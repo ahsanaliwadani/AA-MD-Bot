@@ -430,6 +430,9 @@ async function startServer() {
         autoStatusView:  sv('autoStatusView')  ?? config.autoStatusView  ?? true,
         autoStatusReact: sv('autoStatusReact') ?? config.autoStatusReact ?? true,
         antiSpam:        sv('antiSpam')        ?? config.antiSpam        ?? true,
+        antiCall:        sv('antiCall')        ?? config.antiCall        ?? false,
+        antiDelete:      sv('antiDelete')      ?? config.antiDelete      ?? false,
+        antiViewOnce:    sv('antiViewOnce')    ?? config.antiViewOnce    ?? false,
         maintenanceMode: sv('maintenanceMode') ?? config.maintenanceMode ?? false,
         statusEmoji:     sv('statusEmoji')     ?? config.statusEmoji     ?? '❤️',
         welcomeMessage:  sv('welcomeMessage')  ?? config.welcomeMessage  ?? true,
@@ -445,7 +448,7 @@ async function startServer() {
       req.on('end', () => {
         try {
           const data = JSON.parse(body || '{}');
-          const allowed = ['prefix','botMode','autoRead','autoTyping','autoStatusView','autoStatusReact','antiSpam','maintenanceMode','statusEmoji','welcomeMessage'];
+          const allowed = ['prefix','botMode','autoRead','autoTyping','autoStatusView','autoStatusReact','antiSpam','antiCall','antiDelete','antiViewOnce','maintenanceMode','statusEmoji','welcomeMessage'];
           for (const key of allowed) { if (key in data) db.settings.setValue(key, data[key]); }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
