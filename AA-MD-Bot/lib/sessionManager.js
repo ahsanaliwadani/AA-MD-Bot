@@ -142,8 +142,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, silentLogger),
     },
-    // 'AA MD Bot (AA Mods)' shown in WhatsApp → Settings → Linked Devices
-    browser: ['AA Mods', 'AA MD Bot', '3.0.0'],
+    browser: Browsers.ubuntu('Chrome'),
     printQRInTerminal: !usePairingCode,
     logger: silentLogger,
     generateHighQualityLinkPreview: true,
@@ -788,41 +787,27 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
   sessions.set(sessionId, sock);
   logger.info({ sessionId }, '🔌 Session initialized');
 
-  // Pairing code mode — request code on 'connecting' event (more reliable than setTimeout)
-  // The flag ensures we only request once per session creation, not on reconnects.
+  // Pairing code mode — wait for the WebSocket + noise handshake to finish before requesting.
+  // Background: Baileys emits 'connecting' via process.nextTick (before WS even opens), so
+  // any fixed delay from that event races against the actual noise handshake. Instead we
+  // wait for waitForSocketOpen() (TCP/TLS done) then add 1500 ms for the noise round-trip.
   if (usePairingCode && phoneNumber && !state.creds.registered) {
-    let _pairingRequested = false;
-    let _fallbackTimer    = null;
-
-    const _requestCode = async (source) => {
-      if (_pairingRequested) return;
-      _pairingRequested = true;
-      sock.ev.off('connection.update', _pairingHandler);
-      if (_fallbackTimer) { clearTimeout(_fallbackTimer); _fallbackTimer = null; }
+    (async () => {
       try {
-        // requestPairingCode requires digits only — strip +, spaces, dashes
         const cleanPhone = String(phoneNumber).replace(/\D/g, '');
+        // Wait until the WebSocket TCP connection is established
+        await sock.waitForSocketOpen();
+        // Give the noise handshake (server hello → client finish → finishInit) time to
+        // complete. 1500 ms covers worst-case latency to WA servers from any region.
+        await new Promise(r => setTimeout(r, 1500));
         const code = await sock.requestPairingCode(cleanPhone);
         botEvents.emit('pairingCode', { sessionId, code, phoneNumber });
-        logger.info({ sessionId, code, source }, '📲 Pairing code generated');
+        logger.info({ sessionId, code }, '📲 Pairing code generated');
       } catch (err) {
         botEvents.emit('pairingCodeError', { sessionId, error: err.message });
-        logger.error({ err: err.message, source }, 'Pairing code error');
+        logger.error({ err: err.message }, 'Pairing code error');
       }
-    };
-
-    const _pairingHandler = async (update) => {
-      if (_pairingRequested) return;
-      if (update.connection === 'connecting') {
-        // Brief delay so socket completes handshake before requestPairingCode
-        await new Promise(r => setTimeout(r, 800));
-        _requestCode('connecting-event');
-      }
-    };
-
-    sock.ev.on('connection.update', _pairingHandler);
-    // Fallback: if 'connecting' was already emitted before we registered, request after 4s
-    _fallbackTimer = setTimeout(() => _requestCode('fallback-timer'), 4000);
+    })();
   }
 
   return sock;
