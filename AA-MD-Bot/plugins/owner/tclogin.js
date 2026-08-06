@@ -37,32 +37,80 @@ export const tcloginPlugin = {
 
     await react('⏳');
 
-    try {
-      const loginData = await truecallerjs.login(phone);
+    // Helper: attempt login once, return { data } or { error }
+    async function tryLogin() {
+      try {
+        const data = await truecallerjs.login(phone);
+        return { data };
+      } catch (e) {
+        return { error: e };
+      }
+    }
 
-      if (!loginData?.requestId) {
-        await react('❌');
-        return reply(`❌ *Login Failed*\n\n_Could not send OTP. Try a different number._` + FOOTER);
+    // Try once, retry once on network errors
+    let attempt = await tryLogin();
+    if (attempt.error) {
+      const code = attempt.error.code || '';
+      const isNetwork = ['ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','EAI_AGAIN'].includes(code);
+      if (isNetwork) {
+        // Wait 2s then retry
+        await new Promise(r => setTimeout(r, 2000));
+        attempt = await tryLogin();
+      }
+    }
+
+    if (attempt.error) {
+      await react('❌');
+      const err = attempt.error;
+      const code = err.code || '';
+      const status = err.response?.status;
+
+      let msg;
+      if (['ECONNRESET','ECONNREFUSED'].includes(code)) {
+        msg =
+          `❌ *Truecaller Server Blocked*\n\n` +
+          `Truecaller's server is refusing connection from this server's IP address.\n\n` +
+          `*Possible fixes:*\n` +
+          `▸ Try again in a few minutes\n` +
+          `▸ Use a VPN/proxy if available\n` +
+          `▸ This is a known limitation on cloud servers`;
+      } else if (['ETIMEDOUT','ENOTFOUND','EAI_AGAIN'].includes(code)) {
+        msg =
+          `❌ *Network Timeout*\n\n` +
+          `Could not reach Truecaller servers.\n` +
+          `Please check connectivity and try again.`;
+      } else if (status === 429) {
+        msg = `❌ *Rate Limited*\n\n_Too many requests. Wait a few minutes and try again._`;
+      } else if (status >= 400 && status < 500) {
+        msg = `❌ *Request Rejected (${status})*\n\n_Truecaller rejected the request. Try a different phone number._`;
+      } else {
+        msg = `❌ *Error:* _${String(err.message).slice(0, 200)}_`;
       }
 
-      _pending.set(senderJid, { phone, loginData });
-
-      // Auto-clear after 5 minutes
-      setTimeout(() => _pending.delete(senderJid), 5 * 60 * 1000);
-
-      await react('✅');
-      return reply(
-        `✅ *OTP Sent!*\n\n` +
-        `📱 *Number:* ${phone}\n` +
-        `🕐 *Expires:* 5 minutes\n\n` +
-        `Now enter the OTP you received:\n` +
-        `▸ \`.tcotp 123456\`` +
-        FOOTER
-      );
-    } catch (err) {
-      await react('❌');
-      return reply(`❌ *Error:* _${String(err.message).slice(0, 200)}_` + FOOTER);
+      return reply(msg + FOOTER);
     }
+
+    const loginData = attempt.data;
+
+    if (!loginData?.requestId) {
+      await react('❌');
+      return reply(`❌ *Login Failed*\n\n_Could not send OTP. Try a different number._` + FOOTER);
+    }
+
+    _pending.set(senderJid, { phone, loginData });
+
+    // Auto-clear after 5 minutes
+    setTimeout(() => _pending.delete(senderJid), 5 * 60 * 1000);
+
+    await react('✅');
+    return reply(
+      `✅ *OTP Sent!*\n\n` +
+      `📱 *Number:* ${phone}\n` +
+      `🕐 *Expires:* 5 minutes\n\n` +
+      `Now enter the OTP you received:\n` +
+      `▸ \`.tcotp 123456\`` +
+      FOOTER
+    );
   },
 };
 
@@ -128,7 +176,16 @@ export const tcotpPlugin = {
       );
     } catch (err) {
       await react('❌');
-      return reply(`❌ *Error:* _${String(err.message).slice(0, 200)}_` + FOOTER);
+      const code = err.code || '';
+      let msg;
+      if (['ECONNRESET','ECONNREFUSED'].includes(code)) {
+        msg = `❌ *Truecaller Server Blocked*\n\n_Truecaller is refusing connections from this server. Try again later._`;
+      } else if (['ETIMEDOUT','ENOTFOUND'].includes(code)) {
+        msg = `❌ *Network Timeout*\n\n_Could not reach Truecaller. Check connectivity and retry._`;
+      } else {
+        msg = `❌ *Error:* _${String(err.message).slice(0, 200)}_`;
+      }
+      return reply(msg + FOOTER);
     }
   },
 };
