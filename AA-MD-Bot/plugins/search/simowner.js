@@ -9,6 +9,7 @@
 // ============================================
 
 import axios from 'axios';
+import * as truecallerjs from 'truecallerjs';
 import config from '../../config.js';
 
 const FOOTER = '\n\n> 🌍 *AA MD Bot* • 👨‍💻 *Ahsan Ali Wadani*';
@@ -93,6 +94,21 @@ function getPkOperator(norm) {
 function hasValidKey() {
   const k = process.env.RAPIDAPI_TRUECALLER_KEY || process.env.RAPIDAPI_KEY || '';
   return k.length > 10 && k !== DEMO_KEY;
+}
+
+function hasInstallationId() {
+  return !!(process.env.TRUECALLER_INSTALLATION_ID || '').trim();
+}
+
+// ── Truecaller via truecallerjs (installationId) ─────────────────────────────
+async function tcjsLookup(e164, countryCode) {
+  const installationId = (process.env.TRUECALLER_INSTALLATION_ID || '').trim();
+  const res = await truecallerjs.search({
+    number:         e164,
+    countryCode:    countryCode,
+    installationId: installationId,
+  });
+  return res.json();
 }
 
 // ── Truecaller via RapidAPI ──────────────────────────────────────────────────
@@ -180,7 +196,67 @@ export default {
     const opColor    = pkOperator ? (OP_COLORS[pkOperator] || '📱') : '📱';
     const ccName     = CC_NAMES[countryCode] || countryCode;
 
-    // ── Try Truecaller first if valid key is configured ──────────────────────
+    // ── Priority 1: truecallerjs (installationId — free, no API key) ─────────
+    if (hasInstallationId()) {
+      try {
+        const apiRes = await tcjsLookup(e164, countryCode);
+
+        if (apiRes?.data?.length) {
+          const r       = apiRes.data[0];
+          const name    = r.name || 'Unknown';
+          const ph      = r.phones?.[0] || {};
+          const carrier = ph.carrier || pkOperator || '';
+          const numType = ph.numberType || 'MOBILE';
+          const addr    = r.addresses?.[0] || {};
+          const city    = (addr.address && addr.address !== countryCode) ? addr.address : '';
+          const country = addr.countryCode || countryCode;
+          const email   = (r.internetAddresses || [])[0]?.id || '';
+          const badges  = (r.badges || []).join(', ');
+          const spamSc  = r.spamScore?.spamScore ?? ph.spamScore ?? 0;
+          const spamType= r.spamScore?.spamType  || ph.spamType  || '';
+          const isSpam  = spamSc < -10;
+          const score   = parseFloat(r.score || 0).toFixed(2);
+
+          let out =
+            `🌍 *SIM Owner Info*  _(Truecaller)_\n` +
+            `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `📱 *Number:*   ${e164}\n` +
+            `🌐 *Country:*  ${country}\n` +
+            `👤 *Name:*     *${name}*\n`;
+
+          if (carrier || pkOperator) out += `${opColor} *Operator:* ${carrier || pkOperator}\n`;
+          if (numType)               out += `📋 *Type:*     ${numType}\n`;
+          if (city)                  out += `📍 *City:*     ${city}\n`;
+          if (email)                 out += `📧 *Email:*    ${email}\n`;
+          if (badges)                out += `🏅 *Badges:*   ${badges}\n`;
+          out += `⭐ *Score:*    ${score}/1.0\n\n`;
+
+          if (isSpam) {
+            const bar = '🔴'.repeat(Math.min(5, Math.ceil(Math.abs(spamSc)/20))) + '⚪'.repeat(5 - Math.min(5, Math.ceil(Math.abs(spamSc)/20)));
+            out += `⚠️ *SPAM ALERT!*\n${bar} (${Math.abs(spamSc)} pts)\n` + (spamType ? `🔴 *Type:* ${spamType}\n` : '');
+          } else {
+            out += `✅ *Spam:* Clean\n`;
+          }
+          out += `\n━━━━━━━━━━━━━━━━━━━━━\n_Source: Truecaller_` + FOOTER;
+
+          const ppUrl = await sock.profilePictureUrl(norm + '@s.whatsapp.net', 'image').catch(() => null);
+          if (ppUrl) {
+            const { getBuffer } = await import('../../lib/helper.js');
+            const imgBuf = await getBuffer(ppUrl).catch(() => null);
+            if (imgBuf) {
+              await sock.sendMessage(jid, { image: imgBuf, caption: out }, { quoted: msg });
+              return await react('✅');
+            }
+          }
+          await reply(out);
+          return await react('✅');
+        }
+      } catch (err) {
+        // installationId expired? fall through to RapidAPI or WA-native
+      }
+    }
+
+    // ── Priority 2: RapidAPI Truecaller (if valid paid key) ──────────────────
     if (hasValidKey()) {
       try {
         const phoneParam = norm.slice(ccLen);
