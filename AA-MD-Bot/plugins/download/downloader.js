@@ -27,6 +27,7 @@ function ytdlpBaseArgs() {
 const TT  = /https?:\/\/(www\.)?(vm\.|vt\.|m\.)?tiktok\.com\/[^\s]+/gi;
 const IG  = /https?:\/\/(www\.)?instagram\.com\/[^\s]+/gi;
 const MF  = /https?:\/\/(www\.)?mediafire\.com\/\S+/gi;
+const TB  = /https?:\/\/(?:www\.)?(?:terabox\.com|1024tera\.com|teraboxapp\.com|terasharelink\.com|teraboxlink\.com|4funbox\.com|mirrobox\.com|nephobox\.com|freeterabox\.com|terabox\.app)\/[^\s]+/gi;
 const PIN = /https?:\/\/(www\.)?(pinterest\.(com|fr|de|co\.uk|jp|ru|ca|it|com\.au|com\.mx|com\.br|es|pl)|pin\.it)\/[^\s]+/gi;
 const FB  = /https?:\/\/(www\.|m\.|web\.)?facebook\.com\/[^\s]+/gi;
 const TW  = /https?:\/\/(www\.)?(twitter\.com|x\.com)\/[^\s]+/gi;
@@ -50,6 +51,7 @@ const extract = (txt) => {
   m = txt.match(SP);  if (m) return { type: 'sp',  url: clean(m) };
   m = txt.match(YT);  if (m) return { type: 'yt',  url: clean(m) };
   m = txt.match(MF);  if (m) return { type: 'mf',  url: clean(m) };
+  m = txt.match(TB);  if (m) return { type: 'tb',  url: clean(m) };
   return null;
 };
 
@@ -179,7 +181,7 @@ async function mediafireDirect(url) {
 export default {
   command: 'dl',
   alias: ['download', 'save'],
-  description: 'Multi-platform downloader: TikTok, Instagram, Facebook, Twitter/X, Pinterest, Threads, SoundCloud, Spotify, YouTube, MediaFire',
+  description: 'Multi-platform downloader: TikTok, Instagram, Facebook, Twitter/X, Pinterest, Threads, SoundCloud, Spotify, YouTube, MediaFire, TeraBox',
   category: 'download',
 
   async execute({ sock, msg, jid, text, react, reply, prefix }) {
@@ -190,7 +192,7 @@ export default {
     }
     if (!raw) return reply(
       `*🔗 Universal Downloader*\n\n` +
-      `*Platforms:* TikTok • Instagram • Facebook • Twitter/X • Pinterest • Threads • SoundCloud • Spotify • YouTube • MediaFire\n\n` +
+      `*Platforms:* TikTok • Instagram • Facebook • Twitter/X • Pinterest • Threads • SoundCloud • Spotify • YouTube • MediaFire • TeraBox\n\n` +
       `*Usage:* ${prefix}dl <link>\n` +
       `💡 Or reply to any message containing a link`
     );
@@ -314,6 +316,13 @@ export default {
           mimetype: 'application/octet-stream',
           caption: `📦 *MediaFire Download*\n📄 ${filename}`,
         }, { quoted: msg });
+      }
+
+      // ── TeraBox ─────────────────────────────────────────────────────────────
+      else if (type === 'tb') {
+        const mod = await import('./terabox.js');
+        await mod.default.execute({ text: url, msg, reply, react, sock, jid, prefix });
+        return;
       }
 
       // ── Pinterest ────────────────────────────────────────────────────────────

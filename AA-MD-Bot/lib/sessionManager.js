@@ -25,6 +25,7 @@ import { checkAntiScam } from '../plugins/admin/antiscam.js';
 import { checkChatbotResponse } from '../plugins/gb/chatbot.js';
 import { chatAI } from './aiEngine.js';
 import { CHATBOT_SYSTEM } from '../plugins/gb/chatbot.js';
+import { syncAlwaysOnline } from '../plugins/gb/alwaysonline.js';
 import { trackSentMessage } from './msgTracker.js';
 let _getAlertRegistry = null;
 import('../plugins/gb/onlinealert.js')
@@ -266,7 +267,10 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
 
       // Persist bot's own JID in settings so plugins can reliably read it
       // without depending on sock.user?.id being available at command time
-      if (ownJid) db.settings.setValue('botJid', ownJid);
+      if (ownJid) {
+        db.settings.setValue('botJid', ownJid);
+        db.sessionSettings.setValue(sessionId, 'botJid', ownJid);
+      }
 
       // ── Auto-save connected number as owner ──────────────────────────────
       // Ensures the bot's own number always has owner permissions without manual config.
@@ -281,8 +285,10 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
 
       if (connectionHandler) connectionHandler(sessionId, sock, 'open');
 
-      // Go unavailable immediately so phone still gets push notifications
-      sock.sendPresenceUpdate('unavailable').catch(() => {});
+      // Apply per-session Always Online only when explicitly enabled.
+      // Otherwise force unavailable on connect so a previous interval/restart
+      // cannot leave the number stuck as permanently online.
+      syncAlwaysOnline(sock, sessionId, db.sessionSettings.getValue(sessionId, 'alwaysOnline') === true);
 
       // Auto-follow configured channel(s) on this newly connected number.
       // Fire-and-forget — never blocks or breaks the connection flow.

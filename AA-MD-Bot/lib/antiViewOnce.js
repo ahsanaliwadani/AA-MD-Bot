@@ -86,6 +86,7 @@ const _MAX_STORE = 200;
 // Dedup guard — WhatsApp often delivers view-once twice
 // (empty placeholder via messages.upsert, real content via messages.update)
 const _processed = new Set();
+const _autoRevealed = new Set();
 const _PROCESSED_MAX = 200;
 
 // ── Periodic cleanup (60-minute in-memory TTL) ────────────────────────────────
@@ -93,7 +94,11 @@ export function cleanViewOnceStore() {
   const now = Date.now();
   const MEM_TTL = 60 * 60 * 1000; // 60 min — extended since no disk fallback
   for (const [key, val] of viewOnceStore.entries()) {
-    if (now - val.timestamp > MEM_TTL) viewOnceStore.delete(key);
+    if (now - val.timestamp > MEM_TTL) {
+      viewOnceStore.delete(key);
+      _processed.delete(key);
+      _autoRevealed.delete(key);
+    }
   }
 }
 
@@ -125,24 +130,44 @@ function normalizeMsg(message) {
 }
 
 function extractViewOnceMedia(normalized) {
-  const voMsg =
-    normalized?.viewOnceMessage ||
-    normalized?.viewOnceMessageV2 ||
-    normalized?.viewOnceMessageV2Extension;
+  function scan(node, depth = 0, insideViewOnce = false) {
+    if (!node || depth > 8 || typeof node !== "object") return null;
 
-  if (voMsg?.message?.imageMessage)
-    return { mediaMsg: voMsg.message.imageMessage, isVid: false, isAudio: false };
-  if (voMsg?.message?.videoMessage)
-    return { mediaMsg: voMsg.message.videoMessage, isVid: true,  isAudio: false };
-  if (voMsg?.message?.audioMessage)
-    return { mediaMsg: voMsg.message.audioMessage, isVid: false, isAudio: true  };
-  if (normalized?.imageMessage?.viewOnce)
-    return { mediaMsg: normalized.imageMessage, isVid: false, isAudio: false };
-  if (normalized?.videoMessage?.viewOnce)
-    return { mediaMsg: normalized.videoMessage, isVid: true,  isAudio: false };
-  if (normalized?.audioMessage?.viewOnce)
-    return { mediaMsg: normalized.audioMessage, isVid: false, isAudio: true  };
-  return null;
+    const wrapped =
+      node.viewOnceMessage ||
+      node.viewOnceMessageV2 ||
+      node.viewOnceMessageV2Extension;
+    if (wrapped) {
+      const found = scan(wrapped.message || wrapped, depth + 1, true);
+      if (found) return found;
+    }
+
+    const ephemeral = node.ephemeralMessage?.message;
+    if (ephemeral) {
+      const found = scan(ephemeral, depth + 1, insideViewOnce);
+      if (found) return found;
+    }
+
+    const docCap = node.documentWithCaptionMessage?.message;
+    if (docCap) {
+      const found = scan(docCap, depth + 1, insideViewOnce);
+      if (found) return found;
+    }
+
+    if (node.imageMessage && (insideViewOnce || node.imageMessage.viewOnce)) {
+      return { mediaMsg: node.imageMessage, isVid: false, isAudio: false };
+    }
+    if (node.videoMessage && (insideViewOnce || node.videoMessage.viewOnce)) {
+      return { mediaMsg: node.videoMessage, isVid: true, isAudio: false };
+    }
+    if (node.audioMessage && (insideViewOnce || node.audioMessage.viewOnce)) {
+      return { mediaMsg: node.audioMessage, isVid: false, isAudio: true };
+    }
+
+    return null;
+  }
+
+  return scan(normalized);
 }
 
 async function downloadBuffer(mediaMsg, isVid, isAudio = false) {
@@ -158,6 +183,77 @@ async function downloadBuffer(mediaMsg, isVid, isAudio = false) {
   return Buffer.concat(chunks);
 }
 
+
+function isAntiViewOnceActive(sessionId, chatJid) {
+  const inGroup = chatJid?.endsWith("@g.us");
+  const groupAntiVO = inGroup
+    ? db.groups.get(sessionId, chatJid)?.antiviewonce
+    : undefined;
+  const globalAntiVO = db.settings.getValue("antiViewOnce");
+  const sessAntiVO = db.sessionSettings.getValue(sessionId, "antiViewOnce");
+  return {
+    active: !!(groupAntiVO || globalAntiVO === true || sessAntiVO === true),
+    groupAntiVO,
+    globalAntiVO,
+    sessAntiVO,
+  };
+}
+
+function getSelfChatJid(sock, sessionId) {
+  const ownId = sock.user?.id || sock.authState?.creds?.me?.id || "";
+  const selfNum = ownId.split("@")[0]?.split(":")[0];
+  if (selfNum) return `${selfNum}@s.whatsapp.net`;
+
+  // Per-session fallback first; global fallback is only kept for older installs.
+  return (
+    db.sessionSettings.getValue(sessionId, "botJid") ||
+    db.settings.getValue("botJid") ||
+    null
+  );
+}
+
+async function sendAutoRevealToSelf(sock, sessionId, msgId, entry) {
+  if (!entry || _autoRevealed.has(msgId)) return false;
+
+  const selfJid = getSelfChatJid(sock, sessionId);
+  logger.info({ sessionId, msgId, selfJid: !!selfJid }, "👁️ ViewOnce auto-reveal: preparing self-chat send");
+  if (!selfJid) return false;
+
+  const tz = config.timezone || "Asia/Karachi";
+  const date = moment().tz(tz).format("DD/MM/YYYY");
+  const timeStr = moment().tz(tz).format("HH:mm:ss");
+  const cap =
+    `🔓 *View-Once Auto-Saved*\n\n` +
+    `👤 *From:* ${formatPhone(entry.num)}\n` +
+    `🕐 *Time:* ${timeStr}\n` +
+    `📅 *Date:* ${date}\n` +
+    `📍 *Chat:* ${entry.inGroup ? "Group" : "DM"}\n` +
+    (entry.caption ? `📝 *Caption:* ${entry.caption}\n` : "") +
+    `\n> 👁️ *AA MD Bot*`;
+
+  if (entry.isAudio) {
+    await sock.sendMessage(selfJid, {
+      audio: entry.buf,
+      mimetype: entry.mime,
+      ptt: entry.ptt || false,
+    });
+    await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+  } else {
+    await sock.sendMessage(
+      selfJid,
+      entry.isVid
+        ? { video: entry.buf, caption: cap, mimetype: entry.mime }
+        : { image: entry.buf, caption: cap, mimetype: entry.mime },
+    );
+  }
+
+  _autoRevealed.add(msgId);
+  if (_autoRevealed.size > _PROCESSED_MAX)
+    _autoRevealed.delete(_autoRevealed.values().next().value);
+  logger.info({ sessionId, msgId, selfJid }, "✅ ViewOnce auto-reveal sent");
+  return true;
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 // Call this from both messages.upsert and messages.update in sessionManager.
 export async function handleViewOnceMessage(msg, sock, sessionId) {
@@ -171,7 +267,18 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     // buffer download succeeds, so that a messages.update retry (which fires
     // when WhatsApp delivers the real content after an empty placeholder) can
     // still succeed if the first messages.upsert attempt had no media yet.
-    if (_processed.has(msgId)) return;
+    if (_processed.has(msgId)) {
+      const cached = viewOnceStore.get(msgId);
+      if (cached && !msg.key.fromMe) {
+        const anti = isAntiViewOnceActive(sessionId, cached.chatJid);
+        if (anti.active && !_autoRevealed.has(msgId)) {
+          await sendAutoRevealToSelf(sock, sessionId, msgId, cached).catch((e) =>
+            logger.warn({ err: e.message, msgId }, "ViewOnce cached auto-reveal retry failed"),
+          );
+        }
+      }
+      return;
+    }
 
     const normalized = normalizeMsg(msg.message);
     const extracted = extractViewOnceMedia(normalized);
@@ -226,6 +333,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       chatJid,
       senderJid,
       senderName,
+      ptt: mediaMsg?.ptt || false,
       timestamp: Date.now(),
     };
     viewOnceStore.set(msgId, entry);
@@ -244,64 +352,29 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     }
 
     // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
-    // Check group-level first, then global settings, then per-session settings
-    // (belt-and-suspenders: some callers may persist in sessionSettings instead)
-    // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
     // Applies to BOTH groups and DMs — global flag covers all chats.
-    const groupAntiVO = inGroup
-      ? db.groups.get(sessionId, chatJid)?.antiviewonce
-      : undefined;
-    const globalAntiVO = db.settings.getValue("antiViewOnce");
-    const sessAntiVO   = db.sessionSettings.getValue(sessionId, "antiViewOnce");
-    const antiVOActive = !!(groupAntiVO || globalAntiVO === true || sessAntiVO);
+    const anti = isAntiViewOnceActive(sessionId, chatJid);
 
     logger.info(
-      { sessionId, antiVOActive, globalAntiVO, globalAntiVO_type: typeof globalAntiVO, sessAntiVO, groupAntiVO, fromMe: msg.key.fromMe },
+      {
+        sessionId,
+        antiVOActive: anti.active,
+        globalAntiVO: anti.globalAntiVO,
+        globalAntiVO_type: typeof anti.globalAntiVO,
+        sessAntiVO: anti.sessAntiVO,
+        groupAntiVO: anti.groupAntiVO,
+        fromMe: msg.key.fromMe,
+      },
       "👁️ ViewOnce antiVO check",
     );
 
-    if (antiVOActive && !msg.key.fromMe) {
-      const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
-      // FIX: fallback to the botJid saved in settings at connect time —
-      // sock.user can be momentarily null/undefined right after a reconnect,
-      // which silently killed auto-reveal even when antiVOActive was true.
-      const savedBotJid = db.settings.getValue("botJid");
-      const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : (savedBotJid || null);
-
-      logger.info({ sessionId, selfJid, usedFallback: !selfNum && !!savedBotJid }, "👁️ ViewOnce auto-reveal: sending to self-chat");
-
-      if (selfJid) {
-        const date = moment().tz(tz).format("DD/MM/YYYY");
-        const timeStr = moment().tz(tz).format("HH:mm:ss");
-        const cap =
-          `🔓 *View-Once Auto-Saved*\n\n` +
-          `👤 *From:* ${formatPhone(num)}\n` +
-          `🕐 *Time:* ${timeStr}\n` +
-          `📅 *Date:* ${date}\n` +
-          `📍 *Chat:* ${inGroup ? "Group" : "DM"}\n` +
-          `\n> 👁️ *AA MD Bot*`;
-        try {
-          if (isAudio) {
-            await sock.sendMessage(selfJid, {
-              audio: buf,
-              mimetype: mime,
-              ptt: mediaMsg?.ptt || false,
-            });
-            await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
-          } else {
-            await sock.sendMessage(
-              selfJid,
-              isVid
-                ? { video: buf, caption: cap, mimetype: mime }
-                : { image: buf, caption: cap, mimetype: mime },
-            );
-          }
-          logger.info({ sessionId, selfJid }, "✅ ViewOnce auto-reveal sent");
-        } catch (sendErr) {
-          logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal send FAILED");
-        }
-      } else {
-        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid is null — sock.user AND botJid setting both unavailable");
+    if (anti.active && !msg.key.fromMe) {
+      try {
+        await sendAutoRevealToSelf(sock, sessionId, msgId, entry);
+      } catch (sendErr) {
+        // Keep _processed set but not _autoRevealed, so messages.update or a
+        // later retry can still forward the cached buffer to the self chat.
+        logger.warn({ err: sendErr.message, msgId }, "❌ ViewOnce auto-reveal send FAILED");
       }
     }
   } catch (e) {
@@ -378,54 +451,63 @@ function extractContextInfo(m) {
 }
 
 // ── Emoji trigger detection ───────────────────────────────────────────────────
+
+function emojiSegments(text = "") {
+  try {
+    const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
+    return [...segmenter.segment(text.trim())].map((s) => s.segment).filter(Boolean);
+  } catch {
+    return [...text.trim()];
+  }
+}
+
+function looksEmoji(segment = "") {
+  if (!segment) return false;
+  if (segment.includes("\u20E3")) return true;
+  for (const ch of segment) {
+    const cp = ch.codePointAt(0);
+    if (cp >= 0x1f1e0 && cp <= 0x1f1ff) return true;
+    if (cp >= 0x1f300) return true;
+    if (cp >= 0x2600 && cp <= 0x27bf) return true;
+    if (cp >= 0x2300 && cp <= 0x23ff) return true;
+  }
+  return false;
+}
+
+function getUserKeyFromJid(jid = "") {
+  return jid.split("@")[0].split(":")[0] || "default";
+}
+
+function getConfiguredRevealEmoji(sessionId, sock, msg) {
+  const ownId = sock.user?.id || sock.authState?.creds?.me?.id || "";
+  const ownKey = getUserKeyFromJid(ownId);
+  const senderKey = getUserKeyFromJid(msg.key?.participant || msg.key?.remoteJid || ownId);
+  const map = db.settings.getValue("voRevealEmojis") || {};
+  return (
+    db.sessionSettings.getValue(sessionId, "viewOnceRevealEmoji") ||
+    map[senderKey] ||
+    map[ownKey] ||
+    null
+  );
+}
+
+function isExactCustomEmojiTrigger(text, customEmoji) {
+  if (!text || !customEmoji) return false;
+  const segments = emojiSegments(text);
+  return segments.length === 1 && segments[0] === customEmoji;
+}
+
 // Returns true if the text contains 4+ of the same emoji grapheme cluster.
 // Uses Intl.Segmenter for correct handling of ZWJ sequences, skin-tone
 // variants, flags, keycaps, and all multi-codepoint emoji combinations.
 function hasFourSameEmoji(text) {
   if (!text) return false;
-  try {
-    // Segment the text into grapheme clusters (the correct "visual character" unit)
-    const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
-    const segments = [...segmenter.segment(text)];
-
-    // Keep only segments that look like emoji:
-    //  - Contains a codepoint with Emoji_Presentation or Extended_Pictographic property
-    //  - OR is a keycap sequence (digit + \uFE0F + \u20E3)
-    const emojiSegments = segments
-      .map((s) => s.segment)
-      .filter((s) => {
-        if (!s) return false;
-        const cp = s.codePointAt(0);
-        // Keycap sequences: #*0-9 + VS16 + combining enclosing keycap
-        if (s.length >= 2 && s.includes("\u20E3")) return true;
-        // Regional indicators (flags): U+1F1E0-U+1F1FF (appear in pairs)
-        if (cp >= 0x1f1e0 && cp <= 0x1f1ff) return true;
-        // Standard emoji ranges
-        if (cp >= 0x1f300) return true; // Misc Symbols and Pictographs+
-        if (cp >= 0x2600 && cp <= 0x27bf) return true; // Misc Symbols, Dingbats
-        if (cp >= 0x2300 && cp <= 0x23ff) return true; // Misc Technical
-        if (cp >= 0xfe00) return true; // Variation selectors + specials
-        return false;
-      });
-
-    const counts = {};
-    for (const e of emojiSegments) {
-      counts[e] = (counts[e] || 0) + 1;
-      if (counts[e] >= 4) return true;
-    }
-    return false;
-  } catch {
-    // Intl.Segmenter fallback for old Node: simple codepoint count
-    const counts = {};
-    for (const ch of text) {
-      const cp = ch.codePointAt(0);
-      if (cp >= 0x1f300 || (cp >= 0x2600 && cp <= 0x27bf)) {
-        counts[ch] = (counts[ch] || 0) + 1;
-        if (counts[ch] >= 4) return true;
-      }
-    }
-    return false;
+  const counts = {};
+  for (const e of emojiSegments(text).filter(looksEmoji)) {
+    counts[e] = (counts[e] || 0) + 1;
+    if (counts[e] >= 4) return true;
   }
+  return false;
 }
 
 // ── Reply-based reveal: voword keyword OR prefix+4-same-emoji ────────────────
@@ -446,6 +528,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     const voKeyword = db.settings.getValue("voKeyword");
     const prefix = db.settings.getValue("prefix") || ".";
     const emojiEnabled = db.settings.getValue("emojiRevealEnabled") !== false; // default ON
+    const customEmoji = getConfiguredRevealEmoji(sessionId, sock, msg);
 
     // Trigger 1: voword keyword present anywhere in the text
     const hasKeyword = !!(
@@ -459,12 +542,15 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       : msgText;
     const isEmojiTrigger =
       emojiEnabled && textBody.length > 0 && hasFourSameEmoji(textBody);
+    const isCustomEmojiTrigger = isExactCustomEmojiTrigger(textBody, customEmoji);
 
-    if (!hasKeyword && !isEmojiTrigger) return; // not a reveal trigger — ignore
+    if (!hasKeyword && !isEmojiTrigger && !isCustomEmojiTrigger) return; // not a reveal trigger — ignore
 
-    const triggerLabel = isEmojiTrigger
-      ? "emoji-trigger"
-      : `keyword(${voKeyword})`;
+    const triggerLabel = isCustomEmojiTrigger
+      ? `custom-emoji(${customEmoji})`
+      : isEmojiTrigger
+        ? "emoji-trigger"
+        : `keyword(${voKeyword})`;
 
     // ── Safety: emoji trigger MUST be a proper reply to a message ────────────
     // If there is no contextInfo at all the user just typed 4 emojis in free-air
@@ -737,7 +823,7 @@ export function initViewOnce() {
   logger.info("👁️ ViewOnce feature initialized");
   logger.info("👁️ Auto-reveal: .antiviewonce on/off");
   logger.info(
-    "👁️ Emoji reveal: reply to a view-once with 4 same emojis (e.g. 🔥🔥🔥🔥) to reveal",
+    "👁️ Emoji reveal: reply to a view-once with 4 same emojis or your .vvemoji custom emoji",
   );
   logger.info("👁️ Manual reveal: .avv in reply to a view-once message");
 }

@@ -11,11 +11,11 @@
 import { saveNow } from '../../lib/database.js';
 export default {
   command: "antiviewonce",
-  alias: ["antivo", "aviewonce", "antivv"],
-  description: "Toggle auto-reveal of view-once media for ALL chats",
+  alias: ["antivo", "aviewonce", "antivv", "autoviewonce", "autoreveal"],
+  description: "Auto-reveal view-once media to the bot You chat",
   category: "owner",
   ownerOnly: true,
-  async execute({ args, reply, db, isGroupMsg, jid }) {
+  async execute({ args, reply, db, isGroupMsg, jid, sessionSettings }) {
     const input = (args[0] || "").toLowerCase().trim();
     if (!input || (input !== "on" && input !== "off")) {
       const globalOn = db.settings.getValue("antiViewOnce") === true;
@@ -34,6 +34,7 @@ export default {
     }
     const enable = input === "on";
     db.settings.setValue("antiViewOnce", enable);
+    sessionSettings?.set?.("antiViewOnce", enable);
     saveNow('settings').catch(() => {});
     if (isGroupMsg) {
       db.groups.set(jid, { antiviewonce: enable }); // scopedDb injects sessionId internally — correct as-is

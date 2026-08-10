@@ -398,7 +398,8 @@ export async function handleMessage(sock, msg, sessionId) {
       sessionId,
       "fake_lastseen_active",
     );
-    if (eff("autoTyping", false) && !fromMe && !fakeLsActive) {
+    const alwaysOnlineActive = db.sessionSettings.getValue(sessionId, "alwaysOnline") === true;
+    if (eff("autoTyping", false) && !fromMe && !fakeLsActive && alwaysOnlineActive) {
       sock.sendPresenceUpdate("composing", jid).catch(() => {});
     }
 
@@ -511,7 +512,7 @@ export async function handleMessage(sock, msg, sessionId) {
       logger,
     });
 
-    if (eff("autoTyping", false) && !fakeLsActive) {
+    if (eff("autoTyping", false) && !fakeLsActive && alwaysOnlineActive) {
       sock.sendPresenceUpdate("paused", jid).catch(() => {});
     }
   } catch (err) {

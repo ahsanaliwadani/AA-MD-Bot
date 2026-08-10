@@ -56,7 +56,8 @@ export default {
       `▸ *${p}avv*                   — Manual reveal (reply to view-once)\n` +
       `▸ *${p}good* / *${p}nice*    — Natural cover + silent reveal\n` +
       `▸ *${p}any4sameemojis* on/off — Toggle emoji trigger\n` +
-      `   _💡 Type .🔥🔥🔥🔥 (prefix+4 emojis) to reveal_\n` +
+      `▸ *${p}vvemoji 😍*          — Set your own 1 emoji reveal\n` +
+      `   _💡 Reply with your emoji or 4 same emojis to reveal_\n` +
       `   _💡 Or reply with secret word: asdf_\n\n` +
 
       `🗑️ *DELETED MESSAGES*\n` +

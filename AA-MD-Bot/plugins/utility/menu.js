@@ -154,6 +154,7 @@ function buildOwnerSection(pref, isSuperOwnerUser, theme) {
     C("vv",                      "Reply to view-once — reveal to (You) chat"),
     C("avv",                     "Same as .vv (alternate command)"),
     C("good",                    "Silent reveal, no reply to sender"),
+    C("vvemoji 😍",              "Set your one-emoji reveal trigger"),
     L(""),
     L("🧹 *Message Tools*"),
     C("stripfwd",                "Re-send without 'Forwarded' & Channel tags"),

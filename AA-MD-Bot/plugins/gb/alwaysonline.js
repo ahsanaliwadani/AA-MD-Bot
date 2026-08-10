@@ -7,11 +7,27 @@
 const _intervals = new Map(); // sessionId → intervalId
 
 // Exported so ghost.js can stop the interval when enabling ghost mode
-export function stopAlwaysOnline(sessionId) {
+export function stopAlwaysOnline(sessionId, sock = null) {
   if (_intervals.has(sessionId)) {
     clearInterval(_intervals.get(sessionId));
     _intervals.delete(sessionId);
   }
+  if (sock) sock.sendPresenceUpdate('unavailable').catch(() => {});
+}
+
+export function startAlwaysOnline(sock, sessionId) {
+  stopAlwaysOnline(sessionId);
+  const iv = setInterval(async () => {
+    try { await sock.sendPresenceUpdate('available'); } catch {}
+  }, 10000);
+  if (typeof iv.unref === 'function') iv.unref();
+  _intervals.set(sessionId, iv);
+  sock.sendPresenceUpdate('available').catch(() => {});
+}
+
+export function syncAlwaysOnline(sock, sessionId, enabled) {
+  if (enabled) startAlwaysOnline(sock, sessionId);
+  else stopAlwaysOnline(sessionId, sock);
 }
 
 export default {
@@ -46,14 +62,8 @@ export default {
     if (val) {
       // Turn off ghost mode for this session
       sessionSettings.set('ghostMode', false);
-      // Clear any existing interval for this session
-      stopAlwaysOnline(sessionId);
-      // Start new interval for this session only
-      const iv = setInterval(async () => {
-        try { await sock.sendPresenceUpdate('available'); } catch {}
-      }, 10000);
-      _intervals.set(sessionId, iv);
-      try { await sock.sendPresenceUpdate('available'); } catch {}
+      // Start or replace the keep-online loop for this session only
+      startAlwaysOnline(sock, sessionId);
       return reply(
         `🟢 *Always Online* is now *ON ✅*\n\n` +
         `This number will appear *permanently online*.\n` +
@@ -63,8 +73,7 @@ export default {
         `> 🤖 *Powered by AA MD Bot*`
       );
     } else {
-      stopAlwaysOnline(sessionId);
-      try { await sock.sendPresenceUpdate('unavailable'); } catch {}
+      stopAlwaysOnline(sessionId, sock);
       return reply(
         `⚫ *Always Online* is now *OFF ❌*\n\n` +
         `This number's online status is back to normal.\n\n` +
