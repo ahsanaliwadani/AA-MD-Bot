@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { isConnectedSessionOwner } from "./sessionManager.js";
 import { handleViewOnceMessage } from "./antiViewOnce.js";
+import { sendOnlinePresence } from "../plugins/gb/alwaysonline.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -392,14 +393,11 @@ export async function handleMessage(sock, msg, sessionId) {
       } catch {}
     }
 
-    // Skip composing presence when fake last seen is active — firing "composing"
-    // implicitly marks the number as online and resets the scheduled last-seen time.
-    const fakeLsActive = db.sessionSettings.getValue(
-      sessionId,
-      "fake_lastseen_active",
-    );
-    if (eff("autoTyping", false) && !fromMe && !fakeLsActive) {
-      sock.sendPresenceUpdate("composing", jid).catch(() => {});
+    // Only send typing/online presence when .alwaysonline is explicitly enabled.
+    // WhatsApp treats composing/paused/available as online activity, so suppress
+    // them by default to keep the linked number offline while the bot still runs.
+    if (eff("autoTyping", false) && !fromMe) {
+      sendOnlinePresence(sock, sessionId, "composing", jid);
     }
 
     // Build quoted object with message + key so plugins can download media
@@ -511,8 +509,8 @@ export async function handleMessage(sock, msg, sessionId) {
       logger,
     });
 
-    if (eff("autoTyping", false) && !fakeLsActive) {
-      sock.sendPresenceUpdate("paused", jid).catch(() => {});
+    if (eff("autoTyping", false)) {
+      sendOnlinePresence(sock, sessionId, "paused", jid);
     }
   } catch (err) {
     logger.error({ err: err.message }, "handleMessage error");

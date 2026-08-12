@@ -265,10 +265,16 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       // FIX: fallback to the botJid saved in settings at connect time —
       // sock.user can be momentarily null/undefined right after a reconnect,
       // which silently killed auto-reveal even when antiVOActive was true.
+      const savedSessionBotJid = db.sessionSettings.getValue(sessionId, "botJid");
       const savedBotJid = db.settings.getValue("botJid");
-      const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : (savedBotJid || null);
+      const selfJid = selfNum
+        ? `${selfNum}@s.whatsapp.net`
+        : (savedSessionBotJid || savedBotJid || null);
 
-      logger.info({ sessionId, selfJid, usedFallback: !selfNum && !!savedBotJid }, "👁️ ViewOnce auto-reveal: sending to self-chat");
+      logger.info(
+        { sessionId, selfJid, usedSessionFallback: !selfNum && !!savedSessionBotJid, usedGlobalFallback: !selfNum && !savedSessionBotJid && !!savedBotJid },
+        "👁️ ViewOnce auto-reveal: sending to self-chat",
+      );
 
       if (selfJid) {
         const date = moment().tz(tz).format("DD/MM/YYYY");
@@ -301,7 +307,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
           logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal send FAILED");
         }
       } else {
-        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid is null — sock.user AND botJid setting both unavailable");
+        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid is null — sock.user, session botJid, and global botJid all unavailable");
       }
     }
   } catch (e) {

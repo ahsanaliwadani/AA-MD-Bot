@@ -15,6 +15,7 @@
 
 import { chatAIFast, clearHistory } from '../../lib/aiEngine.js';
 import { db } from '../../lib/database.js';
+import { sendOnlinePresence } from '../gb/alwaysonline.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const COOLDOWN_MS = 2500;
@@ -310,7 +311,7 @@ export default {
   description: 'Chat with your AI virtual girlfriend Ayla 💕',
   category: 'fun',
 
-  async execute({ sock, msg, jid, senderJid, text, react, reply, send, prefix, isOwner }) {
+  async execute({ sock, msg, jid, senderJid, text, react, reply, send, prefix, isOwner, sessionId }) {
     const sub = (text || '').trim().toLowerCase();
 
     // ── .gf help ────────────────────────────────────────────────────────────
@@ -515,7 +516,7 @@ export default {
       const systemPrompt = buildSystemPrompt(data);
 
       // Show typing indicator
-      await sock.sendPresenceUpdate('composing', jid).catch(() => {});
+      await sendOnlinePresence(sock, sessionId, 'composing', jid);
 
       // Race with hard 35s wall-clock timeout
       let aiReply = null;
@@ -526,7 +527,7 @@ export default {
         ]);
       } catch (_) { /* handled below */ }
 
-      await sock.sendPresenceUpdate('available', jid).catch(() => {});
+      await sendOnlinePresence(sock, sessionId, 'available', jid);
 
       if (!aiReply) {
         const fbLang  = data.language || 'roman-urdu';
