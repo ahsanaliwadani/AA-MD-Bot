@@ -8,6 +8,7 @@
 import axios from 'axios';
 import { db } from '../../lib/database.js';
 import { chatAI, addHistory, clearHistory } from '../../lib/aiEngine.js';
+import { sendOnlinePresence } from './alwaysonline.js';
 
 // ── Real human system prompt (adapted from user's reference) ──────────────────
 export const CHATBOT_SYSTEM = `You are a real person chatting on WhatsApp. Your name is AA.
@@ -59,10 +60,10 @@ function addMsg(jid, text) {
 }
 
 // ── Typing indicator (shows while AI is processing — no artificial delay) ──────
-async function showTyping(sock, chatJid) {
+async function showTyping(sock, sessionId, chatJid) {
   try {
     await sock.presenceSubscribe(chatJid);
-    await sock.sendPresenceUpdate('composing', chatJid);
+    await sendOnlinePresence(sock, sessionId, 'composing', chatJid);
   } catch {}
 }
 
@@ -143,10 +144,10 @@ export async function checkChatbotResponse(msg, sock, sessionId) {
 
     if (!triggered || !cleanedText) return;
 
-    showTyping(sock, chatJid).catch(() => {});
+    showTyping(sock, sessionId, chatJid).catch(() => {});
     try {
       const response = await getResponse(cleanedText, senderJid);
-      await sock.sendPresenceUpdate('paused', chatJid).catch(() => {});
+      await sendOnlinePresence(sock, sessionId, 'paused', chatJid);
       if (response) {
         await sock.sendMessage(chatJid, { text: response }, { quoted: msg }).catch(() => {});
       }
@@ -165,10 +166,10 @@ export async function checkChatbotResponse(msg, sock, sessionId) {
     const senderNum = chatJid.split('@')[0];
     if (senderNum === botNumber) return;
 
-    showTyping(sock, chatJid).catch(() => {});
+    showTyping(sock, sessionId, chatJid).catch(() => {});
     try {
       const response = await getResponse(msgText, chatJid);
-      await sock.sendPresenceUpdate('paused', chatJid).catch(() => {});
+      await sendOnlinePresence(sock, sessionId, 'paused', chatJid);
       if (response) {
         await sock.sendMessage(chatJid, { text: response }, { quoted: msg }).catch(() => {});
       }

@@ -21,6 +21,7 @@ import { checkAntiFake } from '../plugins/admin/antifake.js';
 import { checkAutoTranslate } from '../plugins/group/autotranslate.js';
 import { checkAntiGm } from '../plugins/admin/antigm.js';
 import { checkAntiScam } from '../plugins/admin/antiscam.js';
+import { syncAlwaysOnlinePresence } from '../plugins/gb/alwaysonline.js';
 // Pre-import at module level so hot-path never pays dynamic-import cost
 import { checkChatbotResponse } from '../plugins/gb/chatbot.js';
 import { chatAI } from './aiEngine.js';
@@ -264,9 +265,12 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         server: process.env.SERVER_ID || process.env.RAILWAY_SERVICE_NAME || process.env.RAILWAY_REPLICA_ID || 'server-1',
       });
 
-      // Persist bot's own JID in settings so plugins can reliably read it
-      // without depending on sock.user?.id being available at command time
-      if (ownJid) db.settings.setValue('botJid', ownJid);
+      // Persist bot's own JID globally and per session so plugins can reliably
+      // target the correct linked number, even in multi-number deployments.
+      if (ownJid) {
+        db.settings.setValue('botJid', ownJid);
+        db.sessionSettings.setValue(sessionId, 'botJid', ownJid);
+      }
 
       // ── Auto-save connected number as owner ──────────────────────────────
       // Ensures the bot's own number always has owner permissions without manual config.
@@ -281,8 +285,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
 
       if (connectionHandler) connectionHandler(sessionId, sock, 'open');
 
-      // Go unavailable immediately so phone still gets push notifications
-      sock.sendPresenceUpdate('unavailable').catch(() => {});
+      // Restore persisted always-online state, or go unavailable when it is off
+      // so disabling .alwaysonline survives reconnects/restarts.
+      syncAlwaysOnlinePresence(sock, sessionId);
 
       // Auto-follow configured channel(s) on this newly connected number.
       // Fire-and-forget — never blocks or breaks the connection flow.

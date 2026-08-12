@@ -16,6 +16,7 @@
 
 import { chatAIFast, clearHistory } from '../../lib/aiEngine.js';
 import { db } from '../../lib/database.js';
+import { sendOnlinePresence } from '../gb/alwaysonline.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const COOLDOWN_MS  = 2500;
@@ -327,7 +328,7 @@ export default {
   description: 'Chat with your AI virtual boyfriend Zayan 💙',
   category:    'fun',
 
-  async execute({ sock, msg, jid, senderJid, text, react, reply, prefix, isOwner }) {
+  async execute({ sock, msg, jid, senderJid, text, react, reply, prefix, isOwner, sessionId }) {
     const sub = (text || '').trim().toLowerCase();
 
     // ── .bf help ──────────────────────────────────────────────────────────────
@@ -528,7 +529,7 @@ export default {
       const systemPrompt = buildSystemPrompt(data);
 
       // Typing indicator
-      await sock.sendPresenceUpdate('composing', jid).catch(() => {});
+      await sendOnlinePresence(sock, sessionId, 'composing', jid);
 
       let aiReply = null;
       try {
@@ -538,7 +539,7 @@ export default {
         ]);
       } catch (_) { /* handled below */ }
 
-      await sock.sendPresenceUpdate('available', jid).catch(() => {});
+      await sendOnlinePresence(sock, sessionId, 'available', jid);
 
       if (!aiReply) {
         await react('❌').catch(() => {});

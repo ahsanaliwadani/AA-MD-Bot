@@ -3,6 +3,8 @@
 // Per-number: each connected number has its own ghost mode
 // ============================================
 
+import { syncAlwaysOnlinePresence } from './alwaysonline.js';
+
 export default {
   command: 'ghost',
   alias: ['ghostmode', 'invisible', 'offline'],
@@ -40,15 +42,19 @@ export default {
       } catch {}
     }
 
-    try {
-      await sock.sendPresenceUpdate(val ? 'unavailable' : 'available', jid);
-    } catch {}
+    if (val) {
+      await sock.sendPresenceUpdate('unavailable', jid).catch(() => {});
+    } else {
+      // Do not force the number online when ghost is disabled. If always-online
+      // is off, keep the number unavailable while the bot continues working.
+      syncAlwaysOnlinePresence(sock, sessionId);
+    }
 
     return reply(
       `👻 *Ghost Mode* is now *${val ? 'ON ✅' : 'OFF ❌'}*\n\n` +
       (val
         ? `This number is now *invisible* 🕵️\nActive but appears offline to everyone.\nAlways Online has been stopped.`
-        : `This number is now *visible* 👁️\nOnline status will show normally.`)
+        : `Ghost mode disabled. Bot keeps working offline; this number only shows online when *.alwaysonline on* is enabled.`)
     );
   },
 };

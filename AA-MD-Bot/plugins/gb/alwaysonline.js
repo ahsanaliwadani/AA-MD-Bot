@@ -3,15 +3,44 @@
 // Per-number: each connected number has its own always-online
 // ============================================
 
+import { db, saveNow } from '../../lib/database.js';
+
 // Per-session interval map — prevents one number from controlling another
 const _intervals = new Map(); // sessionId → intervalId
 
 // Exported so ghost.js can stop the interval when enabling ghost mode
-export function stopAlwaysOnline(sessionId) {
+export function stopAlwaysOnline(sessionId, sock = null) {
   if (_intervals.has(sessionId)) {
     clearInterval(_intervals.get(sessionId));
     _intervals.delete(sessionId);
   }
+  if (sock) sock.sendPresenceUpdate('unavailable').catch(() => {});
+}
+
+export function startAlwaysOnline(sock, sessionId) {
+  stopAlwaysOnline(sessionId);
+  const iv = setInterval(async () => {
+    try { await sock.sendPresenceUpdate('available'); } catch {}
+  }, 10000);
+  _intervals.set(sessionId, iv);
+  sock.sendPresenceUpdate('available').catch(() => {});
+}
+
+export function shouldSendOnlinePresence(sessionId) {
+  const enabled = !!db.sessionSettings.getValue(sessionId, 'alwaysOnline');
+  const ghost = !!db.sessionSettings.getValue(sessionId, 'ghostMode');
+  const fakeLastSeen = !!db.sessionSettings.getValue(sessionId, 'fake_lastseen_active');
+  return enabled && !ghost && !fakeLastSeen;
+}
+
+export function sendOnlinePresence(sock, sessionId, presence, jid = undefined) {
+  if (!shouldSendOnlinePresence(sessionId)) return Promise.resolve(false);
+  return sock.sendPresenceUpdate(presence, jid).then(() => true).catch(() => false);
+}
+
+export function syncAlwaysOnlinePresence(sock, sessionId) {
+  if (shouldSendOnlinePresence(sessionId)) startAlwaysOnline(sock, sessionId);
+  else stopAlwaysOnline(sessionId, sock);
 }
 
 export default {
@@ -46,14 +75,9 @@ export default {
     if (val) {
       // Turn off ghost mode for this session
       sessionSettings.set('ghostMode', false);
-      // Clear any existing interval for this session
-      stopAlwaysOnline(sessionId);
-      // Start new interval for this session only
-      const iv = setInterval(async () => {
-        try { await sock.sendPresenceUpdate('available'); } catch {}
-      }, 10000);
-      _intervals.set(sessionId, iv);
-      try { await sock.sendPresenceUpdate('available'); } catch {}
+      await saveNow('sessionSettings').catch(() => {});
+      // Start/restart the interval for this session only
+      startAlwaysOnline(sock, sessionId);
       return reply(
         `🟢 *Always Online* is now *ON ✅*\n\n` +
         `This number will appear *permanently online*.\n` +
@@ -63,8 +87,8 @@ export default {
         `> 🤖 *Powered by AA MD Bot*`
       );
     } else {
-      stopAlwaysOnline(sessionId);
-      try { await sock.sendPresenceUpdate('unavailable'); } catch {}
+      await saveNow('sessionSettings').catch(() => {});
+      stopAlwaysOnline(sessionId, sock);
       return reply(
         `⚫ *Always Online* is now *OFF ❌*\n\n` +
         `This number's online status is back to normal.\n\n` +
