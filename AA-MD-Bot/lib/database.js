@@ -254,7 +254,7 @@ export const db = {
           welcome: false, welcomeMsg: 'Welcome @user!',
           goodbye: false, goodbyeMsg: 'Goodbye @user!',
           muted: false, antifake: false, antibadwords: false,
-          antidelete: false, antiviewonce: false,
+          antidelete: false, antiedit: false, antiviewonce: false,
           antidemote: false, antiflood: false, antifloodLimit: 7,
           rules: '',
           badwordsList: [], warnings: {},

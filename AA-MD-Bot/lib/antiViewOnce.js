@@ -110,18 +110,38 @@ function formatPhone(num) {
 
 function normalizeMsg(message) {
   let m = message;
-  for (let i = 0; i < 5; i++) {
-    if (m?.ephemeralMessage) {
-      m = m.ephemeralMessage.message;
-      continue;
-    }
-    if (m?.documentWithCaptionMessage) {
-      m = m.documentWithCaptionMessage.message;
-      continue;
-    }
-    break;
+  for (let i = 0; i < 8; i++) {
+    const next =
+      m?.ephemeralMessage?.message ||
+      m?.documentWithCaptionMessage?.message ||
+      m?.viewOnceMessage?.message ||
+      m?.viewOnceMessageV2?.message ||
+      m?.viewOnceMessageV2Extension?.message ||
+      null;
+    if (!next) break;
+    m = next;
   }
   return m;
+}
+
+function toUserJid(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return null;
+  if (String(raw).includes('@')) return String(raw);
+  const num = String(raw).replace(/\D/g, '');
+  return num ? `${num}@s.whatsapp.net` : null;
+}
+
+function getSelfJid(sock, sessionId) {
+  const raw = sock.user?.id || sock.user?.jid || sock.authState?.creds?.me?.id || '';
+  const selfNum = raw.split('@')[0]?.split(':')[0];
+  if (selfNum) return `${selfNum}@s.whatsapp.net`;
+  return (
+    toUserJid(db.sessionSettings.getValue(sessionId, "botJid")) ||
+    toUserJid(db.settings.getValue("botJid")) ||
+    toUserJid(config.ownerNumber) ||
+    null
+  );
 }
 
 function extractViewOnceMedia(normalized) {
@@ -261,18 +281,10 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     );
 
     if (antiVOActive && !msg.key.fromMe) {
-      const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
-      // FIX: fallback to the botJid saved in settings at connect time —
-      // sock.user can be momentarily null/undefined right after a reconnect,
-      // which silently killed auto-reveal even when antiVOActive was true.
-      const savedSessionBotJid = db.sessionSettings.getValue(sessionId, "botJid");
-      const savedBotJid = db.settings.getValue("botJid");
-      const selfJid = selfNum
-        ? `${selfNum}@s.whatsapp.net`
-        : (savedSessionBotJid || savedBotJid || null);
+      const selfJid = getSelfJid(sock, sessionId);
 
       logger.info(
-        { sessionId, selfJid, usedSessionFallback: !selfNum && !!savedSessionBotJid, usedGlobalFallback: !selfNum && !savedSessionBotJid && !!savedBotJid },
+        { sessionId, selfJid },
         "👁️ ViewOnce auto-reveal: sending to self-chat",
       );
 
@@ -516,8 +528,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     }
     // If stanzaId was null (no proper reply quote) we do NOT scan — abort below.
 
-    const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
-    const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
+    const selfJid = getSelfJid(sock, sessionId);
     if (!selfJid) return;
 
     const tz = config.timezone || "Asia/Karachi";
@@ -631,8 +642,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
 
 // ── Manual reveal: by msgId (from !reveal, .reveal, or the reveal plugin) ─────
 export async function handleManualReveal(msgId, sock, replyJid) {
-  const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
-  const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
+  const selfJid = getSelfJid(sock, null);
   if (!selfJid) return;
 
   const id = msgId?.trim();
@@ -688,8 +698,7 @@ export async function handleManualReveal(msgId, sock, replyJid) {
 // Pass the full `msg` of the owner's command message. Extracts the quoted msgId
 // and reveals that view-once. Returns true if found, false if not in cache.
 export async function handleRevealByReply(msg, sock) {
-  const selfNum = sock.user?.id?.split("@")[0]?.split(":")[0];
-  const selfJid = selfNum ? `${selfNum}@s.whatsapp.net` : null;
+  const selfJid = getSelfJid(sock, null);
   if (!selfJid) return false;
 
   // Extract the quoted message ID from contextInfo

@@ -34,6 +34,8 @@ const SC  = /https?:\/\/(www\.|on\.)?soundcloud\.com\/[^\s]+/gi;
 const SP  = /https?:\/\/open\.spotify\.com\/[^\s]+/gi;
 const YT  = /https?:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/gi;
 const TH  = /https?:\/\/(www\.)?threads\.(net|com)\/[^\s]+/gi;
+const TB  = /https?:\/\/(www\.)?(terabox\.com|1024terabox\.com|teraboxapp\.com|freeterabox\.com|terabox\.app|teraboxlink\.com|terafileshare\.com|4funbox\.co|mirrobox\.com|nephobox\.com|momerybox\.com|teraboxshare\.com)\/[^\s]+/gi;
+const URL = /https?:\/\/[^\s]+/gi;
 
 const clean = (m) => m?.[0]?.replace(/[.,!?;]$/, '');
 
@@ -50,10 +52,60 @@ const extract = (txt) => {
   m = txt.match(SP);  if (m) return { type: 'sp',  url: clean(m) };
   m = txt.match(YT);  if (m) return { type: 'yt',  url: clean(m) };
   m = txt.match(MF);  if (m) return { type: 'mf',  url: clean(m) };
+  m = txt.match(TB);  if (m) return { type: 'tb',  url: clean(m) };
+  m = txt.match(URL); if (m) return { type: 'direct', url: clean(m) };
   return null;
 };
 
-const api = axios.create({ timeout: 30000 });
+const api = axios.create({
+  timeout: 30000,
+  maxRedirects: 5,
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    'Accept': '*/*',
+  },
+});
+
+const MAX_WA_BYTES = Number(process.env.MAX_WA_DOWNLOAD_MB || 95) * 1024 * 1024;
+
+function guessName(url, fallback = 'download') {
+  try {
+    const u = new URL(url);
+    const last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
+    return (last && last.includes('.') ? last : fallback).replace(/[\/:*?"<>|]/g, '_').slice(0, 120);
+  } catch {
+    return fallback;
+  }
+}
+
+function mimeKind(mime = '', filename = '') {
+  const m = mime.toLowerCase();
+  const f = filename.toLowerCase();
+  if (m.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(f)) return 'image';
+  if (m.startsWith('video/') || /\.(mp4|mkv|mov|webm|avi)$/i.test(f)) return 'video';
+  if (m.startsWith('audio/') || /\.(mp3|m4a|ogg|wav|opus)$/i.test(f)) return 'audio';
+  return 'document';
+}
+
+async function downloadAnyBuffer(url, maxBytes = MAX_WA_BYTES) {
+  const res = await api.get(url, { responseType: 'arraybuffer', timeout: 120000, maxContentLength: maxBytes, maxBodyLength: maxBytes });
+  const buf = Buffer.from(res.data || []);
+  if (!buf.length) throw new Error('Downloaded file is empty');
+  if (buf.length > maxBytes) throw new Error(`File is too large for WhatsApp (${Math.ceil(buf.length / 1024 / 1024)}MB)`);
+  const cd = res.headers?.['content-disposition'] || '';
+  const cdName = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+  const filename = cdName ? decodeURIComponent(cdName[1] || cdName[2]) : guessName(res.request?.res?.responseUrl || url);
+  const mimetype = res.headers?.['content-type']?.split(';')[0] || 'application/octet-stream';
+  return { buf, filename, mimetype, kind: mimeKind(mimetype, filename) };
+}
+
+async function sendDownloaded(sock, jid, msg, file, caption) {
+  const common = { mimetype: file.mimetype, caption };
+  if (file.kind === 'image') return sock.sendMessage(jid, { image: file.buf, ...common }, { quoted: msg });
+  if (file.kind === 'video') return sock.sendMessage(jid, { video: file.buf, ...common }, { quoted: msg });
+  if (file.kind === 'audio') return sock.sendMessage(jid, { audio: file.buf, mimetype: file.mimetype, fileName: file.filename, ptt: false }, { quoted: msg });
+  return sock.sendMessage(jid, { document: file.buf, mimetype: file.mimetype, fileName: file.filename, caption }, { quoted: msg });
+}
 
 // ── yt-dlp download → buffer (uses execFile — no shell injection) ──────────────
 async function ytdlpVideo(url) {
@@ -164,6 +216,32 @@ async function rednitPin(url) {
   return d;
 }
 
+
+async function teraboxViaPublicApis(url) {
+  const endpoints = [
+    process.env.TERABOX_API_URL,
+    `https://teraboxdownloader.online/api/download?url=${encodeURIComponent(url)}`,
+    `https://terabox-dl-api.vercel.app/api?url=${encodeURIComponent(url)}`,
+    `https://api.terabox.app/api?url=${encodeURIComponent(url)}`,
+  ].filter(Boolean);
+
+  for (const endpoint of endpoints) {
+    try {
+      const { data } = await api.get(endpoint, { timeout: 30000 });
+      const list = data?.files || data?.result?.files || data?.data?.files || data?.list || data?.result || data?.data || data;
+      const items = Array.isArray(list) ? list : [list];
+      const files = items.map((x) => ({
+        url: x?.download_url || x?.downloadUrl || x?.dlink || x?.direct_link || x?.link || x?.url,
+        filename: x?.filename || x?.file_name || x?.name || x?.title || 'terabox-file',
+        size: x?.size || x?.file_size || '',
+        mimetype: x?.mimetype || x?.mime || 'application/octet-stream',
+      })).filter((x) => x.url);
+      if (files.length) return files;
+    } catch {}
+  }
+  return [];
+}
+
 async function mediafireDirect(url) {
   // Scrape MediaFire HTML to extract direct download link
   const { data: html } = await api.get(url, {
@@ -179,7 +257,7 @@ async function mediafireDirect(url) {
 export default {
   command: 'dl',
   alias: ['download', 'save'],
-  description: 'Multi-platform downloader: TikTok, Instagram, Facebook, Twitter/X, Pinterest, Threads, SoundCloud, Spotify, YouTube, MediaFire',
+  description: 'Universal downloader: TikTok, Instagram, Facebook, Twitter/X, Pinterest, Threads, SoundCloud, Spotify, YouTube, MediaFire, TeraBox, direct files',
   category: 'download',
 
   async execute({ sock, msg, jid, text, react, reply, prefix }) {
@@ -190,7 +268,7 @@ export default {
     }
     if (!raw) return reply(
       `*🔗 Universal Downloader*\n\n` +
-      `*Platforms:* TikTok • Instagram • Facebook • Twitter/X • Pinterest • Threads • SoundCloud • Spotify • YouTube • MediaFire\n\n` +
+      `*Platforms:* TikTok • Instagram • Facebook • Twitter/X • Pinterest • Threads • SoundCloud • Spotify • YouTube • MediaFire • TeraBox • Direct file links\n\n` +
       `*Usage:* ${prefix}dl <link>\n` +
       `💡 Or reply to any message containing a link`
     );
@@ -316,6 +394,33 @@ export default {
         }, { quoted: msg });
       }
 
+      // ── TeraBox ─────────────────────────────────────────────────────────────
+      else if (type === 'tb') {
+        const files = await teraboxViaPublicApis(url);
+        if (files.length) {
+          for (const item of files.slice(0, 3)) {
+            const file = await downloadAnyBuffer(item.url);
+            file.filename = item.filename || file.filename;
+            file.mimetype = item.mimetype || file.mimetype;
+            file.kind = mimeKind(file.mimetype, file.filename);
+            await sendDownloaded(sock, jid, msg, file, `☁️ *TeraBox Download*
+📄 ${file.filename}${item.size ? `
+📦 ${item.size}` : ''}`);
+          }
+        } else {
+          const buf = await ytdlpVideo(url);
+          if (!buf?.length) throw new Error('TeraBox direct link could not be generated. Set TERABOX_API_URL for a private API fallback.');
+          await sock.sendMessage(jid, { video: buf, mimetype: 'video/mp4', caption: '☁️ *TeraBox via AA MD Bot*' }, { quoted: msg });
+        }
+      }
+
+      // ── Direct/Chrome-style file URL ─────────────────────────────────────────
+      else if (type === 'direct') {
+        const file = await downloadAnyBuffer(url);
+        await sendDownloaded(sock, jid, msg, file, `🌐 *Web Download*
+📄 ${file.filename}`);
+      }
+
       // ── Pinterest ────────────────────────────────────────────────────────────
       else if (type === 'pin') {
         // Try yt-dlp first (supports Pinterest), then rednit API
@@ -336,7 +441,7 @@ export default {
     } catch (e) {
       console.error('[dl]', e.message);
       await react('❌');
-      reply(`❌ *Download failed*\n\n${e.message}\n\n💡 Try the dedicated command:\n• *.ig* for Instagram\n• *.tiktok* for TikTok\n• *.play* / *.video* for YouTube`);
+      reply(`❌ *Download failed*\n\n${e.message}\n\n💡 Try the dedicated command:\n• *.ig* for Instagram\n• *.tiktok* for TikTok\n• *.play* / *.video* for YouTube\n• Set TERABOX_API_URL if public TeraBox APIs are blocked`);
     }
   },
 };

@@ -442,12 +442,70 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     }
   });
 
-  // In-memory cache for anti-delete (last 200 messages per JID)
+  // In-memory cache for anti-delete / anti-edit (last 200 messages per JID)
   const _msgCache  = new Map();
   const _CACHE_MAX = 200;
   const _floodMap  = new Map(); // anti-flood tracker
 
+  const getSelfJidLocal = () => {
+    const raw = sock.user?.id || sock.user?.jid || sock.authState?.creds?.me?.id || '';
+    const num = raw.split('@')[0]?.split(':')[0];
+    if (num) return `${num}@s.whatsapp.net`;
+    const fallback = db.sessionSettings.getValue(sessionId, 'botJid') || db.settings.getValue('botJid') || config.ownerNumber?.[0];
+    if (!fallback) return null;
+    if (String(fallback).includes('@')) return String(fallback);
+    const cleanNum = String(fallback).replace(/\D/g, '');
+    return cleanNum ? `${cleanNum}@s.whatsapp.net` : null;
+  };
 
+  const isAntiEditEnabled = (chatJid) => {
+    const isGroup = chatJid?.endsWith('@g.us');
+    const settings = db.settings.get();
+    const globalValue = settings.antiedit ?? settings.antiEdit ?? false;
+    return isGroup
+      ? (db.groups.get(sessionId, chatJid)?.antiedit ?? globalValue)
+      : globalValue;
+  };
+
+  const handleAntiEdit = async (editEvent) => {
+    const proto = editEvent?.message?.protocolMessage;
+    if (proto?.type !== 14) return false; // MESSAGE_EDIT
+
+    const editedKey = proto.key || editEvent.key;
+    const chatJid = editedKey?.remoteJid || editEvent.key?.remoteJid;
+    const editedId = editedKey?.id;
+    if (!chatJid || !editedId || chatJid === 'status@broadcast') return true;
+    if (!isAntiEditEnabled(chatJid)) return true;
+
+    const original = _msgCache.get(chatJid)?.get(editedId);
+    if (!original || original.key?.fromMe) return true;
+
+    const selfJid = getSelfJidLocal();
+    if (!selfJid) return true;
+
+    const isGroup = chatJid.endsWith('@g.us');
+    const editor = editedKey.participant || editEvent.key?.participant || chatJid;
+    const editorNum = editor?.split('@')[0]?.split(':')[0] || '?';
+    const displayName = sock.contacts?.[editor]?.name || sock.contacts?.[editor]?.notify || original.pushName || editEvent.pushName || '';
+    const now = new Date().toLocaleString('en-PK', { timeZone: config.timezone || 'Asia/Karachi' });
+
+    await sock.sendMessage(selfJid, {
+      text:
+        `✏️ *Edited Message Recovered*
+
+` +
+        `👤 By: ${displayName ? `*${displayName}* ` : ''}+${editorNum}
+` +
+        `📍 Where: ${isGroup ? 'Group' : 'DM'}
+` +
+        `🕐 Time: ${now}
+
+` +
+        `_Old/original message:_`,
+    }).catch(() => {});
+    await sock.sendMessage(selfJid, { forward: original, force: true }).catch(() => {});
+    return true;
+  };
 
   // messages.update — fires for: read-receipts, ViewOnce unlocks, edits.
   sock.ev.on('messages.update', async (updates) => {
@@ -457,6 +515,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         if (!content) continue;
         const chatJid = update.key?.remoteJid;
         const msg     = { key: update.key, message: content };
+
+        // ── Anti-Edit: edited messages can arrive through messages.update ─────
+        if (await handleAntiEdit(msg)) continue;
 
         // ── ViewOnce reveal ──────────────────────────────────────────────
         try { await handleViewOnceMessage(msg, sock, sessionId); } catch {}
@@ -474,9 +535,13 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     try {
       if (!msg.message) return;
 
-      // ── Skip protocolMessage type 14 (MESSAGE_EDIT) — not a real chat message ──
       const proto = msg.message?.protocolMessage;
-      if (proto?.type === 14) return;
+
+      // ── Anti-Edit: MESSAGE_EDIT is not a command; recover old cached copy ──
+      if (proto?.type === 14) {
+        await handleAntiEdit(msg);
+        return;
+      }
 
       // ── Anti-Delete: detect protocolMessage REVOKE ────────────
       if (proto?.type === 0) { // type 0 = REVOKE (message deleted)

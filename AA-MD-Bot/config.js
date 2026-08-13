@@ -24,6 +24,7 @@ const config = {
   antiSpam: true,
   antiCall: false,
   antiDelete: false,
+  antiEdit: false,
   antiViewOnce: false,
   spamInterval: 5,
   spamMax: 5,
