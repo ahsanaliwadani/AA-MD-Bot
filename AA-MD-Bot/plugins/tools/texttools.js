@@ -8,6 +8,36 @@
 const SMALLCAPS = {a:'ᴀ',b:'ʙ',c:'ᴄ',d:'ᴅ',e:'ᴇ',f:'ꜰ',g:'ɢ',h:'ʜ',i:'ɪ',j:'ᴊ',k:'ᴋ',l:'ʟ',m:'ᴍ',n:'ɴ',o:'ᴏ',p:'ᴘ',q:'ǫ',r:'ʀ',s:'ꜱ',t:'ᴛ',u:'ᴜ',v:'ᴠ',w:'ᴡ',x:'x',y:'ʏ',z:'ᴢ'};
 const FLIPMAP   = {a:'ɐ',b:'q',c:'ɔ',d:'p',e:'ǝ',f:'ɟ',g:'ƃ',h:'ɥ',i:'ᴉ',j:'ɾ',k:'ʞ',l:'l',m:'ɯ',n:'u',o:'o',p:'d',q:'b',r:'ɹ',s:'s',t:'ʇ',u:'n',v:'ʌ',w:'ʍ',x:'x',y:'ʎ',z:'z','!':'¡','?':'¿','.':'˙'};
 
+async function sendCopyResult(sock, jid, msg, title, result) {
+  const body = `${title}
+
+${result}
+
+> ✏️ *AA MD Bot*`;
+  const buttonParamsJson = JSON.stringify({ display_text: '📋 Copy Text', copy_code: result });
+  const copyButton = { name: 'cta_copy', buttonParamsJson };
+
+  try {
+    return await sock.sendMessage(jid, {
+      text: body,
+      footer: 'Tap below to copy the styled text',
+      buttons: [copyButton],
+    }, { quoted: msg });
+  } catch {
+    try {
+      return await sock.sendMessage(jid, {
+        text: body,
+        footer: 'Tap below to copy the styled text',
+        interactiveButtons: [copyButton],
+      }, { quoted: msg });
+    } catch {
+      return sock.sendMessage(jid, { text: `${body}
+
+📋 *Copy:* \`${result.replace(/`/g, 'ʼ')}\`` }, { quoted: msg });
+    }
+  }
+}
+
 export default {
   command: 'reverse',
   alias: [
@@ -20,25 +50,25 @@ export default {
   description: 'Text manipulation — reverse, case, count, fun transforms',
   category: 'tools',
 
-  async execute({ command, args, text, reply, prefix }) {
+  async execute({ command, args, text, reply, prefix, sock, jid, msg }) {
     const t = text || '';
 
     // ── reverse ────────────────────────────────────────
     if (command === 'reverse') {
       if (!t) return reply(`*Usage:* ${prefix}reverse <text>\n${prefix}reverse Hello World`);
-      return reply(`🔄 *Reversed:*\n${t.split('').reverse().join('')}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🔄 *Reversed*', t.split('').reverse().join(''));
     }
 
     // ── upper ──────────────────────────────────────────
     if (['upper','uppercase','caps'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}upper <text>`);
-      return reply(t.toUpperCase());
+      return sendCopyResult(sock, jid, msg, '🔠 *Uppercase*', t.toUpperCase());
     }
 
     // ── lower ──────────────────────────────────────────
     if (['lower','lowercase'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}lower <text>`);
-      return reply(t.toLowerCase());
+      return sendCopyResult(sock, jid, msg, '🔡 *Lowercase*', t.toLowerCase());
     }
 
     // ── count ──────────────────────────────────────────
@@ -65,31 +95,31 @@ export default {
       const n = Math.min(parseInt(args[0]) || 3, 20);
       const txt = args.slice(1).join(' ');
       if (!txt) return reply(`*Usage:* ${prefix}repeat 5 hello`);
-      return reply(Array(n).fill(txt).join('\n'));
+      return sendCopyResult(sock, jid, msg, '🔁 *Repeated Text*', Array(n).fill(txt).join('\n'));
     }
 
     // ── mock / spongebob ───────────────────────────────
     if (['mock','spongebob'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}mock <text>`);
-      return reply(t.split('').map((c, i) => i % 2 ? c.toUpperCase() : c.toLowerCase()).join(''));
+      return sendCopyResult(sock, jid, msg, '🧽 *Mock Text*', t.split('').map((c, i) => i % 2 ? c.toUpperCase() : c.toLowerCase()).join(''));
     }
 
     // ── tiny / smallcaps ───────────────────────────────
     if (['tiny','smallcaps'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}tiny <text>`);
-      return reply(t.toLowerCase().split('').map(c => SMALLCAPS[c] || c).join(''));
+      return sendCopyResult(sock, jid, msg, '🔤 *Small Caps*', t.toLowerCase().split('').map(c => SMALLCAPS[c] || c).join(''));
     }
 
     // ── fliptext / upsidedown ──────────────────────────
     if (['fliptext','upsidedown'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}fliptext <text>`);
-      return reply(t.toLowerCase().split('').map(c => FLIPMAP[c] || c).reverse().join(''));
+      return sendCopyResult(sock, jid, msg, '🙃 *Flip Text*', t.toLowerCase().split('').map(c => FLIPMAP[c] || c).reverse().join(''));
     }
 
     // ── striketext ─────────────────────────────────────
     if (command === 'striketext') {
       if (!t) return reply(`*Usage:* ${prefix}striketext <text>`);
-      return reply(t.split('').join('\u0336') + '\u0336');
+      return sendCopyResult(sock, jid, msg, '〰️ *Strike Text*', t.split('').join('\u0336') + '\u0336');
     }
 
     // ── palindrome ─────────────────────────────────────
@@ -130,7 +160,7 @@ export default {
     if (command === 'censored') {
       if (!t) return reply(`*Usage:* ${prefix}censored <text>`);
       const censored = t.replace(/\b\w+\b/g, w => w[0] + '*'.repeat(Math.max(w.length-2,1)) + (w.length > 1 ? w[w.length-1] : ''));
-      return reply(censored);
+      return sendCopyResult(sock, jid, msg, '🔒 *Censored Text*', censored);
     }
 
     // ── help ───────────────────────────────────────────

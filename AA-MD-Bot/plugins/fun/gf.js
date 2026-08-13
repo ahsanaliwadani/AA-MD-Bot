@@ -527,7 +527,7 @@ export default {
         ]);
       } catch (_) { /* handled below */ }
 
-      await sendOnlinePresence(sock, sessionId, 'available', jid);
+      await sendOnlinePresence(sock, sessionId, 'paused', jid);
 
       if (!aiReply) {
         const fbLang  = data.language || 'roman-urdu';

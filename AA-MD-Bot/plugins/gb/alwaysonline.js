@@ -6,9 +6,17 @@
 import { db, saveNow } from '../../lib/database.js';
 
 // Per-session interval map — prevents one number from controlling another
-const _intervals = new Map(); // sessionId → intervalId
+const _intervals = new Map(); // sessionId → always-online intervalId
+const _offlineIntervals = new Map(); // sessionId → offline guard intervalId
 
 // Exported so ghost.js can stop the interval when enabling ghost mode
+function stopOfflineGuard(sessionId) {
+  if (_offlineIntervals.has(sessionId)) {
+    clearInterval(_offlineIntervals.get(sessionId));
+    _offlineIntervals.delete(sessionId);
+  }
+}
+
 export function stopAlwaysOnline(sessionId, sock = null) {
   if (_intervals.has(sessionId)) {
     clearInterval(_intervals.get(sessionId));
@@ -17,7 +25,27 @@ export function stopAlwaysOnline(sessionId, sock = null) {
   if (sock) sock.sendPresenceUpdate('unavailable').catch(() => {});
 }
 
+export function stopPresenceLoops(sessionId) {
+  stopAlwaysOnline(sessionId);
+  stopOfflineGuard(sessionId);
+}
+
+export function enforceOfflinePresence(sock, sessionId) {
+  stopAlwaysOnline(sessionId, sock);
+  stopOfflineGuard(sessionId);
+  if (!sock) return;
+
+  // WhatsApp can briefly mark the linked account online when the bot sends,
+  // reacts, reconnects, or handles receipts. Re-assert unavailable so when
+  // .alwaysonline is OFF the bot keeps working without advertising online.
+  const markOffline = () => sock.sendPresenceUpdate('unavailable').catch(() => {});
+  markOffline();
+  const iv = setInterval(markOffline, 15000);
+  _offlineIntervals.set(sessionId, iv);
+}
+
 export function startAlwaysOnline(sock, sessionId) {
+  stopOfflineGuard(sessionId);
   stopAlwaysOnline(sessionId);
   const iv = setInterval(async () => {
     try { await sock.sendPresenceUpdate('available'); } catch {}
@@ -40,7 +68,7 @@ export function sendOnlinePresence(sock, sessionId, presence, jid = undefined) {
 
 export function syncAlwaysOnlinePresence(sock, sessionId) {
   if (shouldSendOnlinePresence(sessionId)) startAlwaysOnline(sock, sessionId);
-  else stopAlwaysOnline(sessionId, sock);
+  else enforceOfflinePresence(sock, sessionId);
 }
 
 export default {
@@ -63,7 +91,7 @@ export default {
         `⚠️ *Per number:* Only applies to this connected number.\n\n` +
         `━━━━━━━━━━━━━━━━\n` +
         `▸ *.alwaysonline on*  — Always appear online\n` +
-        `▸ *.alwaysonline off* — Normal online status\n\n` +
+        `▸ *.alwaysonline off* — Hide bot presence / stay offline\n\n` +
         `⚠️ Note: Ghost Mode & Always Online cannot be active together.\n\n` +
         `> 🤖 *Powered by AA MD Bot*`
       );
@@ -88,10 +116,10 @@ export default {
       );
     } else {
       await saveNow('sessionSettings').catch(() => {});
-      stopAlwaysOnline(sessionId, sock);
+      enforceOfflinePresence(sock, sessionId);
       return reply(
         `⚫ *Always Online* is now *OFF ❌*\n\n` +
-        `This number's online status is back to normal.\n\n` +
+        `Bot presence is hidden now. The bot will keep sending *unavailable* so this number does not stay online while the bot is running.\n\n` +
         `> 🤖 *Powered by AA MD Bot*`
       );
     }

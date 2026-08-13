@@ -70,12 +70,12 @@ export function listThemes() {
 // ── Minimal built-in fallback (no file needed) ──────────────────────────────
 const _fallbackTheme = {
   name: 'default', author: 'AA Mods', version: '1.0.0',
-  description: 'Clean default style', preview: '╭── 🤖 AA MD BOT ──╮',
-  emojiSet: { bullet: '▸', check: '✅', warn: '⚠️' },
-  colors:   { primary: '#25D366', secondary: '#128C7E' },
-  header:   (bot, dev) => `╭─────────────────────────────╮\n   🤖 *${bot}*\n   👨‍💻 ${dev}\n╰─────────────────────────────╯`,
+  description: 'Logo-matched neon blue style', preview: '╔══💠 AA MD BOT 💠══╗',
+  emojiSet: { bullet: '▸', check: '💠', warn: '⚠️' },
+  colors:   { primary: '#00D9FF', secondary: '#0077FF', accent: '#EAF6FF', background: '#020713' },
+  header:   (bot, dev) => `╭─────────────────────────────╮\n   💠 *${bot}*\n   👨‍💻 ${dev}\n╰─────────────────────────────╯`,
   statusBar:({ uptime, memMB, mode, prefix, role, totalCmds }) =>
-    `\n╭── 📊  *STATUS*\n│  🟢 Online  •  ⏱️ ${uptime}  •  💾 ${memMB}MB\n│  Prefix: *${prefix}*   Mode: *${mode}*   Role: ${role}\n│  📦 *${totalCmds}* commands loaded\n╰${'─'.repeat(32)}`,
+    `\n╭── 💎  *SYSTEM STATUS*\n│  🔵 Online  •  ⏱️ ${uptime}  •  💾 ${memMB}MB\n│  Prefix: *${prefix}*   Mode: *${mode}*   Role: ${role}\n│  📦 *${totalCmds}* commands loaded\n╰${'─'.repeat(32)}`,
   sectionBox: (emoji, title, count, lines) => {
     const hdr = `\n╭── ${emoji}  *${title}*  (${count})\n│\n`;
     return hdr + lines.join('') + `╰${'─'.repeat(32)}\n`;
@@ -84,6 +84,6 @@ const _fallbackTheme = {
     ? `│  ▸ *${prefix}${cmd}*\n│     _${desc}_\n│\n`
     : `│  ▸ *${prefix}${cmd}*\n│\n`,
   infoRow: (text) => `│  ${text}\n│\n`,
-  footer:  (tips) => `\n╭── 💡  *TIPS*\n${tips.map(t => `│  ▸ ${t}`).join('\n')}\n╰${'─'.repeat(32)}\n`,
+  footer:  (tips) => `\n╭── ⚡  *SMART • FAST • POWERFUL*\n${tips.map(t => `│  ▸ ${t}`).join('\n')}\n╰${'─'.repeat(32)}\n`,
   divider: () => `${'─'.repeat(34)}\n`,
 };
