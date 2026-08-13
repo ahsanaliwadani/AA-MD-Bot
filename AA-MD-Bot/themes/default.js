@@ -4,21 +4,21 @@ export default {
   name:        'default',
   author:      'AA Mods',
   version:     '1.0.0',
-  description: 'Clean default style',
-  preview:     '╭── 🤖 AA MD BOT ──╮',
-  emojiSet:    { bullet: '▸', check: '✅', warn: '⚠️' },
-  colors:      { primary: '#25D366', secondary: '#128C7E' },
+  description: 'Logo-matched neon blue style',
+  preview:     '╔══💠 AA MD BOT 💠══╗',
+  emojiSet:    { bullet: '▸', check: '💠', warn: '⚠️' },
+  colors:      { primary: '#00D9FF', secondary: '#0077FF', accent: '#EAF6FF', background: '#020713' },
   cmdSpacer:   '',  // already has │\n spacer built into cmdRow — no extra blank needed
 
   header: (bot, dev) =>
     `╭─────────────────────────────╮\n` +
-    `   🤖 *${bot}*\n` +
+    `   💠 *${bot}*\n` +
     `   👨‍💻 ${dev}\n` +
     `╰─────────────────────────────╯`,
 
   statusBar: ({ uptime, memMB, mode, prefix, role, totalCmds }) =>
-    `\n╭── 📊  *STATUS*\n` +
-    `│  🟢 Online  •  ⏱️ ${uptime}  •  💾 ${memMB}MB\n` +
+    `\n╭── 💎  *SYSTEM STATUS*\n` +
+    `│  🔵 Online  •  ⏱️ ${uptime}  •  💾 ${memMB}MB\n` +
     `│  Prefix: *${prefix}*   Mode: *${mode}*   Role: ${role}\n` +
     `│  📦 *${totalCmds}* commands loaded\n` +
     `╰${'─'.repeat(32)}`,
@@ -35,7 +35,7 @@ export default {
   infoRow: (text) => `│  ${text}\n│\n`,
 
   footer: (tips) =>
-    `\n╭── 💡  *TIPS*\n` +
+    `\n╭── ⚡  *SMART • FAST • POWERFUL*\n` +
     tips.map(t => `│  ▸ ${t}`).join('\n') + '\n' +
     `╰${'─'.repeat(32)}\n`,
 
