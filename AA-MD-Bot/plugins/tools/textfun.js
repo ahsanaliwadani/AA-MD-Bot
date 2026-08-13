@@ -67,6 +67,36 @@ function toPigLatin(word) {
   return (m?.[2] || word) + (m?.[1] || '') + 'ay';
 }
 
+async function sendCopyResult(sock, jid, msg, title, result) {
+  const body = `${title}
+
+${result}
+
+> ✏️ *AA MD Bot*`;
+  const buttonParamsJson = JSON.stringify({ display_text: '📋 Copy Text', copy_code: result });
+  const copyButton = { name: 'cta_copy', buttonParamsJson };
+
+  try {
+    return await sock.sendMessage(jid, {
+      text: body,
+      footer: 'Tap below to copy the styled text',
+      buttons: [copyButton],
+    }, { quoted: msg });
+  } catch {
+    try {
+      return await sock.sendMessage(jid, {
+        text: body,
+        footer: 'Tap below to copy the styled text',
+        interactiveButtons: [copyButton],
+      }, { quoted: msg });
+    } catch {
+      return sock.sendMessage(jid, { text: `${body}
+
+📋 *Copy:* \`${result.replace(/`/g, 'ʼ')}\`` }, { quoted: msg });
+    }
+  }
+}
+
 export default {
   command: 'bubble',
   alias: [
@@ -90,25 +120,25 @@ export default {
   description: 'Text fun — bubble, binary, hex, zalgo, leet, aesthetic & more',
   category: 'tools',
 
-  async execute({ command, args, text, reply, prefix }) {
+  async execute({ command, args, text, reply, prefix, sock, jid, msg }) {
     const t = text || '';
 
     // ── bubble / circled ────────────────────────────────────────────────────
     if (['bubble', 'circled'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}bubble <text>\nExample: ${prefix}bubble Hello`);
-      return reply(`🔵 ${bubbleText(t)}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🔵 *Bubble Text*', bubbleText(t));
     }
 
     // ── spacedtext / letterspace ────────────────────────────────────────────
     if (['spacedtext', 'letterspace'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}spacedtext <text>`);
-      return reply(`✏️ ${[...t].join(' ')}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '✏️ *Spaced Text*', [...t].join(' '));
     }
 
     // ── binary ──────────────────────────────────────────────────────────────
     if (['binary', 'tobinary'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}binary <text>`);
-      return reply(`💻 *Text → Binary*\n\n\`${binEncode(t)}\`\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '💻 *Text → Binary*', binEncode(t));
     }
 
     if (['frombinary', 'unbinary'].includes(command)) {
@@ -123,7 +153,7 @@ export default {
     // ── hex ─────────────────────────────────────────────────────────────────
     if (['tohex'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}tohex <text>`);
-      return reply(`🔢 *Text → Hex*\n\n\`${hexEncode(t)}\`\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🔢 *Text → Hex*', hexEncode(t));
     }
 
     if (['fromhex', 'unhex'].includes(command)) {
@@ -138,63 +168,63 @@ export default {
     // ── rot13 / caesar ──────────────────────────────────────────────────────
     if (['rot13', 'caesar'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}rot13 <text>`);
-      return reply(`🔐 *ROT13*\n\n${rot13(t)}\n\n_Apply again to decode._\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🔐 *ROT13*', rot13(t));
     }
 
     // ── novowels ────────────────────────────────────────────────────────────
     if (['novowels', 'removevowels'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}novowels <text>`);
-      return reply(`🔤 ${t.replace(/[aeiouAEIOU]/g, '')}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🔤 *No Vowels*', t.replace(/[aeiouAEIOU]/g, ''));
     }
 
     // ── shuffle ─────────────────────────────────────────────────────────────
     if (['shuffle', 'scramble'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}shuffle <text>`);
-      return reply(`🔀 ${shuffleStr(t)}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🔀 *Shuffled Text*', shuffleStr(t));
     }
 
     // ── emojify ─────────────────────────────────────────────────────────────
     if (['emojify', 'textemoji'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}emojify <text>`);
       const out = [...t.toLowerCase()].map(c => EMOJI_ALPHA[c] || c).join(' ');
-      return reply(`${out}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '😀 *Emojified Text*', out);
     }
 
     // ── clap ────────────────────────────────────────────────────────────────
     if (['clap', 'clapback'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}clap <text>`);
-      return reply(`👏 ${t.split(/\s+/).join(' 👏 ')} 👏\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '👏 *Clap Text*', `👏 ${t.split(/\s+/).join(' 👏 ')} 👏`);
     }
 
     // ── aesthetic / vaporwave ───────────────────────────────────────────────
     if (['aesthetic', 'vaporwave'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}aesthetic <text>`);
-      return reply(`🌊 ${aestheticText(t)}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🌊 *Aesthetic Text*', aestheticText(t));
     }
 
     // ── zalgo ───────────────────────────────────────────────────────────────
     if (['zalgo', 'creepy'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}zalgo <text>`);
-      return reply(`👻 ${zalgoText(t)}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '👻 *Zalgo Text*', zalgoText(t));
     }
 
     // ── leet ────────────────────────────────────────────────────────────────
     if (['leet', 'leetspeak', '1337'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}leet <text>`);
       const out = [...t.toLowerCase()].map(c => LEET_MAP[c] || c).join('');
-      return reply(`💻 ${out}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '💻 *Leet Text*', out);
     }
 
     // ── titlecase ───────────────────────────────────────────────────────────
     if (command === 'titlecase') {
       if (!t) return reply(`*Usage:* ${prefix}titlecase <text>`);
-      return reply(`📝 ${t.replace(/\b\w/g, c => c.toUpperCase())}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '📝 *Title Case*', t.replace(/\b\w/g, c => c.toUpperCase()));
     }
 
     // ── snakecase ───────────────────────────────────────────────────────────
     if (command === 'snakecase') {
       if (!t) return reply(`*Usage:* ${prefix}snakecase <text>`);
-      return reply(`🐍 ${t.toLowerCase().replace(/\s+/g, '_')}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🐍 *Snake Case*', t.toLowerCase().replace(/\s+/g, '_'));
     }
 
     // ── camelcase ───────────────────────────────────────────────────────────
@@ -202,14 +232,14 @@ export default {
       if (!t) return reply(`*Usage:* ${prefix}camelcase <text>`);
       const words = t.split(/\s+/);
       const out   = words[0].toLowerCase() + words.slice(1).map(w => w[0].toUpperCase() + w.slice(1).toLowerCase()).join('');
-      return reply(`🐫 ${out}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🐫 *Camel Case*', out);
     }
 
     // ── piglatin ────────────────────────────────────────────────────────────
     if (command === 'piglatin') {
       if (!t) return reply(`*Usage:* ${prefix}piglatin <text>`);
       const out = t.split(' ').map(toPigLatin).join(' ');
-      return reply(`🐷 ${out}\n\n> ✏️ *AA MD Bot*`);
+      return sendCopyResult(sock, jid, msg, '🐷 *Pig Latin*', out);
     }
 
     // ── help ────────────────────────────────────────────────────────────────

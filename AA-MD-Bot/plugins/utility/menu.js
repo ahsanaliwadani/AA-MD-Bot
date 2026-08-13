@@ -153,6 +153,7 @@ function buildOwnerSection(pref, isSuperOwnerUser, theme) {
     C("antiviewonce on/off",     "Auto-reveal all view-once to (You) chat"),
     C("vv",                      "Reply to view-once — reveal to (You) chat"),
     C("avv",                     "Same as .vv (alternate command)"),
+    C("vvemoji",                 "Set emoji reply triggers for view-once"),
     C("good",                    "Silent reveal, no reply to sender"),
     L(""),
     L("🧹 *Message Tools*"),

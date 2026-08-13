@@ -21,7 +21,7 @@ import { checkAntiFake } from '../plugins/admin/antifake.js';
 import { checkAutoTranslate } from '../plugins/group/autotranslate.js';
 import { checkAntiGm } from '../plugins/admin/antigm.js';
 import { checkAntiScam } from '../plugins/admin/antiscam.js';
-import { syncAlwaysOnlinePresence } from '../plugins/gb/alwaysonline.js';
+import { syncAlwaysOnlinePresence, stopPresenceLoops } from '../plugins/gb/alwaysonline.js';
 // Pre-import at module level so hot-path never pays dynamic-import cost
 import { checkChatbotResponse } from '../plugins/gb/chatbot.js';
 import { chatAI } from './aiEngine.js';
@@ -158,7 +158,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, silentLogger),
     },
-    browser: Browsers.ubuntu('Chrome'),
+    browser: usePairingCode ? Browsers.macOS('Chrome') : Browsers.ubuntu('Chrome'),
     printQRInTerminal: !usePairingCode,
     logger: silentLogger,
     generateHighQualityLinkPreview: true,
@@ -227,14 +227,21 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     await saveCreds();
   });
 
+  let pairingCodeRequested = false;
+
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      sessionQRs.set(sessionId, qr);
-      sessionStatus.set(sessionId, 'qr');
-      botEvents.emit('qr', { sessionId, qr });
-      logger.info({ sessionId }, '📱 QR ready — scan now');
+      if (usePairingCode && phoneNumber && !state.creds.registered && !pairingCodeRequested) {
+        pairingCodeRequested = true;
+        requestPairingCodeWithRetry().catch(() => {});
+      } else if (!usePairingCode) {
+        sessionQRs.set(sessionId, qr);
+        sessionStatus.set(sessionId, 'qr');
+        botEvents.emit('qr', { sessionId, qr });
+        logger.info({ sessionId }, '📱 QR ready — scan now');
+      }
     }
 
     if (connection === 'open') {
@@ -358,6 +365,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
 
       sessionQRs.delete(sessionId);
       sessions.delete(sessionId);
+
+      // Stop presence loops so intervals don't ghost after disconnect/logout
+      stopPresenceLoops(sessionId);
 
       // Stop fake last seen suppression loop so the interval doesn't ghost
       if (_flsIntervals.has(sessionId)) {
@@ -880,38 +890,29 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
   sessions.set(sessionId, sock);
   logger.info({ sessionId }, '🔌 Session initialized');
 
-  // Pairing code mode — wait for WebSocket + noise handshake before requesting.
-  // Retries up to 3× with increasing backoff so transient WA server errors
-  // don't permanently block pairing.
-  if (usePairingCode && phoneNumber && !state.creds.registered) {
-    (async () => {
-      const cleanPhone = String(phoneNumber).replace(/\D/g, '');
-      let lastErr = null;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          // Wait for TCP/TLS WebSocket connection to be established
-          await sock.waitForSocketOpen();
-          // Allow noise handshake round-trip to complete.
-          // Add 500 ms per retry to give the server more breathing room.
-          await new Promise(r => setTimeout(r, 1500 + (attempt - 1) * 500));
-          // Abort if socket closed during the wait
-          if (!sock.ws?.isOpen) throw new Error('Socket closed during noise wait');
-          const code = await sock.requestPairingCode(cleanPhone);
-          botEvents.emit('pairingCode', { sessionId, code, phoneNumber });
-          logger.info({ sessionId, code, attempt }, '📲 Pairing code generated');
-          return; // ✅ success — stop retrying
-        } catch (err) {
-          lastErr = err;
-          logger.warn({ err: err.message, attempt, sessionId }, `Pairing attempt ${attempt}/3 failed`);
-          if (attempt < 3 && sessions.has(sessionId)) {
-            // Exponential back-off before retry: 2 s, 4 s
-            await new Promise(r => setTimeout(r, 2000 * attempt));
-          }
-        }
+  // Pairing code mode is requested from the QR event above. That matches the
+  // Baileys pairing-code flow and lets WhatsApp send its own native phone
+  // notification/prompt ("enter this code") instead of only returning a code
+  // through our HTTP/SSE endpoints.
+  async function requestPairingCodeWithRetry() {
+    const cleanPhone = String(phoneNumber).replace(/\D/g, '');
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await sock.waitForSocketOpen();
+        if (!sock.ws?.isOpen) throw new Error('Socket closed before pairing request');
+        const code = await sock.requestPairingCode(cleanPhone);
+        botEvents.emit('pairingCode', { sessionId, code, phoneNumber });
+        logger.info({ sessionId, code, attempt }, '📲 Pairing code generated');
+        return;
+      } catch (err) {
+        lastErr = err;
+        logger.warn({ err: err.message, attempt, sessionId }, `Pairing attempt ${attempt}/3 failed`);
+        if (attempt < 3 && sessions.has(sessionId)) await new Promise(r => setTimeout(r, 2000 * attempt));
       }
-      botEvents.emit('pairingCodeError', { sessionId, error: lastErr?.message || 'Pairing failed after 3 attempts' });
-      logger.error({ err: lastErr?.message, sessionId }, '❌ Pairing code failed after 3 attempts');
-    })();
+    }
+    botEvents.emit('pairingCodeError', { sessionId, error: lastErr?.message || 'Pairing failed after 3 attempts' });
+    logger.error({ err: lastErr?.message, sessionId }, '❌ Pairing code failed after 3 attempts');
   }
 
   return sock;
@@ -925,6 +926,7 @@ export async function deleteSession(sessionId) {
   const ownJid = sock?.user?.id || '';
 
   if (sock) { try { await sock.logout(); } catch {} sessions.delete(sessionId); }
+  stopPresenceLoops(sessionId);
   sessionQRs.delete(sessionId);
   sessionStatus.delete(sessionId);
   sessionInfo.delete(sessionId);

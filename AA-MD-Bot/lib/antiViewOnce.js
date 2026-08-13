@@ -399,51 +399,53 @@ function extractContextInfo(m) {
 // Returns true if the text contains 4+ of the same emoji grapheme cluster.
 // Uses Intl.Segmenter for correct handling of ZWJ sequences, skin-tone
 // variants, flags, keycaps, and all multi-codepoint emoji combinations.
-function hasFourSameEmoji(text) {
-  if (!text) return false;
+function emojiSegmentsFromText(text) {
+  if (!text) return [];
+  const isEmoji = (s) => {
+    if (!s) return false;
+    const cp = s.codePointAt(0);
+    if (s.length >= 2 && s.includes("\u20E3")) return true;
+    if (cp >= 0x1f1e0 && cp <= 0x1f1ff) return true;
+    if (cp >= 0x1f300) return true;
+    if (cp >= 0x2600 && cp <= 0x27bf) return true;
+    if (cp >= 0x2300 && cp <= 0x23ff) return true;
+    if (cp >= 0xfe00) return true;
+    return false;
+  };
+
   try {
-    // Segment the text into grapheme clusters (the correct "visual character" unit)
     const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
-    const segments = [...segmenter.segment(text)];
-
-    // Keep only segments that look like emoji:
-    //  - Contains a codepoint with Emoji_Presentation or Extended_Pictographic property
-    //  - OR is a keycap sequence (digit + \uFE0F + \u20E3)
-    const emojiSegments = segments
-      .map((s) => s.segment)
-      .filter((s) => {
-        if (!s) return false;
-        const cp = s.codePointAt(0);
-        // Keycap sequences: #*0-9 + VS16 + combining enclosing keycap
-        if (s.length >= 2 && s.includes("\u20E3")) return true;
-        // Regional indicators (flags): U+1F1E0-U+1F1FF (appear in pairs)
-        if (cp >= 0x1f1e0 && cp <= 0x1f1ff) return true;
-        // Standard emoji ranges
-        if (cp >= 0x1f300) return true; // Misc Symbols and Pictographs+
-        if (cp >= 0x2600 && cp <= 0x27bf) return true; // Misc Symbols, Dingbats
-        if (cp >= 0x2300 && cp <= 0x23ff) return true; // Misc Technical
-        if (cp >= 0xfe00) return true; // Variation selectors + specials
-        return false;
-      });
-
-    const counts = {};
-    for (const e of emojiSegments) {
-      counts[e] = (counts[e] || 0) + 1;
-      if (counts[e] >= 4) return true;
-    }
-    return false;
+    return [...segmenter.segment(text)].map((s) => s.segment).filter(isEmoji);
   } catch {
-    // Intl.Segmenter fallback for old Node: simple codepoint count
-    const counts = {};
-    for (const ch of text) {
-      const cp = ch.codePointAt(0);
-      if (cp >= 0x1f300 || (cp >= 0x2600 && cp <= 0x27bf)) {
-        counts[ch] = (counts[ch] || 0) + 1;
-        if (counts[ch] >= 4) return true;
-      }
-    }
-    return false;
+    return [...text].filter(isEmoji);
   }
+}
+
+function normalizeEmojiKey(emoji) {
+  return String(emoji || "").replace(/[\uFE0E\uFE0F]/g, "");
+}
+
+function getConfiguredVvEmojis() {
+  const saved = db.settings.getValue("vvEmojiSet");
+  if (Array.isArray(saved)) return saved.filter(Boolean);
+  if (typeof saved === "string") return emojiSegmentsFromText(saved);
+  return ["👀", "🔓", "💠"];
+}
+
+function hasConfiguredVvEmoji(text) {
+  const allowed = new Set(getConfiguredVvEmojis().map(normalizeEmojiKey));
+  const emojis = emojiSegmentsFromText(text).map(normalizeEmojiKey);
+  if (!allowed.size || !emojis.length) return false;
+  return emojis.some((emoji) => allowed.has(emoji));
+}
+
+function hasFourSameEmoji(text) {
+  const counts = {};
+  for (const e of emojiSegmentsFromText(text)) {
+    counts[e] = (counts[e] || 0) + 1;
+    if (counts[e] >= 4) return true;
+  }
+  return false;
 }
 
 // ── Reply-based reveal: voword keyword OR prefix+4-same-emoji ────────────────
@@ -476,7 +478,9 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       ? msgText.slice(prefix.length)
       : msgText;
     const isEmojiTrigger =
-      emojiEnabled && textBody.length > 0 && hasFourSameEmoji(textBody);
+      emojiEnabled && textBody.length > 0 && (
+        hasConfiguredVvEmoji(textBody) || hasFourSameEmoji(textBody)
+      );
 
     if (!hasKeyword && !isEmojiTrigger) return; // not a reveal trigger — ignore
 
@@ -752,7 +756,7 @@ export function initViewOnce() {
   logger.info("👁️ ViewOnce feature initialized");
   logger.info("👁️ Auto-reveal: .antiviewonce on/off");
   logger.info(
-    "👁️ Emoji reveal: reply to a view-once with 4 same emojis (e.g. 🔥🔥🔥🔥) to reveal",
+    "👁️ Emoji reveal: reply to a view-once with .vvemoji emojis or 4 same emojis to reveal",
   );
   logger.info("👁️ Manual reveal: .avv in reply to a view-once message");
 }

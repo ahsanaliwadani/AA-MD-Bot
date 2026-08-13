@@ -81,6 +81,7 @@ function broadcast(event, data) {
   }
 }
 
+
 botEvents.on('qr', d => broadcast('qr', d));
 botEvents.on('status', d => broadcast('status', d));
 botEvents.on('pairingCode', d => {

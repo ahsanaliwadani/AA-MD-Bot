@@ -43,11 +43,11 @@ export default {
 
     try {
       const response = await chatAI(jid, text);
-      await sendOnlinePresence(sock, sessionId, 'available', jid);
+      await sendOnlinePresence(sock, sessionId, 'paused', jid);
       await react('✅').catch(() => {});
       await reply(`🤖 *AI*\n\n${response}\n\n> 🤖 *AA MD Bot*`);
     } catch (e) {
-      await sendOnlinePresence(sock, sessionId, 'available', jid);
+      await sendOnlinePresence(sock, sessionId, 'paused', jid);
       await react('❌').catch(() => {});
       await reply(`❌ *AI Error:* ${e.message}\n\nTry again in a few seconds.\n\n> 🤖 *AA MD Bot*`);
     }
