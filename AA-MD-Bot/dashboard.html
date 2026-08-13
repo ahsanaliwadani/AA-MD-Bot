@@ -4,29 +4,29 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AA MD Bot — Dashboard</title>
-  <meta name="theme-color" content="#25d366"/>
+  <meta name="theme-color" content="#00d9ff"/>
   <link rel="icon" type="image/webp" href="/logo.webp"/>
   <style>
     *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
     :root {
-      --bg:        #060911;
-      --surface:   #0c1420;
-      --surface2:  #111d2e;
-      --surface3:  #162236;
-      --border:    #1a2d40;
-      --green:     #25d366;
-      --green2:    #1aaa52;
-      --green-dim: rgba(37,211,102,.12);
-      --green-glow:rgba(37,211,102,.25);
-      --text:      #e2eaf5;
-      --text2:     #8fa3be;
-      --text3:     #3d5470;
+      --bg:        #020713;
+      --surface:   #071327;
+      --surface2:  #0b1d3a;
+      --surface3:  #102a52;
+      --border:    #164b86;
+      --green:     #00d9ff;
+      --green2:    #0077ff;
+      --green-dim: rgba(0,217,255,.14);
+      --green-glow:rgba(0,217,255,.35);
+      --text:      #eef8ff;
+      --text2:     #a8c8e8;
+      --text3:     #4e79a8;
       --red:       #ff4757;
       --red-dim:   rgba(255,71,87,.12);
       --yellow:    #ffa502;
       --yellow-dim:rgba(255,165,2,.12);
-      --blue:      #2196f3;
-      --blue-dim:  rgba(33,150,243,.12);
+      --blue:      #00a3ff;
+      --blue-dim:  rgba(0,163,255,.14);
       --purple:    #a855f7;
       --purple-dim:rgba(168,85,247,.12);
       --sidebar-w: 240px;
@@ -43,7 +43,7 @@
     ═══════════════════════════════════════════ */
     #landingView {
       min-height:100vh; display:flex; flex-direction:column; align-items:center;
-      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(37,211,102,.09) 0%, transparent 65%);
+      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0,217,255,.18) 0%, transparent 65%), radial-gradient(ellipse 60% 45% at 50% 15%, rgba(0,119,255,.12) 0%, transparent 70%);
     }
 
     /* ── Nav bar ── */
@@ -58,7 +58,7 @@
     .land-nav-brand span { font-weight:700; font-size:1rem; }
     .land-nav-brand span em { color:var(--green); font-style:normal; }
     .land-nav-right { display:flex; align-items:center; gap:10px; }
-    .badge-online { display:flex; align-items:center; gap:6px; background:var(--green-dim); border:1px solid rgba(37,211,102,.25); border-radius:99px; padding:4px 12px; font-size:.78rem; color:var(--green); font-weight:600; }
+    .badge-online { display:flex; align-items:center; gap:6px; background:var(--green-dim); border:1px solid rgba(0,217,255,.35); border-radius:99px; padding:4px 12px; font-size:.78rem; color:var(--green); font-weight:600; }
     .badge-online-dot { width:6px; height:6px; border-radius:50%; background:var(--green); animation:pulse 2s infinite; }
     .btn-admin-nav {
       display:flex; align-items:center; gap:7px; background:var(--surface2); border:1px solid var(--border);
@@ -99,11 +99,11 @@
       border-radius:var(--radius-sm); cursor:pointer; font-size:.88rem; transition:all .15s;
       box-shadow:0 3px 14px var(--green-glow); white-space:nowrap;
     }
-    .btn-green:hover { background:#2ee87a; transform:translateY(-1px); }
-    .btn-green:disabled { background:#1a4a2e; color:#3a7a52; cursor:not-allowed; transform:none; box-shadow:none; }
+    .btn-green:hover { background:#4deaff; transform:translateY(-1px); }
+    .btn-green:disabled { background:#082e48; color:#35708f; cursor:not-allowed; transform:none; box-shadow:none; }
 
     .pair-code-box {
-      background:var(--surface2); border:1px solid rgba(37,211,102,.35); border-radius:var(--radius);
+      background:var(--surface2); border:1px solid rgba(0,217,255,.45); border-radius:var(--radius);
       padding:18px; text-align:center; margin-top:14px; display:none;
       animation:fadeIn .3s ease;
     }
@@ -153,8 +153,8 @@
       transition:transform .15s,box-shadow .15s,background .15s;
       box-shadow:0 4px 20px var(--green-glow);
     }
-    .btn-primary:hover { background:#2ee87a; transform:translateY(-1px); }
-    .btn-primary:disabled { background:#1a4a2e; color:#3a7a52; cursor:not-allowed; transform:none; box-shadow:none; }
+    .btn-primary:hover { background:#4deaff; transform:translateY(-1px); }
+    .btn-primary:disabled { background:#082e48; color:#35708f; cursor:not-allowed; transform:none; box-shadow:none; }
 
     /* ═══════════════════════════════════════════
        ADMIN APP
@@ -231,7 +231,7 @@
       padding:16px; transition:all .2s; position:relative; overflow:hidden;
     }
     .session-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--green); transform:scaleX(0); transition:transform .2s; }
-    .session-card:hover { border-color:rgba(37,211,102,.3); }
+    .session-card:hover { border-color:rgba(0,217,255,.45); }
     .session-card:hover::before { transform:scaleX(1); }
     .session-card.disconnected { opacity:.7; }
     .session-card.disconnected::before { background:var(--red); }
@@ -283,8 +283,8 @@
     .short-input { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:7px 11px; color:var(--text); font-size:.88rem; width:90px; outline:none; }
     .short-input:focus { border-color:var(--green); }
     .btn-save { background:var(--green); color:#000; font-weight:700; padding:10px 24px; border:none; border-radius:var(--radius-sm); cursor:pointer; font-size:.88rem; transition:all .15s; box-shadow:0 3px 14px var(--green-glow); }
-    .btn-save:hover { background:#2ee87a; transform:translateY(-1px); }
-    .save-toast { display:none; align-items:center; gap:5px; padding:6px 12px; background:var(--green-dim); border:1px solid rgba(37,211,102,.3); border-radius:var(--radius-sm); font-size:.81rem; color:var(--green); }
+    .btn-save:hover { background:#4deaff; transform:translateY(-1px); }
+    .save-toast { display:none; align-items:center; gap:5px; padding:6px 12px; background:var(--green-dim); border:1px solid rgba(0,217,255,.45); border-radius:var(--radius-sm); font-size:.81rem; color:var(--green); }
     .save-toast svg { width:14px; height:14px; }
 
     /* Pair */
@@ -294,7 +294,7 @@
     .pair-form { display:flex; flex-direction:column; gap:10px; }
     .pair-input { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 13px; color:var(--text); font-size:.9rem; outline:none; transition:border-color .2s; }
     .pair-input:focus { border-color:var(--green); }
-    .admin-pair-code-box { background:var(--surface2); border:1px solid rgba(37,211,102,.3); border-radius:var(--radius); padding:18px; text-align:center; margin-top:12px; display:none; }
+    .admin-pair-code-box { background:var(--surface2); border:1px solid rgba(0,217,255,.45); border-radius:var(--radius); padding:18px; text-align:center; margin-top:12px; display:none; }
     .admin-pair-code { font-size:2rem; font-weight:700; letter-spacing:.15em; color:var(--green); font-family:monospace; }
     .pair-code-sub { font-size:.78rem; color:var(--text2); margin-top:5px; }
 
@@ -351,7 +351,7 @@
     .bc-textarea:focus { border-color:var(--green); }
     .bc-select { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:9px 11px; color:var(--text); font-size:.87rem; outline:none; margin-bottom:10px; }
     .bc-result { margin-top:12px; padding:10px 13px; border-radius:var(--radius-sm); font-size:.83rem; display:none; }
-    .bc-result.ok  { background:var(--green-dim);  border:1px solid rgba(37,211,102,.3); color:var(--green); }
+    .bc-result.ok  { background:var(--green-dim);  border:1px solid rgba(0,217,255,.45); color:var(--green); }
     .bc-result.err { background:var(--red-dim);    border:1px solid rgba(255,71,87,.3);  color:var(--red); }
 
     /* History table */
@@ -409,7 +409,7 @@
 
   <!-- Hero -->
   <div class="land-hero">
-    <img class="land-hero-logo" src="/logo.webp" alt="AA MD Bot" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 88 88%22><circle cx=%2244%22 cy=%2244%22 r=%2244%22 fill=%22%230d1421%22/><text x=%2250%%25%22 y=%2257%%25%22 text-anchor=%22middle%22 font-size=%2236%22 fill=%22%2325d366%22>🤖</text></svg>'"/>
+    <img class="land-hero-logo" src="/logo.webp" alt="AA MD Bot" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 88 88%22><circle cx=%2244%22 cy=%2244%22 r=%2244%22 fill=%22%23020713%22/><text x=%2250%%25%22 y=%2257%%25%22 text-anchor=%22middle%22 font-size=%2236%22 fill=%22%2300d9ff%22>🤖</text></svg>'"/>
     <h1>AA MD <span>Bot</span></h1>
     <p>Multi-Device WhatsApp Bot — Connect your numbers, manage sessions and control the bot from one place.</p>
   </div>

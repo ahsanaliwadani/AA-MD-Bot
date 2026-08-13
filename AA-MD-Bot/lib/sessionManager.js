@@ -324,17 +324,17 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
           try {
             await sock.sendMessage(ownJid, {
               text:
-                `🤖 *AA MD Bot Connected!*\n\n` +
-                `✅ Bot successfully linked to your WhatsApp\n` +
+                `💠 *AA MD Bot Connected!*\n\n` +
+                `🔵 Bot successfully linked to your WhatsApp\n` +
                 `📱 *Number:* +${phone}\n` +
                 `🕐 *Time:* ${time}\n` +
                 `📋 *Session:* ${sessionId}\n\n` +
-                `━━━━━━━━━━━━━━━━\n` +
+                `╔═════ 💎 AA MD BOT 💎 ═════╗\n` +
                 `📌 *Quick Start:*\n` +
                 `▸ Type *.menu* to see all commands\n` +
                 `▸ *.antiviewonce on* — auto-reveal view-once\n` +
                 `▸ *.help* — guide & tips\n\n` +
-                `> 🤖 *Powered by AA MD Bot | AA Mods*`,
+                `> 💠 *AA MD Bot | AA Mods*  ⚡ *Smart • Fast • Powerful*`,
             });
           } catch (_) {}
         }, 3000); // 3s delay so connection fully stabilises first
@@ -467,13 +467,21 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       : globalValue;
   };
 
+  const getEditProtocol = (message) => {
+    const proto = message?.protocolMessage
+      || message?.editedMessage?.message?.protocolMessage
+      || message?.editedMessage?.message?.messageContextInfo?.protocolMessage;
+    const type = proto?.type;
+    return type === 14 || type === 'MESSAGE_EDIT' ? proto : null;
+  };
+
   const handleAntiEdit = async (editEvent) => {
-    const proto = editEvent?.message?.protocolMessage;
-    if (proto?.type !== 14) return false; // MESSAGE_EDIT
+    const proto = getEditProtocol(editEvent?.message);
+    if (!proto) return false;
 
     const editedKey = proto.key || editEvent.key;
     const chatJid = editedKey?.remoteJid || editEvent.key?.remoteJid;
-    const editedId = editedKey?.id;
+    const editedId = editedKey?.id || editEvent.key?.id;
     if (!chatJid || !editedId || chatJid === 'status@broadcast') return true;
     if (!isAntiEditEnabled(chatJid)) return true;
 
@@ -484,7 +492,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     if (!selfJid) return true;
 
     const isGroup = chatJid.endsWith('@g.us');
-    const editor = editedKey.participant || editEvent.key?.participant || chatJid;
+    const editor = editedKey.participant || editEvent.key?.participant || (isGroup ? original.key?.participant : chatJid);
     const editorNum = editor?.split('@')[0]?.split(':')[0] || '?';
     const displayName = sock.contacts?.[editor]?.name || sock.contacts?.[editor]?.notify || original.pushName || editEvent.pushName || '';
     const now = new Date().toLocaleString('en-PK', { timeZone: config.timezone || 'Asia/Karachi' });
