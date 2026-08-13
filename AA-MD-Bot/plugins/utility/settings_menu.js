@@ -78,6 +78,7 @@ export default {
       `🔑 Prefix      : *${pref}*\n` +
       `📞 Anti-Call   : ${bool(s.antiCall)}\n` +
       `🗑️ Anti-Delete : ${bool(s.antiDelete)}\n` +
+      `✏️ Anti-Edit   : ${bool(s.antiEdit)}\n` +
       `👁️ Anti-ViewOnce: ${bool(s.antiViewOnce)}\n` +
       `📊 Status View : ${bool(s.autoStatusView, config.autoStatusView)}\n` +
       `❤️ Status React : ${bool(s.autoStatusReact, config.autoStatusReact)}\n` +
@@ -91,6 +92,7 @@ export default {
       `🛡️ *PROTECTION*\n${SDIV}\n` +
       `▸ *${pref}anticall* on/off\n` +
       `▸ *${pref}antidelete* on/off\n` +
+      `▸ *${pref}antiedit* on/off\n` +
       `▸ *${pref}antiviewonce* on/off\n` +
       `▸ *${pref}antispam* on/off\n\n` +
 

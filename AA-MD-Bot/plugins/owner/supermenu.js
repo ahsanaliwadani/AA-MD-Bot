@@ -61,6 +61,7 @@ export default {
 
       `🗑️ *DELETED MESSAGES*\n` +
       `▸ *${p}antidelete* on/off     — Recover deleted msgs\n` +
+      `▸ *${p}antiedit* on/off       — Recover edited msgs\n` +
       `   _All recovered msgs → your (You) chat (silent)_\n\n` +
 
       `👑 *OWNER MANAGEMENT*\n` +
