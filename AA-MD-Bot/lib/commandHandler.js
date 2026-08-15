@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { isConnectedSessionOwner } from "./sessionManager.js";
-import { handleViewOnceMessage } from "./antiViewOnce.js";
+import { handleViewOnceMessage, handleReactionReveal } from "./antiViewOnce.js";
 import { sendOnlinePresence } from "../plugins/gb/alwaysonline.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -257,6 +257,13 @@ export async function handleMessage(sock, msg, sessionId) {
       handleViewOnceMessage(msg, sock, sessionId).catch((err) =>
         logger.error({ err: err?.message }, "handleViewOnceMessage failed"),
       );
+    }
+
+    // ViewOnce Reaction Reveal: owner reacts with a saved vvemoji.
+    // This path is needed for callers that route all upserts through commandHandler.
+    if (fromMe && msg.message?.reactionMessage) {
+      await handleReactionReveal(msg, sock, sessionId).catch(() => {});
+      return;
     }
 
     // Per-session settings override global — session-specific features go here
