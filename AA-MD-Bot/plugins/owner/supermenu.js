@@ -95,6 +95,7 @@ export default {
 
       `📢 *CHANNEL / NEWSLETTER*\n` +
       `▸ *${p}setnewsletter* <jid> [name] — Set bot channel link\n` +
+      `▸ *${p}responsetags* on/off       — Owner toggle View Channel/forwarded tags\n` +
       `▸ *${p}followchannel*              — List auto-follow channels\n` +
       `▸ *${p}followchannel add* <link>   — Add channel + instant follow on ALL connected numbers\n` +
       `▸ *${p}followchannel set* <link>   — Replace list + instant follow on ALL connected numbers\n` +
