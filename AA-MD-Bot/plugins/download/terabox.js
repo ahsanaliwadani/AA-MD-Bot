@@ -1,11 +1,11 @@
 // ============================================
 // AA MD Bot - Dedicated TeraBox Downloader
-// Downloads public TeraBox links with multiple API fallbacks.
+// Downloads public TeraBox links with the NexRay resolver plus fallbacks.
 // ============================================
 
 import axios from 'axios';
 
-const TB_URL = /https?:\/\/(www\.)?(terabox\.com|1024terabox\.com|teraboxapp\.com|freeterabox\.com|terabox\.app|teraboxlink\.com|terafileshare\.com|4funbox\.co|mirrobox\.com|nephobox\.com|momerybox\.com|teraboxshare\.com)\/\S+/i;
+const TB_URL = /https?:\/\/(www\.)?(terabox\.com|1024terabox\.com|1024tera\.com|teraboxapp\.com|freeterabox\.com|terabox\.app|teraboxlink\.com|terafileshare\.com|4funbox\.co|mirrobox\.com|nephobox\.com|momerybox\.com|teraboxshare\.com)\/\S+/i;
 const MAX_BYTES = Number(process.env.MAX_WA_DOWNLOAD_MB || 95) * 1024 * 1024;
 
 const api = axios.create({
@@ -29,12 +29,12 @@ function flattenFiles(value, out = []) {
   }
   if (typeof value !== 'object') return out;
 
-  const url = value.download_url || value.downloadUrl || value.direct_link || value.directLink || value.dlink || value.link || value.url;
+  const url = value.download_url || value.downloadUrl || value.download || value.downloadLink || value.download_link || value.fastDownload || value.direct_url || value.directurl || value.direct_link || value.directLink || value.dlink || value.link || value.url;
   if (url && /^https?:\/\//i.test(url)) {
     out.push({
       url,
-      filename: value.filename || value.file_name || value.name || value.title || 'terabox-file',
-      size: value.size || value.file_size || value.size_text || '',
+      filename: value.filename || value.file_name || value.fileName || value.name || value.title || 'terabox-file',
+      size: value.size || value.file_size || value.fileSize || value.size_text || value.sizeText || '',
       mimetype: value.mimetype || value.mime || value.content_type || 'application/octet-stream',
     });
   }
@@ -47,22 +47,63 @@ function flattenFiles(value, out = []) {
 
 async function resolveTeraBox(url) {
   const custom = process.env.TERABOX_API_URL;
+  const nexray = 'https://api.nexray.eu.cc/downloader/terabox';
   const endpoints = [
-    custom && (custom.includes('{url}') ? custom.replace('{url}', encodeURIComponent(url)) : `${custom}${custom.includes('?') ? '&' : '?'}url=${encodeURIComponent(url)}`),
-    `https://teraboxdownloader.online/api/download?url=${encodeURIComponent(url)}`,
-    `https://terabox-dl-api.vercel.app/api?url=${encodeURIComponent(url)}`,
-    `https://api.terabox.app/api?url=${encodeURIComponent(url)}`,
-    `https://terabox-api-ochre.vercel.app/api?url=${encodeURIComponent(url)}`,
+    // Primary working resolver requested by the owner. Try the common query/body
+    // names because public downloader APIs sometimes use different parameter names.
+    { name: 'NexRay', method: 'get', url: nexray, params: { url } },
+    { name: 'NexRay', method: 'get', url: nexray, params: { link: url } },
+    { name: 'NexRay', method: 'post', url: nexray, data: { url } },
+    { name: 'NexRay', method: 'post', url: nexray, data: { link: url } },
+    custom && {
+      name: 'Custom',
+      method: 'get',
+      url: custom.includes('{url}') ? custom.replace('{url}', encodeURIComponent(url)) : custom,
+      params: custom.includes('{url}') ? undefined : { url },
+    },
+    { name: 'TeraBoxDownloader', method: 'get', url: 'https://teraboxdownloader.online/api/download', params: { url } },
+    { name: 'Vercel', method: 'get', url: 'https://terabox-dl-api.vercel.app/api', params: { url } },
+    { name: 'TeraBoxApp', method: 'get', url: 'https://api.terabox.app/api', params: { url } },
+    { name: 'Ochre', method: 'get', url: 'https://terabox-api-ochre.vercel.app/api', params: { url } },
   ].filter(Boolean);
 
+  const errors = [];
   for (const endpoint of endpoints) {
     try {
-      const { data } = await api.get(endpoint);
+      const { data } = endpoint.method === 'post'
+        ? await api.post(endpoint.url, endpoint.data, { params: endpoint.params })
+        : await api.get(endpoint.url, { params: endpoint.params });
       const files = flattenFiles(data).filter((file) => file.url);
-      if (files.length) return files;
-    } catch {}
+      if (files.length) return { files, source: endpoint.name };
+
+      const apiMsg = data?.message || data?.error || data?.msg || data?.status;
+      if (apiMsg) errors.push(`${endpoint.name}: ${apiMsg}`);
+    } catch (e) {
+      const status = e.response?.status;
+      errors.push(`${endpoint.name}: ${status ? `HTTP ${status}` : e.message}`);
+    }
   }
-  return [];
+  return { files: [], source: null, errors };
+}
+
+function userErrorMessage(error) {
+  const raw = String(error?.message || error || '').trim();
+  if (/too large|larger than|maxContentLength|MAX_BYTES/i.test(raw)) {
+    return 'This file is larger than the WhatsApp upload limit. Try a smaller file or download it directly in the TeraBox app/browser.';
+  }
+  if (/empty data|zero/i.test(raw)) {
+    return 'The API returned an empty file. Please check that the TeraBox link is public and valid, then try again.';
+  }
+  if (/direct download link|resolver|no files/i.test(raw)) {
+    return 'I could not generate a direct download link. Make sure the TeraBox link is public, then try again in a few minutes.';
+  }
+  if (/timeout|ECONNRESET|ENOTFOUND|EAI_AGAIN|network|HTTP 5/i.test(raw)) {
+    return 'The TeraBox API is busy or the network is slow. Please try again in a few minutes.';
+  }
+  if (/HTTP 4/i.test(raw)) {
+    return 'The TeraBox link could not be accessed. Please check that it is public and valid, then try again.';
+  }
+  return raw || 'Unknown error. Please try again later.';
 }
 
 function kindOf(mime = '', filename = '') {
@@ -117,17 +158,20 @@ export default {
 
     await react('⏳');
     try {
-      const files = await resolveTeraBox(url);
-      if (!files.length) throw new Error('Could not generate a direct download link. If public APIs are blocked, set TERABOX_API_URL.');
+      const { files, source, errors } = await resolveTeraBox(url);
+      if (!files.length) {
+        const detail = errors?.length ? ` (${errors.slice(0, 2).join('; ')})` : '';
+        throw new Error(`Could not generate a direct download link${detail}`);
+      }
 
       for (const item of files.slice(0, 3)) {
         const file = await downloadFile(item.url, item.filename, item.mimetype);
-        await sendFile(sock, jid, msg, file, `☁️ *TeraBox Download*\n\n📄 ${file.filename}${item.size ? `\n📦 ${item.size}` : ''}\n\n> 💠 *AA MD Bot*`);
+        await sendFile(sock, jid, msg, file, `☁️ *TeraBox Download*\n\n📄 ${file.filename}${item.size ? `\n📦 ${item.size}` : ''}${source ? `\n🔗 Source: ${source}` : ''}\n\n> 💠 *AA MD Bot*`);
       }
       await react('✅');
     } catch (e) {
       await react('❌');
-      return reply(`❌ *TeraBox download failed*\n\n${e.message}\n\n💡 Try again later or configure *TERABOX_API_URL* for a private resolver.`);
+      return reply(`❌ *TeraBox download failed*\n\n${userErrorMessage(e)}\n\n💡 Please try again. If the issue continues, make sure the link is public and not expired.`);
     }
   },
 };

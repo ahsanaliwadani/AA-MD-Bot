@@ -67,34 +67,10 @@ function toPigLatin(word) {
   return (m?.[2] || word) + (m?.[1] || '') + 'ay';
 }
 
-async function sendCopyResult(sock, jid, msg, title, result) {
-  const body = `${title}
-
-${result}
-
-> ✏️ *AA MD Bot*`;
-  const buttonParamsJson = JSON.stringify({ display_text: '📋 Copy Text', copy_code: result });
-  const copyButton = { name: 'cta_copy', buttonParamsJson };
-
-  try {
-    return await sock.sendMessage(jid, {
-      text: body,
-      footer: 'Tap below to copy the styled text',
-      buttons: [copyButton],
-    }, { quoted: msg });
-  } catch {
-    try {
-      return await sock.sendMessage(jid, {
-        text: body,
-        footer: 'Tap below to copy the styled text',
-        interactiveButtons: [copyButton],
-      }, { quoted: msg });
-    } catch {
-      return sock.sendMessage(jid, { text: `${body}
-
-📋 *Copy:* \`${result.replace(/`/g, 'ʼ')}\`` }, { quoted: msg });
-    }
-  }
+async function sendCopyResult(sock, jid, msg, _title, result) {
+  // Text converters should return only the converted text as one clean message.
+  // No watermark, no footer/buttons, and no newsletter/View Channel context.
+  return sock.sendMessage(jid, { text: result }, { quoted: msg, _noChannelCtx: true });
 }
 
 export default {
@@ -119,6 +95,7 @@ export default {
   ],
   description: 'Text fun — bubble, binary, hex, zalgo, leet, aesthetic & more',
   category: 'tools',
+  noChannelCtx: true,
 
   async execute({ command, args, text, reply, prefix, sock, jid, msg }) {
     const t = text || '';
@@ -144,7 +121,7 @@ export default {
     if (['frombinary', 'unbinary'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}frombinary <binary>`);
       try {
-        return reply(`💻 *Binary → Text*\n\n${binDecode(t)}\n\n> ✏️ *AA MD Bot*`);
+        return sendCopyResult(sock, jid, msg, '💻 *Binary → Text*', binDecode(t));
       } catch {
         return reply('❌ Invalid binary input.');
       }
@@ -159,7 +136,7 @@ export default {
     if (['fromhex', 'unhex'].includes(command)) {
       if (!t) return reply(`*Usage:* ${prefix}fromhex <hex>`);
       try {
-        return reply(`🔢 *Hex → Text*\n\n${hexDecode(t)}\n\n> ✏️ *AA MD Bot*`);
+        return sendCopyResult(sock, jid, msg, '🔢 *Hex → Text*', hexDecode(t));
       } catch {
         return reply('❌ Invalid hex input.');
       }

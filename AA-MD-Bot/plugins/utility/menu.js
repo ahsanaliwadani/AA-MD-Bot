@@ -179,7 +179,6 @@ function buildOwnerSection(pref, isSuperOwnerUser, theme) {
     C("restart",                 "Restart the bot"),
     L(""),
     L("🔍 *Lookup Tools*"),
-    C("simowner <number>",       "Pakistan SIM owner info 🇵🇰 (Truecaller)"),
     C("ac <number>",             "Check if a number is on WhatsApp"),
     L(""),
     L("🤖 *AI & Chatbot*"),
