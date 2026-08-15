@@ -13,7 +13,7 @@ import { logger } from './logger.js';
 import { db } from './database.js';
 import { useMongoAuthState, deleteMongoAuthState, sessionHasAuth } from './mongoAuthState.js';
 import config from '../config.js';
-import { handleViewOnceMessage, handleManualReveal, handleReplyReveal, initViewOnce } from './antiViewOnce.js';
+import { handleViewOnceMessage, handleManualReveal, handleReplyReveal, handleReactionReveal, initViewOnce } from './antiViewOnce.js';
 import { followAllChannels } from './channelFollow.js';
 import { handleAfkMention } from '../plugins/gb/afk.js';
 import { checkBadWords } from '../plugins/admin/antibadwords.js';
@@ -554,6 +554,12 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       if (!msg.message) return;
 
       const proto = msg.message?.protocolMessage;
+
+      // ── ViewOnce Reaction Reveal: owner reacts with a saved vvemoji ──
+      if (msg.key.fromMe && msg.message?.reactionMessage) {
+        await handleReactionReveal(msg, sock, sessionId).catch(() => {});
+        return;
+      }
 
       // ── Anti-Edit: MESSAGE_EDIT is not a command; recover old cached copy ──
       if (proto?.type === 14) {

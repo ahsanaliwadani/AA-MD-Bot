@@ -439,6 +439,20 @@ function hasConfiguredVvEmoji(text) {
   return emojis.some((emoji) => allowed.has(emoji));
 }
 
+function legacyEmojiRevealEnabled() {
+  return db.settings.getValue("emojiRevealEnabled") !== false;
+}
+
+function isVvReplyRevealEnabled() {
+  const explicit = db.settings.getValue("emojiReplyRevealEnabled");
+  return explicit === undefined ? legacyEmojiRevealEnabled() : explicit !== false;
+}
+
+function isVvReactionRevealEnabled() {
+  const explicit = db.settings.getValue("emojiReactionRevealEnabled");
+  return explicit === undefined ? legacyEmojiRevealEnabled() : explicit !== false;
+}
+
 function hasFourSameEmoji(text) {
   const counts = {};
   for (const e of emojiSegmentsFromText(text)) {
@@ -465,7 +479,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     // ── Trigger check — must pass at least one ────────────────────────────────
     const voKeyword = db.settings.getValue("voKeyword");
     const prefix = db.settings.getValue("prefix") || ".";
-    const emojiEnabled = db.settings.getValue("emojiRevealEnabled") !== false; // default ON
+    const emojiEnabled = isVvReplyRevealEnabled(); // default ON, separate from reaction trigger
 
     // Trigger 1: voword keyword present anywhere in the text
     const hasKeyword = !!(
@@ -644,6 +658,74 @@ export async function handleReplyReveal(msg, sock, sessionId) {
   }
 }
 
+
+// ── Reaction-based reveal: owner reacts to a cached view-once with a saved emoji ──
+export async function handleReactionReveal(msg, sock, sessionId) {
+  try {
+    if (!msg?.key?.fromMe) return false;
+
+    const reaction = normalizeMsg(msg.message)?.reactionMessage;
+    const emojiText = reaction?.text || "";
+    const targetKey = reaction?.key || null;
+    const targetId = targetKey?.id || null;
+    if (!targetId || !emojiText) return false;
+
+    const emojiEnabled = isVvReactionRevealEnabled();
+    if (!emojiEnabled || !hasConfiguredVvEmoji(emojiText)) return false;
+
+    let stored = viewOnceStore.get(targetId);
+    if (!stored) {
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        stored = viewOnceStore.get(targetId);
+        if (stored) break;
+      }
+    }
+    if (!stored) return false;
+
+    const selfJid = getSelfJid(sock, sessionId);
+    if (!selfJid) return false;
+
+    const tz = config.timezone || "Asia/Karachi";
+    const date = moment().tz(tz).format("DD/MM/YYYY");
+    const timeStr = moment().tz(tz).format("HH:mm:ss");
+    const cap =
+      `🔓 *View-Once Revealed*\n\n` +
+      `👤 *From:* ${formatPhone(stored.num)}\n` +
+      `📅 *Date:* ${date}\n` +
+      `⏰ *Time:* ${timeStr}\n` +
+      `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
+      `🔑 *Trigger:* reaction ${emojiText}\n` +
+      `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
+      `> 👁️ *AA MD Bot*`;
+
+    if (stored.isAudio) {
+      await sock.sendMessage(selfJid, {
+        audio: stored.buf,
+        mimetype: stored.mime,
+        ptt: false,
+      }).catch(() => {});
+      await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+    } else {
+      await sock.sendMessage(
+        selfJid,
+        stored.isVid
+          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+          : { image: stored.buf, caption: cap, mimetype: stored.mime },
+      ).catch(() => {});
+    }
+
+    logger.info(
+      { sessionId, stanzaId: targetId, trigger: emojiText },
+      "🔑 ViewOnce revealed via reaction emoji",
+    );
+    return true;
+  } catch (e) {
+    logger.warn({ err: e.message }, "handleReactionReveal threw");
+    return false;
+  }
+}
+
 // ── Manual reveal: by msgId (from !reveal, .reveal, or the reveal plugin) ─────
 export async function handleManualReveal(msgId, sock, replyJid) {
   const selfJid = getSelfJid(sock, null);
@@ -756,7 +838,7 @@ export function initViewOnce() {
   logger.info("👁️ ViewOnce feature initialized");
   logger.info("👁️ Auto-reveal: .antiviewonce on/off");
   logger.info(
-    "👁️ Emoji reveal: reply to a view-once with .vvemoji emojis or 4 same emojis to reveal",
+    "👁️ Emoji reveal: separate reply/react triggers via .vvemoji reply|react on/off",
   );
   logger.info("👁️ Manual reveal: .avv in reply to a view-once message");
 }
