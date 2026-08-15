@@ -452,9 +452,9 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     }
   });
 
-  // In-memory cache for anti-delete / anti-edit (last 200 messages per JID)
+  // In-memory cache for anti-delete / anti-edit (last 1000 messages per JID)
   const _msgCache  = new Map();
-  const _CACHE_MAX = 200;
+  const _CACHE_MAX = 1000;
   const _floodMap  = new Map(); // anti-flood tracker
 
   const getSelfJidLocal = () => {
@@ -477,16 +477,26 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       : globalValue;
   };
 
-  const getEditProtocol = (message) => {
-    const proto = message?.protocolMessage
-      || message?.editedMessage?.message?.protocolMessage
-      || message?.editedMessage?.message?.messageContextInfo?.protocolMessage;
-    const type = proto?.type;
-    return type === 14 || type === 'MESSAGE_EDIT' ? proto : null;
+  const getEditProtocol = (message, fallbackKey = null) => {
+    const seen = new Set();
+    const scan = (node, depth = 0) => {
+      if (!node || typeof node !== 'object' || depth > 8 || seen.has(node)) return null;
+      seen.add(node);
+      const proto = node.protocolMessage || node.messageContextInfo?.protocolMessage || null;
+      const type = proto?.type;
+      if (type === 14 || type === 'MESSAGE_EDIT') return proto;
+      if (node.editedMessage?.message) return scan(node.editedMessage.message, depth + 1) || { key: fallbackKey, type: 14 };
+      for (const value of Object.values(node)) {
+        const found = scan(value, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    };
+    return scan(message);
   };
 
   const handleAntiEdit = async (editEvent) => {
-    const proto = getEditProtocol(editEvent?.message);
+    const proto = getEditProtocol(editEvent?.message, editEvent?.key);
     if (!proto) return false;
 
     const editedKey = proto.key || editEvent.key;
@@ -496,7 +506,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     if (!isAntiEditEnabled(chatJid)) return true;
 
     const original = _msgCache.get(chatJid)?.get(editedId);
-    if (!original || original.key?.fromMe) return true;
+    if (!original) return true;
 
     const selfJid = getSelfJidLocal();
     if (!selfJid) return true;
@@ -545,7 +555,6 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
     // Process each message in the batch concurrently — prevents a slow command
     // (e.g. .play, .video, any download) from blocking subsequent messages.
     // Promise.allSettled ensures one message error never aborts others.
@@ -554,6 +563,13 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       if (!msg.message) return;
 
       const proto = msg.message?.protocolMessage;
+      if (type !== 'notify' && proto?.type !== 14 && proto?.type !== 'MESSAGE_EDIT') return;
+
+      // ── ViewOnce Reaction Reveal: owner reacts with a saved vvemoji ──
+      if (msg.key.fromMe && msg.message?.reactionMessage) {
+        await handleReactionReveal(msg, sock, sessionId).catch(() => {});
+        return;
+      }
 
       // ── ViewOnce Reaction Reveal: owner reacts with a saved vvemoji ──
       if (msg.key.fromMe && msg.message?.reactionMessage) {
