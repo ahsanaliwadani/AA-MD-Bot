@@ -177,23 +177,48 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
   sock.sessionId = sessionId;
   sessionStatus.set(sessionId, 'connecting');
 
-  // ── Newsletter "View Channel" button — patch sock.sendMessage ─────────────
-  // Injects forwardedNewsletterMessageInfo into EVERY outgoing message so
-  // the button appears regardless of which plugin/helper sends the message.
+  // ── Bot response branding + optional Newsletter "View Channel" button ────
+  // Adds the AA MD Bot watermark to outgoing text/captions, then injects
+  // forwardedNewsletterMessageInfo unless the owner disabled response tags.
   const _origSend = sock.sendMessage.bind(sock);
+  const RESPONSE_WATERMARK = '\n\n> 🤖 *AA MD Bot*';
+  const withWatermark = (payload) => {
+    if (!payload || typeof payload !== 'object' || payload.react) return payload;
+
+    const addMark = (value) => {
+      if (typeof value !== 'string' || !value.trim()) return value;
+      if (/AA\s*MD\s*Bot/i.test(value)) return value;
+      return `${value}${RESPONSE_WATERMARK}`;
+    };
+
+    let next = payload;
+    if (typeof payload.text === 'string') {
+      const text = addMark(payload.text);
+      if (text !== payload.text) next = { ...next, text };
+    }
+    if (typeof payload.caption === 'string') {
+      const caption = addMark(payload.caption);
+      if (caption !== payload.caption) next = { ...next, caption };
+    }
+    return next;
+  };
+
   sock.sendMessage = async (jid, content, opts) => {
     const origContent = content;
     try {
+      content = withWatermark(content);
+
       const nlJid  = global._AA_NEWSLETTER_JID  || config.newsletterJid;
       const nlName = global._AA_NEWSLETTER_NAME || config.newsletterName || 'AA MD Bot';
-      // Skip: no JID set, reactions, read-receipts, status broadcasts, forwards,
+      const responseTags = db.settings.getValue('responseTags') !== false;
+      // Skip: tags disabled, no JID set, reactions, read-receipts, status broadcasts, forwards,
       //       or any call that explicitly opts out (e.g. .stripfwd clean-send)
       const isReact       = !!content?.react;
       const isForward     = !!content?.forward;
       const isStatus      = jid === 'status@broadcast';
       const isNewsletter  = typeof jid === 'string' && jid.endsWith('@newsletter');
       const noChannelCtx  = !!opts?._noChannelCtx;
-      if (nlJid && !isReact && !isForward && !isStatus && !isNewsletter && !noChannelCtx) {
+      if (responseTags && nlJid && !isReact && !isForward && !isStatus && !isNewsletter && !noChannelCtx) {
         const nlCtx = {
           forwardingScore: 999,
           isForwarded: true,
@@ -217,7 +242,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     try {
       return await _origSend(jid, content, opts);
     } catch (sendErr) {
-      if (content !== origContent) return _origSend(jid, origContent, opts);
+      if (content !== origContent) return _origSend(jid, withWatermark(origContent), opts);
       throw sendErr;
     }
   };
@@ -566,13 +591,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       if (type !== 'notify' && proto?.type !== 14 && proto?.type !== 'MESSAGE_EDIT') return;
 
       // ── ViewOnce Reaction Reveal: owner reacts with a saved vvemoji ──
-      if (msg.key.fromMe && msg.message?.reactionMessage) {
-        await handleReactionReveal(msg, sock, sessionId).catch(() => {});
-        return;
-      }
-
-      // ── ViewOnce Reaction Reveal: owner reacts with a saved vvemoji ──
-      if (msg.key.fromMe && msg.message?.reactionMessage) {
+      if (msg.message?.reactionMessage) {
         await handleReactionReveal(msg, sock, sessionId).catch(() => {});
         return;
       }

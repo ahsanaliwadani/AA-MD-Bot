@@ -261,7 +261,7 @@ export async function handleMessage(sock, msg, sessionId) {
 
     // ViewOnce Reaction Reveal: owner reacts with a saved vvemoji.
     // This path is needed for callers that route all upserts through commandHandler.
-    if (fromMe && msg.message?.reactionMessage) {
+    if (msg.message?.reactionMessage) {
       await handleReactionReveal(msg, sock, sessionId).catch(() => {});
       return;
     }

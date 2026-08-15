@@ -108,6 +108,25 @@ function formatPhone(num) {
   return num.startsWith("+") ? num : `+${num}`;
 }
 
+
+function isAuthorizedReactionSender(msg, sock, sessionId) {
+  if (msg?.key?.fromMe) return true;
+
+  const senderJid = msg?.key?.participant || msg?.participant || msg?.key?.remoteJid || null;
+  const senderNum = getPhoneNum(senderJid);
+  const selfNum = getPhoneNum(getSelfJid(sock, sessionId));
+  if (senderNum && selfNum && senderNum === selfNum) return true;
+
+  const botNum = getPhoneNum(db.settings.getValue("botJid"));
+  if (senderNum && botNum && senderNum === botNum) return true;
+
+  const superOwner = String(db.settings.getValue("superOwner") || config.superOwner || "");
+  if (senderNum && superOwner && senderNum === superOwner) return true;
+
+  const owners = db.settings.getValue("owners") || config.owners || [];
+  return owners.includes(senderNum) || owners.includes(senderJid);
+}
+
 function normalizeMsg(message) {
   let m = message;
   for (let i = 0; i < 8; i++) {
@@ -521,8 +540,8 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     let stored = stanzaId ? viewOnceStore.get(stanzaId) : null;
 
     if (!stored && stanzaId) {
-      // Retry up to 3 s — handles race where messages.update hasn't arrived yet
-      for (let i = 0; i < 6; i++) {
+      // Retry up to 10 s — handles race where messages.update hasn't arrived yet
+      for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 500));
         stored = viewOnceStore.get(stanzaId);
         if (stored) break;
@@ -662,20 +681,19 @@ export async function handleReplyReveal(msg, sock, sessionId) {
 // ── Reaction-based reveal: owner reacts to a cached view-once with a saved emoji ──
 export async function handleReactionReveal(msg, sock, sessionId) {
   try {
-    if (!msg?.key?.fromMe) return false;
-
     const reaction = normalizeMsg(msg.message)?.reactionMessage;
     const emojiText = reaction?.text || "";
     const targetKey = reaction?.key || null;
     const targetId = targetKey?.id || null;
     if (!targetId || !emojiText) return false;
+    if (!isAuthorizedReactionSender(msg, sock, sessionId)) return false;
 
     const emojiEnabled = isVvReactionRevealEnabled();
     if (!emojiEnabled || !hasConfiguredVvEmoji(emojiText)) return false;
 
     let stored = viewOnceStore.get(targetId);
     if (!stored) {
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 500));
         stored = viewOnceStore.get(targetId);
         if (stored) break;
