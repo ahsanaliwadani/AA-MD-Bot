@@ -63,8 +63,8 @@ export async function getDb() {
 // ── Collections persisted to MongoDB ─────────────────────────────────────────
 // Each name maps to a MongoDB collection where every document is { _id: key, ...fields }
 // 'sessions' is excluded from flush (managed separately by WhatsApp auth state).
-const COLLECTIONS = ['groups', 'settings', 'sessionSettings', 'notes', 'birthdays', 'sessions', 'reminders'];
-const cache = { groups: {}, settings: {}, sessionSettings: {}, notes: {}, birthdays: {}, sessions: {}, reminders: {} };
+const COLLECTIONS = ['groups', 'settings', 'sessionSettings', 'notes', 'birthdays', 'sessions', 'reminders', 'accessKeys', 'accessAuthorizations'];
+const cache = { groups: {}, settings: {}, sessionSettings: {}, notes: {}, birthdays: {}, sessions: {}, reminders: {}, accessKeys: {}, accessAuthorizations: {} };
 
 // ── MongoDB helpers ───────────────────────────────────────────────────────────
 async function mongoLoadCollection(name) {
@@ -164,7 +164,18 @@ export async function initDatabase() {
     return;
   }
   try {
-    await getDb(); // ensure connected
+    const mdb = await getDb(); // ensure connected
+    try {
+      await Promise.all([
+        mdb.collection('accessKeys').createIndex({ keyFingerprint: 1 }, { unique: true, sparse: true }),
+        mdb.collection('accessKeys').createIndex({ assignedPhone: 1, status: 1 }),
+        mdb.collection('accessKeys').createIndex({ expiresAt: 1 }, { sparse: true }),
+        mdb.collection('accessAuthorizations').createIndex({ phone: 1 }),
+        mdb.collection('accessAuthorizations').createIndex({ accessKeyId: 1 }),
+      ]);
+    } catch (e) {
+      console.error('[DB] MongoDB access-key index setup failed:', e.message);
+    }
     for (const name of COLLECTIONS) {
       const data = await mongoLoadCollection(name);
       if (data && typeof data === 'object') {
@@ -333,6 +344,20 @@ export const db = {
     all: () => cache.reminders,
     set: (id, data) => { cache.reminders[id] = data; scheduleSave('reminders'); },
     delete: (id) => { delete cache.reminders[id]; scheduleSave('reminders'); },
+  },
+
+  accessKeys: {
+    get: (id) => cache.accessKeys[id] || null,
+    all: () => cache.accessKeys || {},
+    set: (id, data) => { cache.accessKeys[id] = data; scheduleSave('accessKeys'); },
+    delete: (id) => { delete cache.accessKeys[id]; scheduleSave('accessKeys'); },
+  },
+
+  accessAuthorizations: {
+    get: (sessionId) => cache.accessAuthorizations[sessionId] || null,
+    all: () => cache.accessAuthorizations || {},
+    set: (sessionId, data) => { cache.accessAuthorizations[sessionId] = data; scheduleSave('accessAuthorizations'); },
+    delete: (sessionId) => { delete cache.accessAuthorizations[sessionId]; scheduleSave('accessAuthorizations'); },
   },
 
   birthdays: {

@@ -10,6 +10,7 @@ import { dirname, join } from "path";
 import { isConnectedSessionOwner } from "./sessionManager.js";
 import { handleViewOnceMessage, handleReactionReveal } from "./antiViewOnce.js";
 import { sendOnlinePresence } from "../plugins/gb/alwaysonline.js";
+import { ACCESS_REQUIRED_MESSAGE, isAccessEnforced, isAuthorized, jidToPhone, verifyAccessKey } from "./accessKeys.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -320,6 +321,37 @@ export async function handleMessage(sock, msg, sessionId) {
 
     const { command, args, text: argText, prefix } = parsed;
 
+    const sessionPhone = jidToPhone(sock.user?.id || ownJid || db.sessionSettings.getValue(sessionId, "botJid") || "");
+    const isKeyCommand = command === "key" || command === "accesskey";
+
+    if (isKeyCommand) {
+      if (!sessionPhone) {
+        await reply(sock, msg, "❌ Unable to detect the authenticated WhatsApp number for this session. Please reconnect and try again.").catch(() => {});
+        return;
+      }
+      const suppliedKey = argText.trim();
+      if (!suppliedKey) {
+        await reply(sock, msg, ACCESS_REQUIRED_MESSAGE).catch(() => {});
+        return;
+      }
+      const result = await verifyAccessKey({ plainKey: suppliedKey, phone: sessionPhone, sessionId });
+      if (result.ok) {
+        await reply(sock, msg, "✅ *Access Key Verified!*\n\nYour WhatsApp number has been successfully authorized for AA MD Bot.\n\n🤖 AA MD Bot is now ready to use.\n\nEnjoy all available features! 🚀").catch(() => {});
+      } else if (result.reason === "wrong_phone") {
+        await reply(sock, msg, "❌ *Access Key Not Authorized*\n\nThis Access Key cannot be used with your WhatsApp number.\n\nPlease use the Access Key assigned to your own number.").catch(() => {});
+      } else if (result.reason === "rate_limited") {
+        await reply(sock, msg, "⏳ Too many Access Key attempts. Please wait and try again later.").catch(() => {});
+      } else {
+        await reply(sock, msg, "❌ *Invalid Access Key*\n\nThe Access Key you entered is incorrect or not recognized.\n\nPlease check the key and try again.\n\nIf you believe this is an error, contact AA MD Bot Support.").catch(() => {});
+      }
+      return;
+    }
+
+    if (isAccessEnforced() && !isAuthorized(sessionId, sessionPhone)) {
+      await reply(sock, msg, ACCESS_REQUIRED_MESSAGE).catch(() => {});
+      return;
+    }
+
     // Maintenance mode — only block commands, never plain messages.
     // Owner can always use commands even during maintenance.
     if (settings.maintenanceMode && !owner) {
@@ -353,7 +385,6 @@ export async function handleMessage(sock, msg, sessionId) {
     }
 
     // superOwnerOnly: allow if senderJid matches superOwner OR if fromMe on superOwner's own session
-    const sessionPhone = sock.user?.id?.split("@")[0]?.split(":")[0];
     const isSuperOwnerSelf = fromMe && sessionPhone === getSuperOwner();
     if (
       plugin.superOwnerOnly &&
