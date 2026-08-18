@@ -10,7 +10,7 @@ import { dirname, join } from "path";
 import { isConnectedSessionOwner } from "./sessionManager.js";
 import { handleViewOnceMessage, handleReactionReveal } from "./antiViewOnce.js";
 import { sendOnlinePresence } from "../plugins/gb/alwaysonline.js";
-import { ACCESS_REQUIRED_MESSAGE, isAccessEnforced, isAuthorized, jidToPhone, verifyAccessKey } from "./accessKeys.js";
+import { ACCESS_KEY_SUPPORT_NUMBER, ACCESS_REQUIRED_MESSAGE, isAccessEnforced, isAuthorized, jidToPhone, verifyAccessKey } from "./accessKeys.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -280,8 +280,10 @@ export async function handleMessage(sock, msg, sessionId) {
     // fromMe = self-chat ("You" tab) — always treated as owner
     const owner = isOwner(senderJid) || fromMe;
 
-    const botMode = eff("botMode", "public");
-    if (botMode === "private" && !owner && !fromMe) return;
+    const globalBotMode = settings.botMode ?? "public";
+    const sessionBotMode = sessSets.botMode ?? "public";
+    const botMode = globalBotMode === "user_selected" ? sessionBotMode : globalBotMode;
+    if (["private", "self"].includes(botMode) && !owner && !fromMe) return;
 
     // NOTE: auto-read is handled in sessionManager before commandHandler is called — no duplicate here.
 
@@ -338,7 +340,7 @@ export async function handleMessage(sock, msg, sessionId) {
       if (result.ok) {
         await reply(sock, msg, "✅ *Access Key Verified!*\n\nYour WhatsApp number has been successfully authorized for AA MD Bot.\n\n🤖 AA MD Bot is now ready to use.\n\nEnjoy all available features! 🚀").catch(() => {});
       } else if (result.reason === "wrong_phone") {
-        await reply(sock, msg, "❌ *Access Key Not Authorized*\n\nThis Access Key cannot be used with your WhatsApp number.\n\nPlease use the Access Key assigned to your own number.").catch(() => {});
+        await reply(sock, msg, `❌ *Access Key Not Authorized*\n\nThis Access Key cannot be used with your WhatsApp number.\n\nPlease use the Access Key assigned to your own number.\n\nFor a new Access Key or key issue, contact AA MD Bot team: ${ACCESS_KEY_SUPPORT_NUMBER}\n\n> 💠 *AA MD Bot*  ⚡ *Smart • Fast • Powerful*`).catch(() => {});
       } else if (result.reason === "rate_limited") {
         await reply(sock, msg, "⏳ Too many Access Key attempts. Please wait and try again later.").catch(() => {});
       } else {

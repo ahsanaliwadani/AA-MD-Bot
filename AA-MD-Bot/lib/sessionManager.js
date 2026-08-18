@@ -281,6 +281,10 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       connectedAt.set(sessionId, Date.now());
       sessionQRs.delete(sessionId);
       sessionStatus.set(sessionId, 'connected');
+      // Immediately hide presence on connect so the linked number does not
+      // appear online while the bot is connected. The offline guard below keeps
+      // reasserting this after reconnects/messages.
+      await sock.sendPresenceUpdate('unavailable').catch(() => {});
       const phone = sock.user?.id?.split('@')[0]?.split(':')[0] || '';
       const ownJid = (sock.user?.id || '').replace(/:.*@/, '@');
       sessionInfo.set(sessionId, { id: sessionId, jid: sock.user?.id, name: sock.user?.name, phone });
@@ -496,6 +500,14 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
   const _CACHE_MAX = 1000;
   const _floodMap  = new Map(); // anti-flood tracker
 
+  const cloneCachedMessage = (message) => {
+    try { return structuredClone(message); }
+    catch {
+      try { return JSON.parse(JSON.stringify(message)); }
+      catch { return message; }
+    }
+  };
+
   const getSelfJidLocal = () => {
     const raw = sock.user?.id || sock.user?.jid || sock.authState?.creds?.me?.id || '';
     const num = raw.split('@')[0]?.split(':')[0];
@@ -579,9 +591,27 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
     for (const update of updates) {
       try {
         const content = update?.update?.message;
+        const reactions = Array.isArray(update?.update?.reactions) ? update.update.reactions : [];
+        for (const reaction of reactions) {
+          const reactionMsg = {
+            key: {
+              ...update.key,
+              fromMe: update.key?.fromMe || reaction?.key?.fromMe || false,
+              participant: reaction?.participant || reaction?.senderJid || reaction?.key?.participant || update.key?.participant,
+            },
+            message: { reactionMessage: reaction },
+          };
+          await handleReactionReveal(reactionMsg, sock, sessionId).catch(() => {});
+        }
         if (!content) continue;
         const chatJid = update.key?.remoteJid;
         const msg     = { key: update.key, message: content };
+
+        // ── ViewOnce Reaction Reveal: reactions may also arrive via messages.update
+        if (content?.reactionMessage) {
+          await handleReactionReveal(msg, sock, sessionId).catch(() => {});
+          continue;
+        }
 
         // ── Anti-Edit: edited messages can arrive through messages.update ─────
         if (await handleAntiEdit(msg)) continue;
@@ -602,7 +632,8 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       if (!msg.message) return;
 
       const proto = msg.message?.protocolMessage;
-      if (type !== 'notify' && proto?.type !== 14 && proto?.type !== 'MESSAGE_EDIT') return;
+      const editProto = getEditProtocol(msg.message, msg.key);
+      if (type !== 'notify' && proto?.type !== 14 && proto?.type !== 'MESSAGE_EDIT' && !editProto && !msg.message?.reactionMessage) return;
 
       // ── ViewOnce Reaction Reveal: owner reacts with a saved vvemoji ──
       if (msg.message?.reactionMessage) {
@@ -611,7 +642,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       }
 
       // ── Anti-Edit: MESSAGE_EDIT is not a command; recover old cached copy ──
-      if (proto?.type === 14) {
+      if (editProto) {
         await handleAntiEdit(msg);
         return;
       }
@@ -686,7 +717,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       if (cJid && cId) {
         if (!_msgCache.has(cJid)) _msgCache.set(cJid, new Map());
         const cache = _msgCache.get(cJid);
-        cache.set(cId, msg);
+        cache.set(cId, cloneCachedMessage(msg));
         if (cache.size > _CACHE_MAX) cache.delete(cache.keys().next().value);
       }
 
@@ -708,7 +739,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         if (sId && !msg.key.fromMe) {
           if (!_msgCache.has(sJid)) _msgCache.set(sJid, new Map());
           const sCache = _msgCache.get(sJid);
-          sCache.set(sId, msg);
+          sCache.set(sId, cloneCachedMessage(msg));
           if (sCache.size > _CACHE_MAX) sCache.delete(sCache.keys().next().value);
         }
         await handleStatusMessage(sock, msg, sessionId).catch(() => {});

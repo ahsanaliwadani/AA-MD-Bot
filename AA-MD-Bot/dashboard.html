@@ -487,6 +487,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         Access Keys
       </div>
+      <div class="nav-item" data-page="servers" onclick="showPage('servers',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        Servers
+      </div>
       <div class="nav-item" data-page="database" onclick="showPage('database',this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
         Database
@@ -629,7 +633,7 @@
         <div class="bc-grid">
           <div class="bc-card">
             <h3>🔐 Generate Access Key</h3>
-            <p>Create one cryptographically-random key for one WhatsApp number. The plaintext key is shown once only.</p>
+            <p>Create one cryptographically-random key for one WhatsApp number. The key is saved so admins can view and copy it again later.</p>
             <input class="db-search" id="akPhone" placeholder="WhatsApp number with country code" style="width:100%;margin-bottom:8px"/>
             <select class="bc-select" id="akExpiry">
               <option value="">Lifetime</option><option value="30">30 Days</option><option value="90">90 Days</option><option value="180">180 Days</option><option value="365">1 Year</option>
@@ -639,13 +643,27 @@
           </div>
           <div class="bc-card">
             <h3>🔎 Search Keys</h3>
-            <p>Search by phone number or key ID. Plaintext keys are never listed.</p>
+            <p>Search by phone number or key ID. Saved keys are listed for admin copy/reuse.</p>
             <input class="db-search" id="akSearch" placeholder="Search phone or ID…" oninput="loadAccessKeys()" style="width:100%"/>
           </div>
         </div>
         <div class="history-card" style="margin-top:14px">
           <h3>🔐 Access Keys</h3>
-          <div style="overflow-x:auto"><table class="history-table"><thead><tr><th>Phone</th><th>Status</th><th>Created</th><th>Activated</th><th>Expiry</th><th>Last Used</th><th>Actions</th></tr></thead><tbody id="akBody"><tr><td colspan="7" style="text-align:center;color:var(--text2);padding:20px">Loading…</td></tr></tbody></table></div>
+          <div style="overflow-x:auto"><table class="history-table"><thead><tr><th>Phone</th><th>Access Key</th><th>Status</th><th>Created</th><th>Activated</th><th>Expiry</th><th>Last Used</th><th>Actions</th></tr></thead><tbody id="akBody"><tr><td colspan="8" style="text-align:center;color:var(--text2);padding:20px">Loading…</td></tr></tbody></table></div>
+        </div>
+      </div>
+
+
+      <!-- ── SERVERS ── -->
+      <div class="page" id="page-servers">
+        <div class="bc-card">
+          <h3>🖥️ Servers</h3>
+          <p>Open another AA MD Bot server dashboard with one click.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+            <a class="btn-save" href="https://193.122.82.38.nip.io/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">Server 1</a>
+            <a class="btn-save" href="https://141-147-132-189.nip.io/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">Server 2</a>
+            <a class="btn-save" href="https://130-110-123-57.nip.io/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">Server 3</a>
+          </div>
         </div>
       </div>
 
@@ -775,11 +793,11 @@
               <input class="short-input" id="setPrefixInput" value="." maxlength="3"/>
             </div>
             <div class="setting-row">
-              <div><div class="setting-label">Bot Mode</div><div class="setting-sub">Who can use the bot</div></div>
+              <div><div class="setting-label">Bot Mode</div><div class="setting-sub">Global control: Public/Private apply to all connected numbers; User Selected keeps each number's own .mode setting</div></div>
               <div class="mode-radios">
                 <label class="mode-radio"><input type="radio" name="botMode" value="public" id="modePub"/><label for="modePub">Public</label></label>
-                <label class="mode-radio"><input type="radio" name="botMode" value="self"   id="modeSelf"/><label for="modeSelf">Self</label></label>
-                <label class="mode-radio"><input type="radio" name="botMode" value="group"  id="modeGrp"/><label for="modeGrp">Group</label></label>
+                <label class="mode-radio"><input type="radio" name="botMode" value="private" id="modePriv"/><label for="modePriv">Private</label></label>
+                <label class="mode-radio"><input type="radio" name="botMode" value="user_selected" id="modeUserSelected"/><label for="modeUserSelected">User Selected</label></label>
               </div>
             </div>
             <div class="setting-row">
@@ -925,6 +943,7 @@ const PAGE_META = {
   sessions:  ['Sessions',   'Manage all connected WhatsApp numbers'],
   broadcast: ['Broadcast',  'Send messages to connected sessions'],
   accesskeys:['Access Keys','Generate, view, revoke and disable paid access keys'],
+  servers:   ['Servers',    'Open other AA MD Bot server dashboards'],
   database:  ['Database',   'View and manage all bot database collections'],
   logs:      ['Live Logs',  'Real-time bot log stream'],
   settings:  ['Settings',   'Configure bot behavior and features'],
@@ -1209,7 +1228,8 @@ function emptyState(msg) {
 function applySettingsToForm(d) {
   const prefix = Array.isArray(d.prefix)?d.prefix[0]:(d.prefix||'.');
   document.getElementById('setPrefixInput').value = prefix;
-  const modeEl = document.querySelector(`input[name="botMode"][value="${d.botMode||'public'}"]`);
+  const modeValue = d.botMode === 'self' ? 'private' : (d.botMode || 'public');
+  const modeEl = document.querySelector(`input[name="botMode"][value="${modeValue}"]`);
   if (modeEl) modeEl.checked = true;
   document.getElementById('setMaintenance').checked    = !!d.maintenanceMode;
   document.getElementById('setAccessKeysEnforced').checked = !!d.accessKeysEnforced;
@@ -1337,9 +1357,9 @@ async function loadAccessKeys() {
   const search = document.getElementById('akSearch')?.value || '';
   const d = await fetch('/admin/access-keys?search='+encodeURIComponent(search)).then(r=>r.json()).catch(()=>({ok:false}));
   const keys = d.keys || [];
-  if (!keys.length) { body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text2);padding:20px">No access keys found.</td></tr>'; return; }
+  if (!keys.length) { body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text2);padding:20px">No access keys found.</td></tr>'; return; }
   body.innerHTML = keys.map(k => `<tr>
-    <td>+${k.assignedPhone}</td><td>${k.status}</td><td>${fmtTime(k.createdAt)}</td><td>${fmtTime(k.activatedAt)}</td><td>${fmtTime(k.expiresAt)}</td><td>${fmtTime(k.lastUsedAt)}</td>
+    <td>+${k.assignedPhone}</td><td>${k.plainKey ? `<code>${k.plainKey}</code><br><button class="btn-sm" onclick="copyAccessKey('${k.plainKey}')">Copy</button>` : '<span style="color:var(--text3)">Not saved</span>'}</td><td>${k.status}</td><td>${fmtTime(k.createdAt)}</td><td>${fmtTime(k.activatedAt)}</td><td>${fmtTime(k.expiresAt)}</td><td>${fmtTime(k.lastUsedAt)}</td>
     <td style="white-space:nowrap">
       <button class="btn-sm" onclick="accessKeyAction('${k.id}','regenerate')">Regenerate</button>
       <button class="btn-sm" onclick="accessKeyAction('${k.id}','activate')">Activate</button>
@@ -1356,14 +1376,19 @@ async function generateAccessKeyUI() {
   box.style.display='block'; box.style.background='var(--surface2)'; box.style.color='var(--text2)'; box.textContent='Generating…';
   const payload = { phone, expiresInDays: days ? Number(days) : null };
   const r = await fetch('/admin/access-keys/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
-  if (r.ok) { box.style.background='var(--green-dim)'; box.style.color='var(--green)'; box.innerHTML = `✅ Key generated. Copy now; it will not be shown again:<br><strong style="font-family:monospace;font-size:1.1rem">${r.accessKey}</strong>`; document.getElementById('akPhone').value=''; loadAccessKeys(); }
+  if (r.ok) { box.style.background='var(--green-dim)'; box.style.color='var(--green)'; box.innerHTML = `✅ Key generated and saved in database:<br><strong style="font-family:monospace;font-size:1.1rem">${r.accessKey}</strong><br><button class="btn-sm" onclick="copyAccessKey('${r.accessKey}')">Copy Key</button>`; document.getElementById('akPhone').value=''; loadAccessKeys(); }
   else { box.style.background='var(--red-dim)'; box.style.color='var(--red)'; box.textContent = r.error || 'Failed to generate key'; }
+}
+
+async function copyAccessKey(key) {
+  try { await navigator.clipboard.writeText(key); alert('Access Key copied.'); }
+  catch { prompt('Copy Access Key:', key); }
 }
 
 async function accessKeyAction(id, action) {
   if (!confirm(`${action} this access key?`)) return;
   const r = await fetch(`/admin/access-keys/${encodeURIComponent(id)}/${action}`,{method:'POST'}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
-  if (r.ok && r.accessKey) alert('Replacement key generated. Copy now:\n\n'+r.accessKey);
+  if (r.ok && r.accessKey) alert('Replacement key generated and saved in database. Copy now or from the Access Keys table:\n\n'+r.accessKey);
   else if (!r.ok) alert(r.error || 'Action failed');
   await loadAccessKeys();
 }
