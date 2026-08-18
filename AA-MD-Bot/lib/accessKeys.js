@@ -3,6 +3,7 @@ import { db, saveNow } from './database.js';
 
 const KEY_STATUSES = new Set(['pending', 'active', 'revoked', 'expired', 'disabled']);
 const KEY_LENGTH = 32;
+export const ACCESS_KEY_SUPPORT_NUMBER = '+923316041183';
 
 function intSetting(name, fallback) {
   const value = db.settings.getValue(name) ?? process.env[name];
@@ -109,6 +110,7 @@ export async function generateAccessKey({ phone, expiresAt = null, createdBy = '
     keyHash: hash,
     keySalt: salt,
     keyFingerprint: fingerprintKey(plainKey),
+    plainKey,
     hashIterations: intSetting('ACCESS_KEY_HASH_ITERATIONS', 210000),
     assignedPhone,
     status: 'active',
@@ -279,7 +281,9 @@ export async function deleteAccessKey(id) {
 export const ACCESS_REQUIRED_MESSAGE =
   '🔐 *AA MD Bot Access Required*\n\n' +
   'Your WhatsApp number is connected, but an active Access Key is required to use AA MD Bot.\n\n' +
-  'Please contact the AA MD Bot team to receive your Access Key.\n\n' +
+  `Please contact the AA MD Bot team on ${ACCESS_KEY_SUPPORT_NUMBER} to receive your Access Key.\n\n` +
+  `If your Access Key has any issue, contact ${ACCESS_KEY_SUPPORT_NUMBER}.\n\n` +
   'After receiving your key, send:\n\n' +
   '*.key YOUR_ACCESS_KEY*\n\n' +
-  'Example:\n*.key AA-XXXX-XXXX-XXXX*';
+  'Example:\n*.key AA-XXXX-XXXX-XXXX*\n\n' +
+  '> 💠 *AA MD Bot*  ⚡ *Smart • Fast • Powerful*';

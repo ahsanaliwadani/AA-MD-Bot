@@ -112,7 +112,8 @@ function formatPhone(num) {
 function isAuthorizedReactionSender(msg, sock, sessionId) {
   if (msg?.key?.fromMe) return true;
 
-  const senderJid = msg?.key?.participant || msg?.participant || msg?.key?.remoteJid || null;
+  const reaction = normalizeMsg(msg?.message)?.reactionMessage;
+  const senderJid = msg?.key?.participant || msg?.participant || reaction?.participant || reaction?.senderJid || reaction?.key?.participant || msg?.key?.remoteJid || null;
   const senderNum = getPhoneNum(senderJid);
   const selfNum = getPhoneNum(getSelfJid(sock, sessionId));
   if (senderNum && selfNum && senderNum === selfNum) return true;
@@ -163,25 +164,42 @@ function getSelfJid(sock, sessionId) {
   );
 }
 
-function extractViewOnceMedia(normalized) {
-  const voMsg =
-    normalized?.viewOnceMessage ||
-    normalized?.viewOnceMessageV2 ||
-    normalized?.viewOnceMessageV2Extension;
+function extractViewOnceMedia(message) {
+  function scan(node, insideViewOnce = false, depth = 0) {
+    if (!node || depth > 10) return null;
 
-  if (voMsg?.message?.imageMessage)
-    return { mediaMsg: voMsg.message.imageMessage, isVid: false, isAudio: false };
-  if (voMsg?.message?.videoMessage)
-    return { mediaMsg: voMsg.message.videoMessage, isVid: true,  isAudio: false };
-  if (voMsg?.message?.audioMessage)
-    return { mediaMsg: voMsg.message.audioMessage, isVid: false, isAudio: true  };
-  if (normalized?.imageMessage?.viewOnce)
-    return { mediaMsg: normalized.imageMessage, isVid: false, isAudio: false };
-  if (normalized?.videoMessage?.viewOnce)
-    return { mediaMsg: normalized.videoMessage, isVid: true,  isAudio: false };
-  if (normalized?.audioMessage?.viewOnce)
-    return { mediaMsg: normalized.audioMessage, isVid: false, isAudio: true  };
-  return null;
+    const wrappers = [
+      'viewOnceMessage',
+      'viewOnceMessageV2',
+      'viewOnceMessageV2Extension',
+    ];
+    for (const wrapper of wrappers) {
+      if (node[wrapper]?.message) {
+        const found = scan(node[wrapper].message, true, depth + 1);
+        if (found) return found;
+      }
+    }
+
+    for (const wrapper of ['ephemeralMessage', 'documentWithCaptionMessage']) {
+      if (node[wrapper]?.message) {
+        const found = scan(node[wrapper].message, insideViewOnce, depth + 1);
+        if (found) return found;
+      }
+    }
+
+    if (node.imageMessage && (insideViewOnce || node.imageMessage.viewOnce)) {
+      return { mediaMsg: node.imageMessage, isVid: false, isAudio: false };
+    }
+    if (node.videoMessage && (insideViewOnce || node.videoMessage.viewOnce)) {
+      return { mediaMsg: node.videoMessage, isVid: true, isAudio: false };
+    }
+    if (node.audioMessage && (insideViewOnce || node.audioMessage.viewOnce)) {
+      return { mediaMsg: node.audioMessage, isVid: false, isAudio: true };
+    }
+    return null;
+  }
+
+  return scan(message);
 }
 
 async function downloadBuffer(mediaMsg, isVid, isAudio = false) {
@@ -212,8 +230,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     // still succeed if the first messages.upsert attempt had no media yet.
     if (_processed.has(msgId)) return;
 
-    const normalized = normalizeMsg(msg.message);
-    const extracted = extractViewOnceMedia(normalized);
+    const extracted = extractViewOnceMedia(msg.message);
     if (!extracted) return;
 
     const { mediaMsg, isVid, isAudio } = extracted;
@@ -698,6 +715,15 @@ export async function handleReactionReveal(msg, sock, sessionId) {
         stored = viewOnceStore.get(targetId);
         if (stored) break;
       }
+    }
+    if (!stored) {
+      const targetChat = targetKey?.remoteJid || msg.key?.remoteJid;
+      const TTL = 60 * 60 * 1000;
+      let newest = null;
+      for (const [, entry] of viewOnceStore) {
+        if (entry.chatJid === targetChat && (!newest || entry.timestamp > newest.timestamp)) newest = entry;
+      }
+      if (newest && Date.now() - newest.timestamp < TTL) stored = newest;
     }
     if (!stored) return false;
 

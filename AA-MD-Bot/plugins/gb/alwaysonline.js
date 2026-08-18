@@ -9,6 +9,10 @@ import { db, saveNow } from '../../lib/database.js';
 const _intervals = new Map(); // sessionId → always-online intervalId
 const _offlineIntervals = new Map(); // sessionId → offline guard intervalId
 
+function hideOnlinePresence() {
+  return String(db.settings.getValue('PRIVACY_HIDE_ONLINE') ?? process.env.PRIVACY_HIDE_ONLINE ?? 'true').toLowerCase() !== 'false';
+}
+
 // Exported so ghost.js can stop the interval when enabling ghost mode
 function stopOfflineGuard(sessionId) {
   if (_offlineIntervals.has(sessionId)) {
@@ -40,11 +44,12 @@ export function enforceOfflinePresence(sock, sessionId) {
   // .alwaysonline is OFF the bot keeps working without advertising online.
   const markOffline = () => sock.sendPresenceUpdate('unavailable').catch(() => {});
   markOffline();
-  const iv = setInterval(markOffline, 15000);
+  const iv = setInterval(markOffline, 5000);
   _offlineIntervals.set(sessionId, iv);
 }
 
 export function startAlwaysOnline(sock, sessionId) {
+  if (hideOnlinePresence()) return enforceOfflinePresence(sock, sessionId);
   stopOfflineGuard(sessionId);
   stopAlwaysOnline(sessionId);
   const iv = setInterval(async () => {
@@ -55,6 +60,7 @@ export function startAlwaysOnline(sock, sessionId) {
 }
 
 export function shouldSendOnlinePresence(sessionId) {
+  if (hideOnlinePresence()) return false;
   const enabled = !!db.sessionSettings.getValue(sessionId, 'alwaysOnline');
   const ghost = !!db.sessionSettings.getValue(sessionId, 'ghostMode');
   const fakeLastSeen = !!db.sessionSettings.getValue(sessionId, 'fake_lastseen_active');
@@ -104,8 +110,16 @@ export default {
       // Turn off ghost mode for this session
       sessionSettings.set('ghostMode', false);
       await saveNow('sessionSettings').catch(() => {});
-      // Start/restart the interval for this session only
+      // Start/restart the interval for this session only unless global privacy hides online presence
       startAlwaysOnline(sock, sessionId);
+      if (hideOnlinePresence()) {
+        return reply(
+          `🛡️ *Online Privacy is Active*\n\n` +
+          `Bot is connected, but this WhatsApp number will stay hidden/offline.\n` +
+          `Always Online cannot show online while privacy mode is enabled.\n\n` +
+          `> 🤖 *Powered by AA MD Bot*`
+        );
+      }
       return reply(
         `🟢 *Always Online* is now *ON ✅*\n\n` +
         `This number will appear *permanently online*.\n` +
