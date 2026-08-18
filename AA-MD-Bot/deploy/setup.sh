@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════════════
-#  AA MD Bot — Oracle Cloud Ubuntu 22.04 ARM64 Auto-Deploy Script
+#  AA MD Bot — Oracle Cloud Ubuntu ARM64 Auto-Deploy Script
 #  Bot + MongoDB + Nginx + Let's Encrypt — SAME VM, fully automatic
 #
 #  Fresh VM par ek hi baar chalao (ya dobara bhi — idempotent hai):
@@ -9,10 +9,10 @@
 #  Features:
 #   ✔ Oracle ARM64 (Ampere) compatible — koi x86 package nahi
 #   ✔ Idempotent — safely re-run on existing deployment
-#   ✔ MongoDB 7 local — localhost only, auth enabled
+#   ✔ MongoDB local — localhost only, auth enabled
 #   ✔ Nginx reverse proxy + Let's Encrypt HTTPS (nip.io domain)
 #   ✔ Oracle iptables REJECT fix — ports 80/443/5000 auto-opened
-#   ✔ UFW firewall configured automatically
+#   ✔ Persistent iptables firewall configured automatically
 #   ✔ PM2 with systemd startup
 #   ✔ Auto-detects bot directory (handles nested repo structures)
 #   ✔ .env merge — never overwrites user's custom values
@@ -101,23 +101,35 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq \
 ok "System tools + nginx + certbot + iptables-persistent ready"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 3 — MongoDB 7 (ARM64-compatible, localhost only)
+# STEP 3 — MongoDB (ARM64-compatible, localhost only)
 # ══════════════════════════════════════════════════════════════════════════════
-hdr "3. MongoDB 7 (local — $ARCH)"
-if ! command -v mongod &>/dev/null; then
-  inf "MongoDB 7 install ho raha hai ($ARCH)..."
-  # Keyring
-  curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
-    | sudo gpg --batch --yes -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
+# MongoDB 7 is supported on Ubuntu 20.04/22.04; MongoDB 8 is the supported
+# choice for Ubuntu 24.04. Select the repository from the actual OS codename.
+. /etc/os-release
+UBUNTU_CODENAME="${VERSION_CODENAME:-}"
+case "$UBUNTU_CODENAME" in
+  noble) MONGO_MAJOR="8.0" ;;
+  jammy|focal) MONGO_MAJOR="7.0" ;;
+  *) fail "Unsupported Ubuntu release for automatic MongoDB setup: ${UBUNTU_CODENAME:-unknown}" ;;
+esac
 
-  # Both amd64 and arm64 supported by MongoDB 7 official repo
-  echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] \
-https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" \
-    | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list > /dev/null
+MONGO_KEYRING="/usr/share/keyrings/mongodb-server-${MONGO_MAJOR}.gpg"
+MONGO_LIST="/etc/apt/sources.list.d/mongodb-org-${MONGO_MAJOR}.list"
+
+hdr "3. MongoDB ${MONGO_MAJOR} (local — $ARCH)"
+if ! command -v mongod &>/dev/null; then
+  inf "MongoDB ${MONGO_MAJOR} install ho raha hai ($ARCH)..."
+
+  curl -fsSL "https://www.mongodb.org/static/pgp/server-${MONGO_MAJOR}.asc" \
+    | sudo gpg --batch --yes -o "$MONGO_KEYRING" --dearmor
+
+  echo "deb [ arch=amd64,arm64 signed-by=${MONGO_KEYRING} ] \
+https://repo.mongodb.org/apt/ubuntu ${UBUNTU_CODENAME}/mongodb-org/${MONGO_MAJOR} multiverse" \
+    | sudo tee "$MONGO_LIST" > /dev/null
 
   sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mongodb-org
-  ok "MongoDB 7 installed"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq mongodb-org
+  ok "MongoDB ${MONGO_MAJOR} installed"
 else
   ok "MongoDB already installed — skipping ($(mongod --version 2>/dev/null | head -1 || echo 'unknown version'))"
 fi
@@ -590,75 +602,73 @@ fi
 ok "Bot directory detected: $BOT_DIR"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 11 — npm install (with registry fix + auto-retry on failure)
+# STEP 11 — npm install (lockfile-aware + retry)
 # ══════════════════════════════════════════════════════════════════════════════
 hdr "11. Node.js Packages"
 cd "$BOT_DIR"
 
-# npm 10 on ARM64 has a bug: "Exit handler never called" — exits 0 but installs nothing.
-# Fix: downgrade to npm 9 (stable, no bug) + always start from a clean slate.
 npm config set registry "$NPM_REGISTRY"
+npm config set progress false
 ok "npm registry set: $NPM_REGISTRY"
 
-# Downgrade to npm 9 to avoid the "Exit handler never called" bug on ARM64 npm 10
-_CURRENT_NPM=$(npm --version 2>/dev/null || echo "0")
-if [[ "$_CURRENT_NPM" == 10* ]]; then
-  inf "npm 10 detected — downgrading to npm 9 (ARM64 bug fix)..."
-  npm install -g npm@9 --registry="$NPM_REGISTRY" --silent 2>/dev/null || true
-  ok "npm $(npm --version) ready"
-fi
-
-# Always wipe node_modules before install — prevents ENOTEMPTY race errors on re-run
-inf "node_modules clean kar rahe hain (fresh install ke liye)..."
-rm -rf node_modules package-lock.json
-
-inf "npm install running... (2-5 minute lagenge)"
-if ! npm install --omit=dev \
-    --registry="$NPM_REGISTRY" \
-    --no-audit \
-    --no-fund \
-    --legacy-peer-deps; then
-  warn "npm install failed — retry kar rahe hain..."
-  rm -rf node_modules package-lock.json
-  npm install --omit=dev \
-    --registry="$NPM_REGISTRY" \
-    --no-audit \
-    --no-fund \
-    --legacy-peer-deps \
-  || fail "npm install second attempt bhi fail hua — logs check karo: $DEPLOY_LOG"
+# Keep package-lock.json. Production installs should be deterministic.
+inf "Node.js packages install ho rahe hain..."
+if [ -f package-lock.json ]; then
+  if ! NPM_CONFIG_PROGRESS=false timeout 900 npm ci --omit=dev \
+      --registry="$NPM_REGISTRY" \
+      --no-audit \
+      --no-fund \
+      --legacy-peer-deps; then
+    warn "npm ci failed — package-lock/package.json mismatch ho sakta hai; npm install fallback..."
+    rm -rf node_modules
+    NPM_CONFIG_PROGRESS=false timeout 900 npm install --omit=dev \
+      --registry="$NPM_REGISTRY" \
+      --no-audit \
+      --no-fund \
+      --legacy-peer-deps \
+      || fail "npm install fallback bhi fail hua — logs check karo: $DEPLOY_LOG"
+  fi
+else
+  if ! NPM_CONFIG_PROGRESS=false timeout 900 npm install --omit=dev \
+      --registry="$NPM_REGISTRY" \
+      --no-audit \
+      --no-fund \
+      --legacy-peer-deps; then
+    warn "npm install failed — clean retry kar rahe hain..."
+    rm -rf node_modules
+    NPM_CONFIG_PROGRESS=false timeout 900 npm install --omit=dev \
+      --registry="$NPM_REGISTRY" \
+      --no-audit \
+      --no-fund \
+      --legacy-peer-deps \
+      || fail "npm install second attempt bhi fail hua — logs check karo: $DEPLOY_LOG"
+  fi
 fi
 ok "Node.js packages installed"
 
 # ── Generic dependency verifier ───────────────────────────────────────────────
-# NEVER validates by file path — uses Node.js module resolution only.
-# NEVER aborts deployment — worst case is a WARNING and continue.
 verify_dependency() {
   local pkg="$1"
-  # Primary: require.resolve() — correct way to check if Node can find it
   if node -e "require.resolve('${pkg}')" >/dev/null 2>&1; then
     ok "Dependency verified: ${pkg}"
     return 0
   fi
-  # Not resolvable — try installing it once
+
   warn "${pkg} resolve nahi hua — npm install ${pkg} --save try kar rahe hain..."
-  npm install "${pkg}" --save --registry="$NPM_REGISTRY" --no-audit --no-fund 2>&1 || true
-  # Re-check after targeted install
-  if node -e "require.resolve('${pkg}')" >/dev/null 2>&1; then
-    ok "Dependency verified after targeted install: ${pkg}"
-    return 0
-  fi
-  # Still not resolvable — WARNING only, never exit
-  warn "WARNING: ${pkg} verify nahi ho saka — deployment jaari rahega"
-  return 0
+  npm install "${pkg}" --save --registry="$NPM_REGISTRY" --no-audit --no-fund \
+    || fail "Required dependency '${pkg}' install nahi hui"
+
+  node -e "require.resolve('${pkg}')" >/dev/null 2>&1 \
+    || fail "Required dependency '${pkg}' install ke baad bhi resolve nahi hui"
+  ok "Dependency verified after targeted install: ${pkg}"
 }
 
-# Verify critical dependencies using Node.js resolution (not file checks)
-# These NEVER abort deployment — worst case is a WARNING
+# dotenv is required by the generated PM2 ecosystem config.
+verify_dependency dotenv
 verify_dependency fs-extra
 verify_dependency axios
 verify_dependency @whiskeysockets/baileys
 
-# ══════════════════════════════════════════════════════════════════════════════
 # STEP 12 — Required Bot Directories
 # ══════════════════════════════════════════════════════════════════════════════
 hdr "12. Bot Directories"
@@ -789,6 +799,17 @@ hdr "15. PM2 Ecosystem Config"
 ECOSYSTEM_FILE="$BOT_DIR/ecosystem.config.cjs"
 LOGS_DIR="$BOT_DIR/logs"
 
+# Prefer package.json "main"; fall back to index.js.
+MAIN_SCRIPT=$(node -e 'const p=require("./package.json"); process.stdout.write(p.main || "index.js")' 2>/dev/null || echo "index.js")
+if [ ! -f "$BOT_DIR/$MAIN_SCRIPT" ]; then
+  if [ -f "$BOT_DIR/index.js" ]; then
+    warn "package.json main '$MAIN_SCRIPT' nahi mila — index.js use hoga"
+    MAIN_SCRIPT="index.js"
+  else
+    fail "Bot entry file nahi mila: $BOT_DIR/$MAIN_SCRIPT"
+  fi
+fi
+
 inf "ecosystem.config.cjs fresh likh rahe hain (dotenv explicit load — PM2 v7 env_file workaround)..."
 cat > "$ECOSYSTEM_FILE" << ECOSYSTEM
 // AA MD Bot — PM2 Ecosystem Config
@@ -810,7 +831,7 @@ try {
 module.exports = {
   apps: [{
     name        : 'aa-md-bot',
-    script      : path.join(BOT_DIR, 'index.js'),
+    script      : path.join(BOT_DIR, '${MAIN_SCRIPT}'),
     cwd         : BOT_DIR,
     interpreter : 'node',
     node_args   : '--experimental-vm-modules',
@@ -888,20 +909,31 @@ sudo netfilter-persistent save >/dev/null 2>&1 \
 ok "iptables rules permanently saved"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 17 — UFW Firewall
-# Allow SSH/HTTP/HTTPS/5000, block MongoDB from internet
+# STEP 17 — Firewall Verification
+# Ubuntu 24.04 removes/conflicts UFW when iptables-persistent is installed.
+# Use one firewall manager only: persistent iptables.
 # ══════════════════════════════════════════════════════════════════════════════
-hdr "17. UFW Firewall"
-sudo ufw --force reset >/dev/null 2>&1 || true  # fresh start
-sudo ufw default deny incoming  >/dev/null
-sudo ufw default allow outgoing >/dev/null
-sudo ufw allow 22/tcp   comment 'SSH'             >/dev/null
-sudo ufw allow 80/tcp   comment 'HTTP'            >/dev/null
-sudo ufw allow 443/tcp  comment 'HTTPS'           >/dev/null
-sudo ufw allow 5000/tcp comment 'AA-MD-Bot dashboard' >/dev/null
-# Port 27017 (MongoDB) is intentionally NOT opened — localhost only
-sudo ufw --force enable >/dev/null
-ok "UFW: SSH(22) HTTP(80) HTTPS(443) Dashboard(5000) open | MongoDB(27017) blocked"
+hdr "17. Firewall Verification"
+
+for _port in 22 80 443 5000; do
+  if sudo iptables -C INPUT -p tcp --dport "$_port" -j ACCEPT &>/dev/null; then
+    ok "iptables: TCP/$_port ACCEPT"
+  else
+    warn "iptables: TCP/$_port ACCEPT rule missing — adding now"
+    sudo iptables -I INPUT 1 -p tcp --dport "$_port" -j ACCEPT
+  fi
+done
+
+# MongoDB is bound to 127.0.0.1, so it is not internet-accessible.
+if sudo ss -lnt 2>/dev/null | grep -qE '127\.0\.0\.1:27017|\[::1\]:27017'; then
+  ok "MongoDB: 27017 localhost-only"
+else
+  warn "MongoDB 27017 listener verify nahi hua — check: sudo ss -lntp | grep 27017"
+fi
+
+sudo netfilter-persistent save >/dev/null 2>&1 \
+  || sudo iptables-save | sudo tee /etc/iptables/rules.v4 >/dev/null
+ok "iptables rules verified and saved"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 18 — Nginx Configuration (fully idempotent, assumes nothing exists)
@@ -993,12 +1025,11 @@ MAINNGINX
   ok "nginx.conf generated"
 fi
 
-# ── 6. Ensure sites-enabled is included in nginx.conf ────────────────────────
-if ! sudo grep -q 'sites-enabled' /etc/nginx/nginx.conf 2>/dev/null; then
+# ── 6. Ensure sites-enabled is included inside the http{} block ───────────────
+if ! sudo grep -qE '^[[:space:]]*include[[:space:]]+/etc/nginx/sites-enabled/\*;' /etc/nginx/nginx.conf 2>/dev/null; then
   inf "nginx.conf: sites-enabled include add kar rahe hain..."
-  echo "    include /etc/nginx/sites-enabled/*;" \
-    | sudo tee -a /etc/nginx/nginx.conf > /dev/null
-  ok "sites-enabled include added"
+  sudo sed -i '/^[[:space:]]*http[[:space:]]*{/a\\    include /etc/nginx/sites-enabled/*;' /etc/nginx/nginx.conf
+  ok "sites-enabled include added inside http{}"
 fi
 
 # ── 7. Remove default site ────────────────────────────────────────────────────
@@ -1040,12 +1071,13 @@ ok "Nginx site config created: $NGINX_CONF"
 
 # ── 10. Test — abort ONLY if nginx -t fails ───────────────────────────────────
 inf "Nginx config test..."
-NGINX_TEST_OUT=$(sudo nginx -t 2>&1 || true)
-echo "$NGINX_TEST_OUT" | while IFS= read -r line; do inf "$line"; done
-if echo "$NGINX_TEST_OUT" | grep -q 'failed'; then
+if NGINX_TEST_OUT=$(sudo nginx -t 2>&1); then
+  echo "$NGINX_TEST_OUT" | while IFS= read -r line; do inf "$line"; done
+  ok "Nginx config valid"
+else
+  echo "$NGINX_TEST_OUT" | while IFS= read -r line; do warn "$line"; done
   fail "nginx -t failed — config fix karo phir dobara run karo"
 fi
-ok "Nginx config valid"
 
 # ── 11. Enable and start ──────────────────────────────────────────────────────
 sudo systemctl enable nginx >/dev/null
@@ -1134,9 +1166,10 @@ if sudo certbot --nginx \
      --register-unsafely-without-email \
      --domains "$DOMAIN" \
      --redirect \
-     2>&1 | tee /tmp/certbot-output.log | while IFS= read -r line; do
-       inf "certbot: $line"
-     done; then
+     2>&1 | tee /tmp/certbot-output.log; then
+  while IFS= read -r line; do
+    inf "certbot: $line"
+  done < /tmp/certbot-output.log
 
   CERTBOT_SUCCESS=true
   HTTPS_URL="https://${DOMAIN}"
@@ -1262,11 +1295,8 @@ echo ""
 pm2 logs "\$PM2_APP_NAME" --lines 30
 REDEPLOY_EOF
 
-# Use the maintained repository script instead of leaving the VM with an
-# older generated copy when setup.sh itself is updated.
-if [ -f "$BOT_DIR/deploy/redeploy.sh" ]; then
-  cp "$BOT_DIR/deploy/redeploy.sh" "$REDEPLOY_SCRIPT"
-fi
+# Keep the generated redeploy script from this setup.sh.
+# Do not overwrite it with a potentially older repository copy.
 chmod +x "$REDEPLOY_SCRIPT"
 chmod 600 "$ENV_FILE"
 chown ubuntu:ubuntu "$REDEPLOY_SCRIPT"
