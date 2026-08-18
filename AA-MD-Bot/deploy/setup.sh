@@ -563,43 +563,65 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # STEP 10 — Auto-detect Bot Directory
-# package.json sometimes at:  AA-MD-Bot/package.json
-# and sometimes at:           AA-MD-Bot/AA-MD-Bot/package.json
 # ══════════════════════════════════════════════════════════════════════════════
 hdr "10. Bot Directory Detection"
 
 BOT_DIR=""
 
-# Priority 1: direct (repo root is the bot)
-if [ -f "$REPO_CLONE_DIR/package.json" ]; then
-  BOT_DIR="$REPO_CLONE_DIR"
+# Priority 1 — nested actual bot directory
+# AA-MD-Bot repo structure:
+#   repo/
+#     package.json
+#     AA-MD-Bot/
+#       package.json
+#       index.js
+if [ -f "$REPO_CLONE_DIR/AA-MD-Bot/package.json" ] && \
+   [ -f "$REPO_CLONE_DIR/AA-MD-Bot/index.js" ]; then
+    BOT_DIR="$REPO_CLONE_DIR/AA-MD-Bot"
 fi
 
-# Priority 2: nested AA-MD-Bot/ subfolder
-if [ -z "$BOT_DIR" ] && [ -f "$REPO_CLONE_DIR/AA-MD-Bot/package.json" ]; then
-  BOT_DIR="$REPO_CLONE_DIR/AA-MD-Bot"
+# Priority 2 — repository root itself is the bot
+if [ -z "$BOT_DIR" ] && \
+   [ -f "$REPO_CLONE_DIR/package.json" ] && \
+   [ -f "$REPO_CLONE_DIR/index.js" ]; then
+    BOT_DIR="$REPO_CLONE_DIR"
 fi
 
-# Priority 3: double-nested AA-MD-Bot/AA-MD-Bot/
-if [ -z "$BOT_DIR" ] && [ -f "$REPO_CLONE_DIR/AA-MD-Bot/AA-MD-Bot/package.json" ]; then
-  BOT_DIR="$REPO_CLONE_DIR/AA-MD-Bot/AA-MD-Bot"
-fi
-
-# Fallback: find the first package.json anywhere in the repo
+# Priority 3 — another nested bot directory
 if [ -z "$BOT_DIR" ]; then
-  _found=$(find "$REPO_CLONE_DIR" -maxdepth 4 -name "package.json" \
-            ! -path "*/node_modules/*" | head -1)
-  if [ -n "$_found" ]; then
-    BOT_DIR="$(dirname "$_found")"
-    warn "package.json auto-detected at: $BOT_DIR"
-  fi
+    _found=$(find "$REPO_CLONE_DIR" \
+        -maxdepth 4 \
+        -type f \
+        -name "package.json" \
+        ! -path "*/node_modules/*" \
+        | while IFS= read -r pkg; do
+            dir="$(dirname "$pkg")"
+
+            if [ -f "$dir/index.js" ]; then
+                echo "$dir"
+                break
+            fi
+        done
+    )
+
+    if [ -n "$_found" ]; then
+        BOT_DIR="$_found"
+        warn "Bot directory auto-detected: $BOT_DIR"
+    fi
 fi
 
-[ -z "$BOT_DIR" ] && fail "package.json kahi bhi nahi mila — repo structure check karo:\n  ls $REPO_CLONE_DIR/"
-[ -f "$BOT_DIR/package.json" ] || fail "Bot directory invalid: $BOT_DIR"
+[ -z "$BOT_DIR" ] && fail "Bot directory nahi mila — package.json + index.js check karo"
+
+[ -f "$BOT_DIR/package.json" ] || \
+    fail "Bot package.json nahi mila: $BOT_DIR/package.json"
+
+[ -f "$BOT_DIR/index.js" ] || \
+    fail "Bot entry file nahi mila: $BOT_DIR/index.js"
 
 ok "Bot directory detected: $BOT_DIR"
+ok "Bot entry file detected: $BOT_DIR/index.js"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 11 — npm install (lockfile-aware + retry)
