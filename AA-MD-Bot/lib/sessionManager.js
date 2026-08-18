@@ -27,6 +27,7 @@ import { checkChatbotResponse } from '../plugins/gb/chatbot.js';
 import { chatAI } from './aiEngine.js';
 import { CHATBOT_SYSTEM } from '../plugins/gb/chatbot.js';
 import { trackSentMessage } from './msgTracker.js';
+import { ACCESS_REQUIRED_MESSAGE, getAuthorization, isAccessEnforced } from './accessKeys.js';
 let _getAlertRegistry = null;
 import('../plugins/gb/onlinealert.js')
   .then(m => { _getAlertRegistry = m.getAlertRegistry; })
@@ -285,6 +286,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       sessionInfo.set(sessionId, { id: sessionId, jid: sock.user?.id, name: sock.user?.name, phone });
       botEvents.emit('status', { sessionId, status: 'connected', user: sock.user });
       logger.info({ sessionId, name: sock.user?.name }, '✅ WhatsApp Connected!');
+      console.log('[ACCESS] Number connected', { sessionId, phone });
 
       // Check if this is a FIRST-EVER connect (not a restart)
       const existingSession = db.sessions.all()[sessionId];
@@ -316,6 +318,18 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       }
 
       if (connectionHandler) connectionHandler(sessionId, sock, 'open');
+
+      if (isAccessEnforced() && phone) {
+        const auth = getAuthorization(sessionId, phone);
+        console.log('[ACCESS] Authorization check', { sessionId, phone, authorized: !!auth });
+        if (auth) {
+          console.log('[ACCESS] Authorization restored', { sessionId, phone, accessKeyId: auth.accessKeyId });
+        } else if (ownJid) {
+          setTimeout(() => {
+            sock.sendMessage(ownJid, { text: ACCESS_REQUIRED_MESSAGE }).catch(() => {});
+          }, 3500);
+        }
+      }
 
       // Restore persisted always-online state, or go unavailable when it is off
       // so disabling .alwaysonline survives reconnects/restarts.
@@ -417,7 +431,7 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
         // Clean up all per-session data (settings + group settings)
         db.sessionSettings.delete(sessionId);
         db.groups.deleteBySession(sessionId);
-        logger.info({ sessionId }, '🗑️ Session settings & group data removed on logout');
+        logger.info({ sessionId }, '🗑️ Session settings & group data removed on logout; Access Key authorization remains until admin action');
 
         // Note: economy/level system removed — no user records to clean up
 

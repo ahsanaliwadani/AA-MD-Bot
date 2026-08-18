@@ -39,6 +39,7 @@ import { cleanTemp, formatDuration } from './lib/helper.js';
 import { startBirthdayScheduler } from './plugins/utility/birthday.js';
 import { initTelegramAdmin }    from './lib/telegramAdmin.js';
 import { initTelegramFeatures } from './lib/telegramFeatures.js';
+import { generateAccessKey, listAccessKeys, updateAccessKeyStatus, deleteAccessKey, verifyAccessKey, isAuthorized, normalizePhone, getAccessKeySecuritySettings } from './lib/accessKeys.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const startTime = Date.now();
@@ -378,6 +379,82 @@ async function startServer() {
       return;
     }
 
+
+    // ── Access Key verification/status (server-side session binding) ───────
+    if (p === '/access-keys/status' && req.method === 'GET') {
+      const sessionId = url.searchParams.get('session') || 'default';
+      const sock = sessions.get(sessionId);
+      const actualPhone = normalizePhone(sock?.user?.id || sessionInfo.get(sessionId)?.phone || '');
+      if (!sock || !actualPhone) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'Session not connected' })); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, sessionId, authorized: isAuthorized(sessionId, actualPhone) }));
+      return;
+    }
+
+    if (p === '/access-keys/verify' && req.method === 'POST') {
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', async () => {
+        try {
+          const { sessionId = 'default', accessKey } = JSON.parse(body || '{}');
+          const sock = sessions.get(sessionId);
+          const actualPhone = normalizePhone(sock?.user?.id || sessionInfo.get(sessionId)?.phone || '');
+          if (!sock || !actualPhone) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'Session not connected' })); }
+          const result = await verifyAccessKey({ plainKey: accessKey, phone: actualPhone, sessionId });
+          const safeError = result.ok ? null : (result.reason === 'wrong_phone' ? 'Access Key is not authorized for this WhatsApp number' : result.reason === 'rate_limited' ? 'Too many attempts. Try again later.' : 'Invalid Access Key');
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: result.ok, authorized: result.ok, error: safeError, reason: result.ok ? undefined : result.reason }));
+        } catch { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'Bad request' })); }
+      });
+      return;
+    }
+
+    // ── Admin: Access Keys ──────────────────────────────────
+    if (p === '/admin/access-keys' && req.method === 'GET') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      const keys = listAccessKeys({ search: url.searchParams.get('search') || '' });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, keys }));
+      return;
+    }
+
+    if (p === '/admin/access-keys/generate' && req.method === 'POST') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      let body = '';
+      req.on('data', d => body += d);
+      req.on('end', async () => {
+        try {
+          const { phone, expiresAt = null, expiresInDays = null, connectionId = null } = JSON.parse(body || '{}');
+          const exp = expiresInDays ? Date.now() + Number(expiresInDays) * 86400000 : expiresAt;
+          const out = await generateAccessKey({ phone, expiresAt: exp, createdBy: 'admin-panel', connectionId });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, accessKey: out.key, record: out.record }));
+        } catch (err) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: err.message })); }
+      });
+      return;
+    }
+
+    const akAction = p.match(/^\/admin\/access-keys\/([^/]+)\/(revoke|disable|activate|delete|regenerate)$/);
+    if (akAction && req.method === 'POST') {
+      if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+      try {
+        const [, id, action] = akAction;
+        if (action === 'delete') { await deleteAccessKey(id); res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: true })); }
+        if (action === 'regenerate') {
+          const old = db.accessKeys.get(id);
+          if (!old) throw new Error('Access key not found');
+          const out = await generateAccessKey({ phone: old.assignedPhone, expiresAt: old.expiresAt, createdBy: 'admin-panel', connectionId: old.connectionId });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: true, accessKey: out.key, record: out.record }));
+        }
+        const status = action === 'revoke' ? 'revoked' : action === 'disable' ? 'disabled' : 'active';
+        const record = await updateAccessKeyStatus(id, status);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, record }));
+      } catch (err) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: err.message })); }
+      return;
+    }
+
     // ── Admin: sessions list ────────────────────────────────
     if (p === '/admin/sessions') {
       if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
@@ -389,6 +466,7 @@ async function startServer() {
         status:      s.status,
         connectedAt: s.connectedAt || null,
         jid:         s.jid   || null,
+        accessAuthorized: isAuthorized(s.id, s.phone || s.jid || s.id),
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ sessions: result, total: result.length, connected: result.filter(s => s.status === 'connected').length }));
@@ -438,6 +516,8 @@ async function startServer() {
         maintenanceMode: sv('maintenanceMode') ?? config.maintenanceMode ?? false,
         statusEmoji:     sv('statusEmoji')     ?? config.statusEmoji     ?? '❤️',
         welcomeMessage:  sv('welcomeMessage')  ?? config.welcomeMessage  ?? true,
+        accessKeysEnforced: String(sv('ACCESS_KEYS_ENFORCED') ?? sv('accessKeysEnforced') ?? process.env.ACCESS_KEYS_ENFORCED ?? 'false').toLowerCase() === 'true',
+        accessKeySecurity: getAccessKeySecuritySettings(),
       }));
       return;
     }
@@ -450,8 +530,13 @@ async function startServer() {
       req.on('end', () => {
         try {
           const data = JSON.parse(body || '{}');
-          const allowed = ['prefix','botMode','autoRead','autoTyping','autoStatusView','autoStatusReact','antiSpam','antiCall','antiDelete','antiEdit','antiViewOnce','maintenanceMode','statusEmoji','welcomeMessage'];
-          for (const key of allowed) { if (key in data) db.settings.setValue(key, data[key]); }
+          const allowed = ['prefix','botMode','autoRead','autoTyping','autoStatusView','autoStatusReact','antiSpam','antiCall','antiDelete','antiEdit','antiViewOnce','maintenanceMode','statusEmoji','welcomeMessage','accessKeysEnforced','ACCESS_KEYS_ENFORCED','ACCESS_KEY_VERIFY_LIMIT','ACCESS_KEY_VERIFY_WINDOW_MS','ACCESS_KEY_HASH_ITERATIONS','ACCESS_KEY_PEPPER'];
+          for (const key of allowed) {
+            if (!(key in data)) continue;
+            if (key === 'ACCESS_KEY_PEPPER' && !String(data[key] || '').trim()) continue;
+            db.settings.setValue(key, data[key]);
+          }
+          if ('accessKeysEnforced' in data) db.settings.setValue('ACCESS_KEYS_ENFORCED', !!data.accessKeysEnforced);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
         } catch { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: 'Bad request' })); }
@@ -614,7 +699,7 @@ async function startServer() {
     if (p === '/admin/db' && req.method === 'GET') {
       if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
       const col = new URL(req.url, 'http://localhost').searchParams.get('collection');
-      const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'birthdays', 'sessions', 'reminders'];
+      const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'birthdays', 'sessions', 'reminders', 'accessKeys', 'accessAuthorizations'];
       if (!col || !ALLOWED_COLS.includes(col)) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ ok: true, collections: ALLOWED_COLS }));
@@ -627,6 +712,8 @@ async function startServer() {
       else if (col === 'notes') { try { data = db.notes.all(); } catch { data = {}; } }
       else if (col === 'birthdays') { try { data = db.birthdays?.all?.() || {}; } catch { data = {}; } }
       else if (col === 'reminders') { try { data = db.reminders?.all?.() || {}; } catch { data = {}; } }
+      else if (col === 'accessKeys') { try { data = db.accessKeys?.all?.() || {}; } catch { data = {}; } }
+      else if (col === 'accessAuthorizations') { try { data = db.accessAuthorizations?.all?.() || {}; } catch { data = {}; } }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: true, collection: col, data: data || {} }));
     }
@@ -638,7 +725,7 @@ async function startServer() {
       req.on('end', () => {
         try {
           const { collection, key, value } = JSON.parse(body || '{}');
-          const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'sessions'];
+          const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'sessions', 'accessKeys', 'accessAuthorizations'];
           if (!ALLOWED_COLS.includes(collection)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'Invalid collection' })); }
           const val = typeof value === 'string' ? JSON.parse(value) : value;
           if (collection === 'settings') {
@@ -655,6 +742,10 @@ async function startServer() {
             const [sId, k] = key.split('|');
             if (!k) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: 'key must be sessionId|field' })); }
             db.sessionSettings.setValue(sId, k, val);
+          } else if (collection === 'accessKeys') {
+            db.accessKeys.set(key, val);
+          } else if (collection === 'accessAuthorizations') {
+            db.accessAuthorizations.set(key, val);
           } else if (collection === 'notes') {
             // key format: "jid|noteName"
             const [jid, noteName] = key.split('|');
@@ -678,7 +769,7 @@ async function startServer() {
       req.on('end', () => {
         try {
           const { collection, key } = JSON.parse(body || '{}');
-          const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'sessions'];
+          const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'sessions', 'accessKeys', 'accessAuthorizations'];
           if (!ALLOWED_COLS.includes(collection)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'Invalid collection' })); }
           if (collection === 'settings') {
             const d = db.settings.get(); delete d[key]; db.settings.set({});
@@ -695,6 +786,10 @@ async function startServer() {
           } else if (collection === 'sessionSettings') {
             const [sId] = key.split('|');
             db.sessionSettings.delete(sId);
+          } else if (collection === 'accessKeys') {
+            db.accessKeys.delete(key);
+          } else if (collection === 'accessAuthorizations') {
+            db.accessAuthorizations.delete(key);
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));

@@ -483,6 +483,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
         Broadcast
       </div>
+      <div class="nav-item" data-page="accesskeys" onclick="showPage('accesskeys',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Access Keys
+      </div>
       <div class="nav-item" data-page="database" onclick="showPage('database',this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
         Database
@@ -618,6 +622,31 @@
           <button class="btn-save" style="padding:6px 14px;font-size:.8rem" onclick="refreshSessions()">↻ Refresh</button>
         </div>
         <div class="sessions-grid" id="sessionsGrid"></div>
+      </div>
+
+      <!-- ── ACCESS KEYS ── -->
+      <div class="page" id="page-accesskeys">
+        <div class="bc-grid">
+          <div class="bc-card">
+            <h3>🔐 Generate Access Key</h3>
+            <p>Create one cryptographically-random key for one WhatsApp number. The plaintext key is shown once only.</p>
+            <input class="db-search" id="akPhone" placeholder="WhatsApp number with country code" style="width:100%;margin-bottom:8px"/>
+            <select class="bc-select" id="akExpiry">
+              <option value="">Lifetime</option><option value="30">30 Days</option><option value="90">90 Days</option><option value="180">180 Days</option><option value="365">1 Year</option>
+            </select>
+            <button class="btn-save" onclick="generateAccessKeyUI()">Generate Key</button>
+            <div id="akGenerated" class="bc-result"></div>
+          </div>
+          <div class="bc-card">
+            <h3>🔎 Search Keys</h3>
+            <p>Search by phone number or key ID. Plaintext keys are never listed.</p>
+            <input class="db-search" id="akSearch" placeholder="Search phone or ID…" oninput="loadAccessKeys()" style="width:100%"/>
+          </div>
+        </div>
+        <div class="history-card" style="margin-top:14px">
+          <h3>🔐 Access Keys</h3>
+          <div style="overflow-x:auto"><table class="history-table"><thead><tr><th>Phone</th><th>Status</th><th>Created</th><th>Activated</th><th>Expiry</th><th>Last Used</th><th>Actions</th></tr></thead><tbody id="akBody"><tr><td colspan="7" style="text-align:center;color:var(--text2);padding:20px">Loading…</td></tr></tbody></table></div>
+        </div>
       </div>
 
       <!-- ── BROADCAST ── -->
@@ -758,6 +787,26 @@
               <label class="toggle"><input type="checkbox" id="setMaintenance"/><span class="toggle-slider"></span></label>
             </div>
             <div class="setting-row">
+              <div><div class="setting-label">Require Access Keys</div><div class="setting-sub">Migration switch: when off, existing sessions continue normally</div></div>
+              <label class="toggle"><input type="checkbox" id="setAccessKeysEnforced"/><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Verify Limit</div><div class="setting-sub">Failed .key tries before temporary lock</div></div>
+              <input class="short-input" id="setAccessKeyVerifyLimit" type="number" min="1" value="5" style="width:110px"/>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Verify Window (ms)</div><div class="setting-sub">Rate-limit window / block duration, default 900000</div></div>
+              <input class="short-input" id="setAccessKeyVerifyWindow" type="number" min="60000" value="900000" style="width:140px"/>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Hash Iterations</div><div class="setting-sub">PBKDF2 strength for newly generated keys</div></div>
+              <input class="short-input" id="setAccessKeyHashIterations" type="number" min="100000" value="210000" style="width:140px"/>
+            </div>
+            <div class="setting-row">
+              <div><div class="setting-label">Access Key Pepper</div><div class="setting-sub">Optional secret fingerprint pepper. Leave blank to keep current value.</div></div>
+              <input class="short-input" id="setAccessKeyPepper" type="password" placeholder="<secret-pepper>" style="width:190px"/>
+            </div>
+            <div class="setting-row">
               <div><div class="setting-label">Status Reaction Emoji</div><div class="setting-sub">Emoji for auto status reactions</div></div>
               <input class="short-input" id="setStatusEmoji" value="❤️" style="width:72px;text-align:center;font-size:1.1rem"/>
             </div>
@@ -875,6 +924,7 @@ const PAGE_META = {
   overview:  ['Overview',   'Bot stats and sessions at a glance'],
   sessions:  ['Sessions',   'Manage all connected WhatsApp numbers'],
   broadcast: ['Broadcast',  'Send messages to connected sessions'],
+  accesskeys:['Access Keys','Generate, view, revoke and disable paid access keys'],
   database:  ['Database',   'View and manage all bot database collections'],
   logs:      ['Live Logs',  'Real-time bot log stream'],
   settings:  ['Settings',   'Configure bot behavior and features'],
@@ -1000,7 +1050,7 @@ async function showApp() {
 }
 
 async function loadAll() {
-  await Promise.all([loadStats(), loadSessions(), loadSettings(), loadStorage()]);
+  await Promise.all([loadStats(), loadSessions(), loadSettings(), loadStorage(), loadAccessKeys()]);
   renderOverview();
 }
 
@@ -1162,6 +1212,12 @@ function applySettingsToForm(d) {
   const modeEl = document.querySelector(`input[name="botMode"][value="${d.botMode||'public'}"]`);
   if (modeEl) modeEl.checked = true;
   document.getElementById('setMaintenance').checked    = !!d.maintenanceMode;
+  document.getElementById('setAccessKeysEnforced').checked = !!d.accessKeysEnforced;
+  document.getElementById('setAccessKeyVerifyLimit').value = d.accessKeySecurity?.ACCESS_KEY_VERIFY_LIMIT || 5;
+  document.getElementById('setAccessKeyVerifyWindow').value = d.accessKeySecurity?.ACCESS_KEY_VERIFY_WINDOW_MS || 900000;
+  document.getElementById('setAccessKeyHashIterations').value = d.accessKeySecurity?.ACCESS_KEY_HASH_ITERATIONS || 210000;
+  document.getElementById('setAccessKeyPepper').placeholder = d.accessKeySecurity?.ACCESS_KEY_PEPPER_SET ? 'Current pepper saved' : '<secret-pepper>';
+  document.getElementById('setAccessKeyPepper').value = '';
   document.getElementById('setAutoRead').checked       = !!d.autoRead;
   document.getElementById('setAutoTyping').checked     = !!d.autoTyping;
   document.getElementById('setAutoStatusView').checked = !!d.autoStatusView;
@@ -1179,6 +1235,11 @@ async function saveSettings() {
     prefix:          [document.getElementById('setPrefixInput').value||'.'],
     botMode:         document.querySelector('input[name="botMode"]:checked')?.value||'public',
     maintenanceMode: document.getElementById('setMaintenance').checked,
+    accessKeysEnforced: document.getElementById('setAccessKeysEnforced').checked,
+    ACCESS_KEYS_ENFORCED: document.getElementById('setAccessKeysEnforced').checked,
+    ACCESS_KEY_VERIFY_LIMIT: Number(document.getElementById('setAccessKeyVerifyLimit').value || 5),
+    ACCESS_KEY_VERIFY_WINDOW_MS: Number(document.getElementById('setAccessKeyVerifyWindow').value || 900000),
+    ACCESS_KEY_HASH_ITERATIONS: Number(document.getElementById('setAccessKeyHashIterations').value || 210000),
     autoRead:        document.getElementById('setAutoRead').checked,
     autoTyping:      document.getElementById('setAutoTyping').checked,
     autoStatusView:  document.getElementById('setAutoStatusView').checked,
@@ -1190,6 +1251,8 @@ async function saveSettings() {
     antiViewOnce:    document.getElementById('setAntiViewOnce').checked,
     statusEmoji:     document.getElementById('setStatusEmoji').value||'❤️',
   };
+  const pepper = document.getElementById('setAccessKeyPepper').value.trim();
+  if (pepper) body.ACCESS_KEY_PEPPER = pepper;
   const r = await fetch('/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>({ok:false}));
   if (r.ok) {
     const toast = document.getElementById('saveToast');
@@ -1260,6 +1323,49 @@ function clearBcImage() {
   document.getElementById('bcImageName').textContent = 'No image selected';
   document.getElementById('bcImagePreview').style.display = 'none';
   document.getElementById('bcImageClear').style.display = 'none';
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  ACCESS KEYS
+// ══════════════════════════════════════════════════════════
+function fmtTime(ts) { return ts ? new Date(ts).toLocaleString() : '—'; }
+
+async function loadAccessKeys() {
+  const body = document.getElementById('akBody');
+  if (!body) return;
+  const search = document.getElementById('akSearch')?.value || '';
+  const d = await fetch('/admin/access-keys?search='+encodeURIComponent(search)).then(r=>r.json()).catch(()=>({ok:false}));
+  const keys = d.keys || [];
+  if (!keys.length) { body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text2);padding:20px">No access keys found.</td></tr>'; return; }
+  body.innerHTML = keys.map(k => `<tr>
+    <td>+${k.assignedPhone}</td><td>${k.status}</td><td>${fmtTime(k.createdAt)}</td><td>${fmtTime(k.activatedAt)}</td><td>${fmtTime(k.expiresAt)}</td><td>${fmtTime(k.lastUsedAt)}</td>
+    <td style="white-space:nowrap">
+      <button class="btn-sm" onclick="accessKeyAction('${k.id}','regenerate')">Regenerate</button>
+      <button class="btn-sm" onclick="accessKeyAction('${k.id}','activate')">Activate</button>
+      <button class="btn-sm" onclick="accessKeyAction('${k.id}','disable')">Disable</button>
+      <button class="btn-sm" onclick="accessKeyAction('${k.id}','revoke')">Revoke</button>
+      <button class="btn-sm" style="color:var(--red)" onclick="accessKeyAction('${k.id}','delete')">Delete</button>
+    </td></tr>`).join('');
+}
+
+async function generateAccessKeyUI() {
+  const phone = document.getElementById('akPhone').value.trim();
+  const days = document.getElementById('akExpiry').value;
+  const box = document.getElementById('akGenerated');
+  box.style.display='block'; box.style.background='var(--surface2)'; box.style.color='var(--text2)'; box.textContent='Generating…';
+  const payload = { phone, expiresInDays: days ? Number(days) : null };
+  const r = await fetch('/admin/access-keys/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  if (r.ok) { box.style.background='var(--green-dim)'; box.style.color='var(--green)'; box.innerHTML = `✅ Key generated. Copy now; it will not be shown again:<br><strong style="font-family:monospace;font-size:1.1rem">${r.accessKey}</strong>`; document.getElementById('akPhone').value=''; loadAccessKeys(); }
+  else { box.style.background='var(--red-dim)'; box.style.color='var(--red)'; box.textContent = r.error || 'Failed to generate key'; }
+}
+
+async function accessKeyAction(id, action) {
+  if (!confirm(`${action} this access key?`)) return;
+  const r = await fetch(`/admin/access-keys/${encodeURIComponent(id)}/${action}`,{method:'POST'}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  if (r.ok && r.accessKey) alert('Replacement key generated. Copy now:\n\n'+r.accessKey);
+  else if (!r.ok) alert(r.error || 'Action failed');
+  await loadAccessKeys();
 }
 
 // ══════════════════════════════════════════════════════════
