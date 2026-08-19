@@ -12,7 +12,7 @@ import { logger } from "./logger.js";
 import { db } from "./database.js";
 import config from "../config.js";
 
-// ── Direct-download helper (mirrors reveal.js Step 1) ────────────────────────
+// ── Direct-download helper ────────────────────────────────────────────────────
 async function dlBufDirect(mediaMsg, type) {
   const { downloadContentFromMessage } = await import(
     "@whiskeysockets/baileys"
@@ -110,6 +110,47 @@ function isSameJidOrLid(jid1, jid2) {
   return clean1 === clean2;
 }
 
+function isOptEnabled(val) {
+  if (val === true || val === 1) return true;
+  if (typeof val === "string") {
+    const s = val.trim().toLowerCase();
+    return s === "true" || s === "on" || s === "1" || s === "enabled" || s === "yes";
+  }
+  return false;
+}
+
+function toUserJid(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return null;
+  if (String(raw).includes('@')) {
+    if (String(raw).includes('@lid')) return null;
+    return String(raw);
+  }
+  const num = String(raw).replace(/\D/g, '');
+  return num ? `${num}@s.whatsapp.net` : null;
+}
+
+function getSelfJid(sock, sessionId) {
+  const rawUser = sock?.user?.id || sock?.user?.jid || sock?.authState?.creds?.me?.id || '';
+  if (rawUser && !rawUser.includes('@lid')) {
+    const num = rawUser.split('@')[0]?.split(':')[0];
+    if (num && /^\d+$/.test(num)) return `${num}@s.whatsapp.net`;
+  }
+
+  if (sessionId) {
+    const sessJid = toUserJid(sessionId);
+    if (sessJid) return sessJid;
+  }
+
+  return (
+    toUserJid(db?.sessionSettings?.getValue(sessionId, "botJid")) ||
+    toUserJid(db?.settings?.getValue("botJid")) ||
+    toUserJid(config?.ownerNumber) ||
+    toUserJid(config?.superOwner) ||
+    null
+  );
+}
+
 // ── Reaction Sender Authorization (Supports Phone Numbers & LID) ─────────────
 function isAuthorizedReactionSender(msg, sock, sessionId) {
   if (msg?.key?.fromMe || msg?.reaction?.key?.fromMe) return true;
@@ -132,24 +173,24 @@ function isAuthorizedReactionSender(msg, sock, sessionId) {
   const selfNum = getPhoneNum(selfJid);
   if (senderNum && selfNum && senderNum === selfNum) return true;
 
-  // 2. Match against Self LID (WhatsApp MD sends LID JIDs on reactions)
+  // 2. Match against Self LID
   const selfLid =
     sock?.user?.lid ||
     sock?.authState?.creds?.me?.lid ||
-    db.sessionSettings.getValue(sessionId, "botLid") ||
+    db?.sessionSettings?.getValue(sessionId, "botLid") ||
     "";
   if (selfLid && isSameJidOrLid(senderJid, selfLid)) return true;
 
   // 3. Match against Bot JID
-  const botJid = db.settings.getValue("botJid");
+  const botJid = db?.settings?.getValue("botJid");
   if (senderNum && botJid && senderNum === getPhoneNum(botJid)) return true;
 
   // 4. Match against Super Owner
-  const superOwner = String(db.settings.getValue("superOwner") || config.superOwner || "");
+  const superOwner = String(db?.settings?.getValue("superOwner") || config?.superOwner || "");
   if (senderNum && superOwner && getPhoneNum(superOwner) === senderNum) return true;
 
   // 5. Match against Owners List
-  const owners = db.settings.getValue("owners") || config.owners || [];
+  const owners = db?.settings?.getValue("owners") || config?.owners || [];
   for (const owner of owners) {
     if (!owner) continue;
     if (senderNum && getPhoneNum(owner) === senderNum) return true;
@@ -173,26 +214,6 @@ function normalizeMsg(message) {
     m = next;
   }
   return m;
-}
-
-function toUserJid(value) {
-  const raw = Array.isArray(value) ? value[0] : value;
-  if (!raw) return null;
-  if (String(raw).includes('@')) return String(raw);
-  const num = String(raw).replace(/\D/g, '');
-  return num ? `${num}@s.whatsapp.net` : null;
-}
-
-function getSelfJid(sock, sessionId) {
-  const raw = sock.user?.id || sock.user?.jid || sock.authState?.creds?.me?.id || '';
-  const selfNum = raw.split('@')[0]?.split(':')[0];
-  if (selfNum) return `${selfNum}@s.whatsapp.net`;
-  return (
-    toUserJid(db.sessionSettings.getValue(sessionId, "botJid")) ||
-    toUserJid(db.settings.getValue("botJid")) ||
-    toUserJid(config.ownerNumber) ||
-    null
-  );
 }
 
 function extractViewOnceMedia(message) {
@@ -315,7 +336,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       "✅ ViewOnce cached (memory only)",
     );
 
-    // Auto-reply to sender
+    // Auto-reply to sender if configured
     const autoReply = db.settings.getValue("voAutoReply");
     if (autoReply && !msg.key.fromMe) {
       await sock.sendMessage(chatJid, { text: autoReply }).catch(() => {});
@@ -327,10 +348,15 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       : undefined;
     const globalAntiVO = db.settings.getValue("antiViewOnce");
     const sessAntiVO   = db.sessionSettings.getValue(sessionId, "antiViewOnce");
-    const antiVOActive = !!(groupAntiVO || globalAntiVO === true || sessAntiVO);
+    const antiVOActive = isOptEnabled(groupAntiVO) || isOptEnabled(globalAntiVO) || isOptEnabled(sessAntiVO);
 
     if (antiVOActive && !msg.key.fromMe) {
       const selfJid = getSelfJid(sock, sessionId);
+
+      logger.info(
+        { sessionId, selfJid },
+        "👁️ ViewOnce auto-reveal: sending to self-chat",
+      );
 
       if (selfJid) {
         const date = moment().tz(tz).format("DD/MM/YYYY");
@@ -362,6 +388,8 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
         } catch (sendErr) {
           logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal send FAILED");
         }
+      } else {
+        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid unavailable");
       }
     }
   } catch (e) {
@@ -469,17 +497,17 @@ function hasConfiguredVvEmoji(text) {
 }
 
 function legacyEmojiRevealEnabled() {
-  return db.settings.getValue("emojiRevealEnabled") !== false;
+  return isOptEnabled(db.settings.getValue("emojiRevealEnabled"));
 }
 
 function isVvReplyRevealEnabled() {
   const explicit = db.settings.getValue("emojiReplyRevealEnabled");
-  return explicit === undefined ? legacyEmojiRevealEnabled() : explicit !== false;
+  return explicit === undefined ? legacyEmojiRevealEnabled() : isOptEnabled(explicit);
 }
 
 function isVvReactionRevealEnabled() {
   const explicit = db.settings.getValue("emojiReactionRevealEnabled");
-  return explicit === undefined ? legacyEmojiRevealEnabled() : explicit !== false;
+  return explicit === undefined ? legacyEmojiRevealEnabled() : isOptEnabled(explicit);
 }
 
 function hasFourSameEmoji(text) {
@@ -784,7 +812,6 @@ export async function handleManualReveal(msgId, sock, replyJid) {
   if (!selfJid) return;
 
   const id = msgId?.trim();
-
   const stored = viewOnceStore.get(id);
 
   if (!stored) {
