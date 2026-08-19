@@ -1,5 +1,5 @@
 // ============================================
-// AA MD Bot - Anti Edit Plugin (FULLY FIXED)
+// AA MD Bot - Anti Edit Plugin (ULTIMATE FIX)
 // Developer: Ahsan Ali Wadani
 // ============================================
 
@@ -24,31 +24,33 @@ try {
 
 const LOG = (...args) => console.log('[AntiEdit]', ...args);
 
-// ── Cache Settings ──────────────────────────────────────────────────
-const MAX_CACHE = 5000;
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 Hours
+// ── Cache Memory (10,000 Messages capacity) ────────────────────────
+const MAX_CACHE = 10000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 Hours
 const messageCache = new Map();
 
-// JID Cleaner (Strips device suffix like :12)
+// Strip device IDs and handle LID/JID formats cleanly
 function cleanJid(jid) {
   if (!jid) return '';
   const base = jid.split(':')[0].split('@')[0];
-  return jid.includes('@g.us') ? `${base}@g.us` : `${base}@s.whatsapp.net`;
+  if (jid.endsWith('@g.us')) return `${base}@g.us`;
+  if (jid.endsWith('@lid')) return `${base}@lid`;
+  return `${base}@s.whatsapp.net`;
 }
 
-// Extract Bot Owner's JID reliably
+// Ultra-reliable Self-JID Extractor (Target Self Chat)
 function getSelfJid(sock) {
   try {
     const raw = sock?.user?.id || sock?.user?.jid || sock?.user?.phone || '';
     if (!raw) return null;
-    const cleanNumber = raw.split(':')[0].split('@')[0];
-    return `${cleanNumber}@s.whatsapp.net`;
+    const cleanNum = raw.split(':')[0].split('@')[0];
+    return cleanNum ? `${cleanNum}@s.whatsapp.net` : null;
   } catch {
     return null;
   }
 }
 
-// Deep text extractor for edited & wrapped messages
+// Deep recursive text extractor for all WhatsApp message wrappers
 function extractText(msg) {
   if (!msg) return '';
   
@@ -67,11 +69,13 @@ function extractText(msg) {
     m?.documentMessage?.caption ||
     m?.protocolMessage?.editedMessage?.conversation ||
     m?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
+    m?.protocolMessage?.editedMessage?.imageMessage?.caption ||
+    m?.protocolMessage?.editedMessage?.videoMessage?.caption ||
     ''
   ).trim();
 }
 
-// Safe DB Check
+// AntiEdit database check
 function isAntiEditEnabled(db, jid, isGroup) {
   try {
     if (!db) return true;
@@ -100,7 +104,7 @@ function pruneCache() {
   }
 }
 
-// Core function to process detected edits
+// Main logic to process edited messages
 async function processEditMessage(sock, db, m, protocolMsg) {
   try {
     const rawJid = m.key?.remoteJid || protocolMsg?.key?.remoteJid;
@@ -110,18 +114,15 @@ async function processEditMessage(sock, db, m, protocolMsg) {
     const isGroup = jid.endsWith('@g.us');
 
     const enabled = isAntiEditEnabled(db, jid, isGroup);
-    LOG(`Edit event detected in ${jid} | AntiEdit Enabled: ${enabled}`);
-
     if (!enabled) return;
 
     const targetId = protocolMsg?.key?.id;
     if (!targetId) return;
 
-    // Fast cache lookup
-    const cacheKey = `${jid}:${targetId}`;
-    const cached = messageCache.get(cacheKey) || messageCache.get(targetId);
+    // Dual Lookup (Bare Message ID + JID prefixed ID)
+    const cached = messageCache.get(targetId) || messageCache.get(`${jid}:${targetId}`);
 
-    const newText = extractText(protocolMsg?.editedMessage) || extractText(m.message) || '(Non-text content / Media)';
+    const newText = extractText(protocolMsg?.editedMessage) || extractText(m.message) || '(Media / Non-text Content)';
     const senderJid = cleanJid(m.key?.participant || protocolMsg?.key?.participant || rawJid);
     const senderName = m.pushName || senderJid.split('@')[0];
 
@@ -135,30 +136,30 @@ async function processEditMessage(sock, db, m, protocolMsg) {
       chatLabel = `Group: ${groupName}`;
     }
 
-    const oldText = cached?.text || '_(Original message not captured in cache)_';
+    const oldText = cached?.text || '_(Pehlay wala message cache me save nahi ho saka tha)_';
 
     const reportText = 
       `✏️ *EDITED MESSAGE DETECTED*\n\n` +
       `👤 *From:* ${senderName} (@${senderJid.split('@')[0]})\n` +
       `💬 *Chat:* ${chatLabel}\n\n` +
-      `🔴 *Original Message:*\n${oldText}\n\n` +
-      `🟢 *Edited Message:*\n${newText}`;
+      `🔴 *Original Message (Purana Version):*\n${oldText}\n\n` +
+      `🟢 *Edited Message (Naya Version):*\n${newText}`;
 
     const selfJid = getSelfJid(sock);
-    LOG(`Target self chat JID: ${selfJid}`);
+    LOG(`Detected Edit! Attempting to send report to Self JID: [${selfJid}]`);
 
     if (selfJid) {
       await sock.sendMessage(selfJid, {
         text: reportText,
         mentions: [senderJid]
       });
-      LOG('✅ AntiEdit report successfully sent to Self Chat!');
+      LOG(`✅ AntiEdit report successfully delivered to Self Chat!`);
     } else {
-      console.error('[AntiEdit] Could not determine bot owner JID to send report.');
+      LOG(`❌ Failed: Bot user self JID could not be resolved.`);
     }
 
-    // Update cache with edited version
-    messageCache.set(cacheKey, {
+    // Update memory cache with edited content
+    messageCache.set(targetId, {
       text: newText,
       jid,
       sender: senderJid,
@@ -168,7 +169,7 @@ async function processEditMessage(sock, db, m, protocolMsg) {
     });
 
   } catch (err) {
-    console.error('[AntiEdit] Error handling edit message:', err);
+    console.error('[AntiEdit] Processing error:', err);
   }
 }
 
@@ -178,9 +179,9 @@ export function attachEditListener(sock, db) {
   if (!sock?.ev) return;
   if (attachedSockets.has(sock)) return;
   attachedSockets.add(sock);
-  LOG('AntiEdit listener attached successfully ✅');
+  LOG('AntiEdit Global Listener Attached Successfully ✅');
 
-  // 1. Listen for new incoming messages (Upsert)
+  // 1. Listen for new incoming messages and store in memory
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
 
@@ -192,7 +193,6 @@ export function attachEditListener(sock, db) {
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
         const jid = cleanJid(rawJid);
-        const isGroup = jid.endsWith('@g.us');
         const msgId = m.key?.id;
 
         const protocolMsg = m.message?.protocolMessage || m.message?.ephemeralMessage?.message?.protocolMessage;
@@ -203,38 +203,35 @@ export function attachEditListener(sock, db) {
           protocolMsg.type === proto?.Message?.ProtocolMessage?.Type?.MESSAGE_EDIT
         );
 
-        // Process if message is an Edit
         if (isEdit) {
-          if (m.key?.fromMe) continue; // Ignore edits made by the bot itself
+          if (m.key?.fromMe) continue;
           await processEditMessage(sock, db, m, protocolMsg);
           continue;
         }
 
-        // Save incoming normal messages into Cache
-        if (!m.key?.fromMe) {
+        // Cache regular incoming messages
+        if (!m.key?.fromMe && msgId) {
           const text = extractText(m.message);
-          if (text && msgId) {
+          if (text) {
             const item = {
               text,
               jid,
               sender: cleanJid(m.key.participant || rawJid),
               pushName: m.pushName || '',
-              isGroup,
               ts: Date.now()
             };
-
-            messageCache.set(`${jid}:${msgId}`, item);
             messageCache.set(msgId, item);
+            messageCache.set(`${jid}:${msgId}`, item);
             pruneCache();
           }
         }
       } catch (e) {
-        console.error('[AntiEdit] Error in upsert listener:', e);
+        console.error('[AntiEdit] Upsert error:', e);
       }
     }
   });
 
-  // 2. Listen for message update events (Baileys edit push handler)
+  // 2. Listen for protocol message updates (Baileys Edit Payload)
   sock.ev.on('messages.update', async (updates) => {
     for (const update of updates) {
       try {
@@ -244,7 +241,7 @@ export function attachEditListener(sock, db) {
           await processEditMessage(sock, db, update, protocolMsg);
         }
       } catch (e) {
-        console.error('[AntiEdit] Error in update listener:', e);
+        console.error('[AntiEdit] Update event error:', e);
       }
     }
   });
@@ -269,7 +266,7 @@ export default {
 
     if (!toggle || !['on', 'off'].includes(toggle)) {
       return reply(
-        `✏️ *Anti Edit* is currently *${currentVal ? 'ON ✅' : 'OFF ❌'}*\n\n` +
+        `✏️ *Anti Edit* status: *${currentVal ? 'ON ✅' : 'OFF ❌'}*\n\n` +
         `━━━━━━━━━━━━━━━━━━\n` +
         `*.antiedit on*  — Send old version of edited messages to Self Chat\n` +
         `*.antiedit off* — Ignore edited messages\n\n` +
