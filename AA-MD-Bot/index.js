@@ -41,6 +41,9 @@ import { initTelegramAdmin }    from './lib/telegramAdmin.js';
 import { initTelegramFeatures } from './lib/telegramFeatures.js';
 import { generateAccessKey, listAccessKeys, updateAccessKeyStatus, deleteAccessKey, verifyAccessKey, isAuthorized, normalizePhone, getAccessKeySecuritySettings } from './lib/accessKeys.js';
 
+// ── AntiEdit Listener Import ──────────────────────────────────────────────
+import { attachEditListener } from './plugins/group/antiedit.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const startTime = Date.now();
 const dashboardPath = path.join(__dirname, 'dashboard.html');
@@ -81,7 +84,6 @@ function broadcast(event, data) {
     try { res.write(payload); } catch { sseClients.delete(res); }
   }
 }
-
 
 botEvents.on('qr', d => broadcast('qr', d));
 botEvents.on('status', d => broadcast('status', d));
@@ -187,15 +189,12 @@ async function startServer() {
       res.write('retry: 3000\n\n');
       sseClients.add(res);
 
-      // Send current QR immediately if available
       for (const [sessionId, qr] of sessionQRs) {
         res.write(`event: qr\ndata: ${JSON.stringify({ sessionId, qr })}\n\n`);
       }
-      // Send current session statuses
       for (const [sessionId, status] of sessionStatus) {
         res.write(`event: status\ndata: ${JSON.stringify({ sessionId, status })}\n\n`);
       }
-      // Send any cached pairing codes
       for (const [sessionId, code] of latestPairingCodes) {
         res.write(`event: pairingCode\ndata: ${JSON.stringify({ sessionId, code })}\n\n`);
       }
@@ -238,7 +237,6 @@ async function startServer() {
       const sessList = getAllSessions();
       const catCounts = {};
       for (const [cat, cmds] of Object.entries(cats)) catCounts[cat] = cmds.length;
-      // Strip phone/jid from session data before sending to dashboard
       const safeSessions = sessList.map(s => ({
         id: s.id,
         name: s.name || null,
@@ -259,7 +257,7 @@ async function startServer() {
       return;
     }
 
-    // ── Status — for external frontends (Vercel etc) ──────
+    // ── Status ──
     if (p === '/status') {
       const connected = getAllSessions().filter(s => s.status === 'connected').length;
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -274,7 +272,7 @@ async function startServer() {
       return;
     }
 
-    // ── Latest pairing code per session (for polling) ─────
+    // ── Latest pairing code per session ─────
     if (p === '/pairing-code') {
       const sid = url.searchParams.get('session') || 'default';
       const code = latestPairingCodes.get(sid);
@@ -298,7 +296,6 @@ async function startServer() {
             return;
           }
 
-          // If session already exists and connected, return early; otherwise close it
           if (sessions.has(cleanId)) {
             const sock = sessions.get(cleanId);
             if (sock.ws?.readyState === 1) {
@@ -306,7 +303,6 @@ async function startServer() {
               res.end(JSON.stringify({ ok: true, sessionId: cleanId, info: 'Already connected' }));
               return;
             }
-            // Close stale session cleanly before recreating
             sessions.delete(cleanId);
             try { sock.end(new Error('restart')); } catch {}
           }
@@ -379,8 +375,7 @@ async function startServer() {
       return;
     }
 
-
-    // ── Access Key verification/status (server-side session binding) ───────
+    // ── Access Key verification/status ───────────────────────
     if (p === '/access-keys/status' && req.method === 'GET') {
       const sessionId = url.searchParams.get('session') || 'default';
       const sock = sessions.get(sessionId);
@@ -577,14 +572,12 @@ async function startServer() {
         const { execFile } = await import('child_process');
         const { promisify } = await import('util');
         const execFileP = promisify(execFile);
-        // Disk totals
         let total = 0, used = 0, avail = 0;
         try {
           const df = await execFileP('df', ['-k', __dirname]);
           const parts = df.stdout.trim().split('\n')[1]?.split(/\s+/);
           if (parts) { total = parseInt(parts[1]) * 1024; used = parseInt(parts[2]) * 1024; avail = parseInt(parts[3]) * 1024; }
         } catch {}
-        // Per-folder sizes
         const folderNames = ['downloads', 'temp', 'logs', 'cache'];
         const folders = {};
         for (const f of folderNames) {
@@ -644,13 +637,11 @@ async function startServer() {
       req.on('end', async () => {
         try {
           const { message: rawMsg, targetSession, image, imageMime } = JSON.parse(body || '{}');
-          // Normalize line endings: \r\n and \r → \n so WhatsApp receives clean newlines
           const message = (rawMsg || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
           if (!message.trim() && !image) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify({ ok: false, error: 'message or image is required' }));
           }
-          // Convert base64 image to buffer if present
           let imgBuf = null;
           let imgMime = imageMime || 'image/jpeg';
           if (image) {
@@ -663,9 +654,6 @@ async function startServer() {
             const sock = sessions.get(sid);
             if (!sock || sessionStatus.get(sid) !== 'connected') { failed++; continue; }
             try {
-              // Use sock.user.id directly (same as working .broadcast plugin) — it has the
-              // correct device suffix (e.g. 923316041183:0@s.whatsapp.net) for self-chat.
-              // Fall back to owner number from DB if sock.user.id is somehow missing.
               const selfId  = sock.user?.id || '';
               const ownerRaw = db.settings.getValue(`owner_${sid}`) || db.settings.getValue('owner') || '';
               const jid = selfId
@@ -734,7 +722,6 @@ async function startServer() {
           } else if (collection === 'sessions') {
             db.sessions.set(key, val);
           } else if (collection === 'groups') {
-            // key format: "sessionId|groupId"
             const [sId, gId] = key.split('|');
             if (!gId) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: 'key must be sessionId|groupId' })); }
             db.groups.set(sId, gId, val);
@@ -747,7 +734,6 @@ async function startServer() {
           } else if (collection === 'accessAuthorizations') {
             db.accessAuthorizations.set(key, val);
           } else if (collection === 'notes') {
-            // key format: "jid|noteName"
             const [jid, noteName] = key.split('|');
             if (!noteName) { res.writeHead(400); return res.end(JSON.stringify({ ok: false, error: 'key must be jid|noteName' })); }
             db.notes.setNote(jid, noteName, val);
@@ -770,10 +756,9 @@ async function startServer() {
         try {
           const { collection, key } = JSON.parse(body || '{}');
           const ALLOWED_COLS = ['groups', 'settings', 'sessionSettings', 'notes', 'sessions', 'accessKeys', 'accessAuthorizations'];
-          if (!ALLOWED_COLS.includes(collection)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'Invalid collection' })); }
+          if (!ALLOWED_COLS.includes(collection)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Invalid collection' })); }
           if (collection === 'settings') {
             const d = db.settings.get(); delete d[key]; db.settings.set({});
-            // Re-apply all remaining keys
             Object.keys(d).forEach(k => db.settings.setValue(k, d[k]));
           } else if (collection === 'groups') {
             const [sId, gId] = key.split('|');
@@ -801,7 +786,7 @@ async function startServer() {
       return;
     }
 
-    // ── Admin: restart hint (safe — just signals process to re-init) ─────────
+    // ── Admin: restart ───────────────────────────────────────────────────────
     if (p === '/admin/restart' && req.method === 'POST') {
       if (!_isAdmin(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -849,24 +834,31 @@ async function startServer() {
   return server;
 }
 
+// ── Handlers Wire-up ─────────────────────────────────────────────────────
 setMessageHandler(handleMessage);
+
+// Connection Handler with Auto AntiEdit Listener Binding
 setConnectionHandler((sessionId, sock) => {
   console.log(chalk.green(`✅ Session [${sessionId}] connected as ${sock.user?.name || sock.user?.id}`));
+  
+  // Attach AntiEdit listener automatically on session connection/reconnect
+  try {
+    attachEditListener(sock, db);
+  } catch (err) {
+    logger.error({ err: err.message }, `[AntiEdit] Failed to attach listener for session [${sessionId}]`);
+  }
 });
 
 async function main() {
   printBanner();
   logger.info('🚀 Starting AA MD Bot...');
 
-  // Ensure all required directories exist (created on every startup — safe to repeat)
   for (const dir of ['temp', 'logs', 'session', 'downloads', 'database', 'cache']) {
     fs.ensureDirSync(path.join(__dirname, dir));
   }
 
-  // Load persistent database state before anything reads from db
   await initDatabase();
 
-  // Restore newsletter JID — db first (set via .setnewsletter), then config fallback
   try {
     const savedJid  = db.settings.getValue('newsletterJid') || config.newsletterJid;
     const savedName = db.settings.getValue('newsletterName') || config.newsletterName || 'AA MD Bot';
@@ -892,12 +884,10 @@ async function main() {
   logger.info('📡 Initializing WhatsApp sessions...');
   await initAllSessions();
 
-  // ── Birthday scheduler — runs at exactly midnight every day ───────────────
+  // ── Birthday scheduler ──────────────────────────────────────────────────
   startBirthdayScheduler(() => sessions);
 
-  // ── Fake Last Seen scheduler — checks every minute ────────────────────────
-  // For each session that has fake_lastseen_active=true, fires sendPresenceUpdate('unavailable')
-  // at the exact HH:MM the user configured, so WA records that moment as last seen.
+  // ── Fake Last Seen scheduler ───────────────────────────────────────────
   setInterval(() => {
     const now   = new Date();
     const hh    = String(now.getHours()).padStart(2, '0');
@@ -910,7 +900,6 @@ async function main() {
         if (!active) continue;
         const target = db.sessionSettings.getValue(sessionId, 'fake_lastseen_time');
         if (!target || target !== curHHMM) continue;
-        // Exact minute match — fire unavailable
         sock.sendPresenceUpdate('unavailable').catch(() => {});
         logger.info({ sessionId, time: curHHMM }, '🕐 Fake last seen fired');
       } catch {}
