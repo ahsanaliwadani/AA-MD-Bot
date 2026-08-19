@@ -1,25 +1,24 @@
 // ============================================
-// AA MD Bot - Anti View Once
+// AA MD Bot - Anti View Once (Auto-Reveal Fixed)
 // Developer: Ahsan Ali | AA Mods
-// Handles View-Once media caching, Auto-Reveal
-// to self-chat, and Emoji-based Reply Reveals.
+// Pure Auto-Reveal & Emoji-Reply Reveal Engine
 // ============================================
 
 import moment from "moment-timezone";
+import { jidNormalizedUser, downloadContentFromMessage } from "@whiskeysockets/baileys";
 import { logger } from "./logger.js";
 import { db } from "./database.js";
 import config from "../config.js";
 
-// ── Direct-download helper for quoted media ──────────────────────────────────
+// ── Direct Download Helper ───────────────────────────────────────────────────
 async function dlBufDirect(mediaMsg, type) {
-  const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
   const stream = await downloadContentFromMessage(mediaMsg, type);
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks);
 }
 
-// ── Extract media from a quotedMessage object ─────────────────────────────────
+// ── Quoted Media Extractor ───────────────────────────────────────────────────
 function extractQuotedMediaForReveal(quotedMsg) {
   if (!quotedMsg) return null;
   const inner =
@@ -46,13 +45,12 @@ function extractQuotedMediaForReveal(quotedMsg) {
   return null;
 }
 
-// ── Memory Storage ────────────────────────────────────────────────────────────
+// ── Memory Cache ─────────────────────────────────────────────────────────────
 export const viewOnceStore = new Map();
 const _MAX_STORE = 200;
 const _processed = new Set();
 const _PROCESSED_MAX = 200;
 
-// ── Cache Cleanup ─────────────────────────────────────────────────────────────
 export function cleanViewOnceStore() {
   const now = Date.now();
   const MEM_TTL = 60 * 60 * 1000;
@@ -61,7 +59,7 @@ export function cleanViewOnceStore() {
   }
 }
 
-// ── Utility Helpers ───────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function getPhoneNum(jid) {
   if (!jid) return null;
   return jid.split("@")[0].split(":")[0];
@@ -76,7 +74,7 @@ function isOptEnabled(val) {
   if (val === true || val === 1) return true;
   if (typeof val === "string") {
     const s = val.trim().toLowerCase();
-    return s === "true" || s === "on" || s === "1" || s === "enabled" || s === "yes";
+    return ["true", "on", "1", "enabled", "yes", "active"].includes(s);
   }
   return false;
 }
@@ -86,17 +84,18 @@ function toUserJid(value) {
   if (!raw) return null;
   if (String(raw).includes("@")) {
     if (String(raw).includes("@lid")) return null;
-    return String(raw);
+    return jidNormalizedUser(String(raw));
   }
   const num = String(raw).replace(/\D/g, "");
-  return num ? `${num}@s.whatsapp.net` : null;
+  return num ? jidNormalizedUser(`${num}@s.whatsapp.net`) : null;
 }
 
+// Guaranteed Self-Chat JID Resolver using Baileys Native jidNormalizedUser
 function getSelfJid(sock, sessionId) {
-  const rawUser = sock?.user?.id || sock?.user?.jid || sock?.authState?.creds?.me?.id || "";
-  if (rawUser && !rawUser.includes("@lid")) {
-    const num = rawUser.split("@")[0]?.split(":")[0];
-    if (num && /^\d+$/.test(num)) return `${num}@s.whatsapp.net`;
+  const rawJid = sock?.user?.id || sock?.user?.jid || sock?.authState?.creds?.me?.id;
+  if (rawJid) {
+    const normalized = jidNormalizedUser(rawJid);
+    if (normalized && !normalized.includes("@lid")) return normalized;
   }
 
   if (sessionId) {
@@ -111,22 +110,6 @@ function getSelfJid(sock, sessionId) {
     toUserJid(config?.superOwner) ||
     null
   );
-}
-
-function normalizeMsg(message) {
-  let m = message;
-  for (let i = 0; i < 8; i++) {
-    const next =
-      m?.ephemeralMessage?.message ||
-      m?.documentWithCaptionMessage?.message ||
-      m?.viewOnceMessage?.message ||
-      m?.viewOnceMessageV2?.message ||
-      m?.viewOnceMessageV2Extension?.message ||
-      null;
-    if (!next) break;
-    m = next;
-  }
-  return m;
 }
 
 function extractViewOnceMedia(message) {
@@ -164,7 +147,6 @@ function extractViewOnceMedia(message) {
 }
 
 async function downloadBuffer(mediaMsg, isVid, isAudio = false) {
-  const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
   const stream = await downloadContentFromMessage(
     mediaMsg,
     isAudio ? "audio" : isVid ? "video" : "image"
@@ -174,7 +156,7 @@ async function downloadBuffer(mediaMsg, isVid, isAudio = false) {
   return Buffer.concat(chunks);
 }
 
-// ── Main ViewOnce Listener & Auto-Reveal ─────────────────────────────────────
+// ── Main Listener & Fixed Auto-Reveal Engine ─────────────────────────────────
 export async function handleViewOnceMessage(msg, sock, sessionId) {
   if (!msg?.message || !msg?.key?.id) return;
 
@@ -198,7 +180,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     try {
       buf = await downloadBuffer(mediaMsg, isVid, isAudio);
     } catch (e) {
-      logger.warn({ err: e.message }, "ViewOnce download failed");
+      logger.warn({ err: e.message }, "ViewOnce media download failed");
     }
     if (!buf?.length) return;
 
@@ -224,19 +206,25 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     viewOnceStore.set(msgId, entry);
     if (viewOnceStore.size > _MAX_STORE) viewOnceStore.delete(viewOnceStore.keys().next().value);
 
-    // Auto-reply to sender if configured
-    const autoReply = db.settings.getValue("voAutoReply");
-    if (autoReply && !msg.key.fromMe) {
-      await sock.sendMessage(chatJid, { text: autoReply }).catch(() => {});
-    }
+    // Flexible multi-key settings lookup
+    const groupAntiVO = inGroup
+      ? (db.groups?.get(sessionId, chatJid)?.antiviewonce ?? db.groups?.get(sessionId, chatJid)?.antiViewOnce)
+      : undefined;
 
-    // Auto-Reveal check across Group, Session, and Global settings
-    const groupAntiVO = inGroup ? db.groups.get(sessionId, chatJid)?.antiviewonce : undefined;
-    const globalAntiVO = db.settings.getValue("antiViewOnce");
-    const sessAntiVO = db.sessionSettings.getValue(sessionId, "antiViewOnce");
-    const antiVOActive = isOptEnabled(groupAntiVO) || isOptEnabled(globalAntiVO) || isOptEnabled(sessAntiVO);
+    const globalAntiVO =
+      db.settings?.getValue("antiViewOnce") ??
+      db.settings?.getValue("antiviewonce") ??
+      db.settings?.getValue("autoViewOnce");
 
-    if (antiVOActive && !msg.key.fromMe) {
+    const sessAntiVO =
+      db.sessionSettings?.getValue(sessionId, "antiViewOnce") ??
+      db.sessionSettings?.getValue(sessionId, "antiviewonce");
+
+    const antiVOActive =
+      isOptEnabled(groupAntiVO) || isOptEnabled(globalAntiVO) || isOptEnabled(sessAntiVO);
+
+    // Send auto-reveal directly to self chat
+    if (antiVOActive) {
       const selfJid = getSelfJid(sock, sessionId);
 
       if (selfJid) {
@@ -248,6 +236,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
           `🕐 *Time:* ${timeStr}\n` +
           `📅 *Date:* ${date}\n` +
           `📍 *Chat:* ${inGroup ? "Group" : "DM"}\n` +
+          (caption ? `💬 *Caption:* "${caption}"\n` : "") +
           `\n> 👁️ *AA MD Bot*`;
 
         try {
@@ -266,14 +255,16 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
                 : { image: buf, caption: cap, mimetype: mime }
             );
           }
-          logger.info({ sessionId, selfJid }, "✅ ViewOnce auto-revealed to self-chat");
+          logger.info({ sessionId, selfJid }, "✅ ViewOnce successfully auto-revealed to self-chat");
         } catch (sendErr) {
-          logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal failed");
+          logger.error({ err: sendErr.message, selfJid }, "❌ Failed to send auto-reveal to self-chat");
         }
+      } else {
+        logger.warn({ sessionId }, "⚠️ Auto-reveal active but selfJid could not be resolved");
       }
     }
   } catch (e) {
-    logger.warn({ err: e.message }, "ViewOnce handler error");
+    logger.warn({ err: e.message }, "ViewOnce main handler error");
   }
 }
 
@@ -338,9 +329,8 @@ function normalizeEmojiKey(emoji) {
   return String(emoji || "").replace(/[\uFE0E\uFE0F]/g, "").trim();
 }
 
-// ── Multi-Emoji Configuration Parser for .vvemoji ─────────────────────────────
 function getConfiguredVvEmojis() {
-  const saved = db.settings.getValue("vvEmojiSet");
+  const saved = db.settings?.getValue("vvEmojiSet");
   let emojis = [];
 
   if (Array.isArray(saved)) {
@@ -363,7 +353,7 @@ function hasConfiguredVvEmoji(text) {
   return inputEmojis.some((e) => allowed.has(e));
 }
 
-// ── Reply-Based Emoji Reveal (.vvemoji Handler) ──────────────────────────────
+// ── Multi-Emoji Reply Reveal Handler ─────────────────────────────────────────
 export async function handleReplyReveal(msg, sock, sessionId) {
   try {
     if (!msg?.key?.fromMe) return;
@@ -375,17 +365,16 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     ).trim();
     if (!msgText) return;
 
-    const voKeyword = db.settings.getValue("voKeyword");
-    const prefix = db.settings.getValue("prefix") || ".";
+    const voKeyword = db.settings?.getValue("voKeyword");
+    const prefix = db.settings?.getValue("prefix") || ".";
 
     const hasKeyword = !!(voKeyword && msgText.toLowerCase().includes(voKeyword.toLowerCase()));
     const textBody = msgText.startsWith(prefix) ? msgText.slice(prefix.length) : msgText;
 
     const isEmojiTrigger = hasConfiguredVvEmoji(textBody) || hasConfiguredVvEmoji(msgText);
-
     if (!hasKeyword && !isEmojiTrigger) return;
 
-    const triggerLabel = isEmojiTrigger ? `emoji-trigger (${msgText})` : `keyword (${voKeyword})`;
+    const triggerLabel = isEmojiTrigger ? `emoji (${msgText})` : `keyword (${voKeyword})`;
 
     const ctxInfo = extractContextInfo(msg.message);
     const ctxInfoDirect0 =
@@ -415,7 +404,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     const date = moment().tz(tz).format("DD/MM/YYYY");
     const timeStr = moment().tz(tz).format("HH:mm:ss");
 
-    // 1. Try Direct Download from Quoted Message
+    // Direct Quoted Download Fallback
     try {
       const quotedMsg = ctxInfoDirect0?.quotedMessage;
       if (quotedMsg) {
@@ -444,7 +433,6 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       }
     } catch (_) {}
 
-    // 2. Fallback to Memory Store
     if (!stored) return;
 
     const cap =
@@ -473,46 +461,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
   }
 }
 
-// ── Reaction Reveal Stub (Disabled) ──────────────────────────────────────────
-export async function handleReactionReveal() {
-  return false;
-}
-
-// ── Manual Reveal via Command ────────────────────────────────────────────────
-export async function handleManualReveal(msgId, sock) {
-  const selfJid = getSelfJid(sock, null);
-  if (!selfJid) return;
-
-  const id = msgId?.trim();
-  const stored = viewOnceStore.get(id);
-
-  if (!stored) {
-    await sock.sendMessage(selfJid, { text: `❌ *View-Once not found in memory cache.*` }).catch(() => {});
-    return;
-  }
-
-  const cap =
-    `🔓 *View-Once Revealed (Manual)*\n\n` +
-    `👤 *From:* ${formatPhone(stored.num)}\n` +
-    `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
-    `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
-    `> 👁️ *AA MD Bot*`;
-
-  if (stored.isAudio) {
-    await sock.sendMessage(selfJid, { audio: stored.buf, mimetype: stored.mime, ptt: false }).catch(() => {});
-    await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
-  } else {
-    await sock.sendMessage(
-      selfJid,
-      stored.isVid
-        ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-        : { image: stored.buf, caption: cap, mimetype: stored.mime }
-    ).catch(() => {});
-  }
-}
-
-// ── Initialization ───────────────────────────────────────────────────────────
 export function initViewOnce() {
   setInterval(cleanViewOnceStore, 60_000);
-  logger.info("👁️ ViewOnce engine active | Reaction reveal disabled | Multi-emoji reply enabled");
+  logger.info("👁️ ViewOnce Engine initialized with jidNormalizedUser self-chat fixes");
 }
