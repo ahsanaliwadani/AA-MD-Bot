@@ -51,7 +51,7 @@ FORMATTING — WhatsApp markdown strictly:
 
 BEHAVIOR:
 - Never repeat the question, never say "Great question!"
-- Match user language exactly (Urdu, Roman Urdu, English, Arabic)
+- CRITICAL: Match the user's language and script EXACTLY — if they write English, reply only in English; if Roman Urdu, reply only in Roman Urdu; if Urdu script, reply only in Urdu script; if Hindi/Devanagari, reply only in Hindi. Never switch languages on your own.
 - For Islam: answer from Quran/Sunnah accurately
 - If unsure: say so briefly`;
 
@@ -59,12 +59,42 @@ export const HINGLISH_SYSTEM = `You are a casual WhatsApp chatbot. Reply like a 
 
 Rules:
 - 1-2 lines MAX — short and punchy
-- Use Hinglish naturally (Hindi/Urdu + English mix)
+- CRITICAL: Reply in the SAME language the user just wrote in — pure English → pure English, pure Urdu/Roman Urdu → pure Urdu/Roman Urdu, pure Hindi → pure Hindi. Only mix languages (Hinglish-style) if the user's own message is itself mixed. Never switch on your own.
 - Use real emojis (😂 😅 😎 🙄 🥺)
 - If abused → give savage reply
 - If someone is sad → be warm
 - If someone is funny → joke back
 - NEVER say you are an AI or a bot`;
+
+// ── Language-matching helpers (used only by chatAI — .ai / .autoai / .chatbot) ─
+// Several fast backends (DC APIs, Mistral, ch.at) accept only a raw prompt with
+// NO system-role support — they were previously getting zero language guidance
+// at all, so they fell back to whatever the underlying model defaults to
+// (commonly Hindi), regardless of what language the user actually wrote in.
+// This detects the user's language/script and appends an explicit, short
+// instruction naming it directly — far more reliable for weak/free completion
+// APIs than a vague "match the language" system rule they can't see anyway.
+const LANG_RULE =
+  "CRITICAL: Match the user's language and script exactly — English→English, " +
+  "Roman Urdu→Roman Urdu, Urdu script→Urdu script, Hindi/Devanagari→Hindi. Never switch languages on your own.";
+
+function detectLangHint(text) {
+  const t = String(text || '');
+  if (/[\u0600-\u06FF]/.test(t)) return 'Urdu script (اردو)';
+  if (/[\u0900-\u097F]/.test(t)) return 'Hindi (Devanagari script)';
+  if (/\b(hai|hain|nahi|nhi|kya|kaise|acha|theek|thek|mujhe|tumhe|aapko|karo|kardo|kar do|bhai|yaar|kyun|kyu|matlab|samajh|pata)\b/i.test(t)) {
+    return 'Roman Urdu / Hinglish (Latin script)';
+  }
+  return 'English';
+}
+
+// Appends an explicit, named-language instruction AFTER the message (trailing
+// instructions are followed more reliably by simple completion-style APIs than
+// a leading system block they may not even support).
+function withLangGuard(userMsg) {
+  const hint = detectLangHint(userMsg);
+  return `${userMsg}\n\n(Reply only in ${hint} — do not switch to any other language.)`;
+}
 
 // ── Response validator ────────────────────────────────────────────────────────
 // Rejects API error strings that slip through as "valid" text
@@ -257,26 +287,35 @@ export async function chatAI(jid, userMsg, systemPrompt) {
     ...getHistory(jid),
   ];
 
-  // Build compact context for GET APIs (last 3 exchanges embedded in prompt)
+  // Build compact context for GET APIs (last 3 exchanges embedded in prompt).
+  // FIXED: previously used `(systemPrompt||DEFAULT_SYSTEM).slice(0,300)` — the
+  // language-matching rule sits well past character 300 in DEFAULT_SYSTEM, so
+  // it was being silently truncated out for every GET-based backend. LANG_RULE
+  // is now concatenated directly so it's ALWAYS present regardless of persona length.
   const hist = getHistory(jid).slice(-6).filter(m => m.role !== 'system');
   const ctxStr = hist.length
     ? hist.map(m => `${m.role === 'user' ? 'User' : 'Bot'}: ${m.content}`).join('\n') + '\n'
     : '';
-  const sys = (systemPrompt || DEFAULT_SYSTEM).slice(0, 300);
+  const persona = (systemPrompt || DEFAULT_SYSTEM).slice(0, 220);
+  const sys = `${LANG_RULE}\n${persona}`;
   const getPrompt = `${sys}\n\n${ctxStr}User: ${userMsg}\nBot:`;
+
+  // Guarded prompt for backends with NO system-role support at all (DC APIs,
+  // Mistral, ch.at) — previously these got zero language instruction whatsoever.
+  const guardedMsg = withLangGuard(userMsg);
 
   let reply = null;
 
   // Phase 1: Race ALL backends simultaneously — GET + POST together (max 13s)
   // Whichever responds first wins. POST has full context; GET has compact context.
   reply = await raceSuccess([
-    tryDCGemini(userMsg).catch(() => null),
-    tryDCGpt5(userMsg).catch(() => null),
-    tryDCGrok(userMsg).catch(() => null),
-    tryDCClaude(userMsg).catch(() => null),
+    tryDCGemini(guardedMsg).catch(() => null),
+    tryDCGpt5(guardedMsg).catch(() => null),
+    tryDCGrok(guardedMsg).catch(() => null),
+    tryDCClaude(guardedMsg).catch(() => null),
     tryABZTechGemini(getPrompt).catch(() => null),
     tryABLlama(getPrompt).catch(() => null),
-    tryPollinationsMistral(userMsg).catch(() => null),
+    tryPollinationsMistral(guardedMsg).catch(() => null),
     tryPollinationsPost(messages, 'openai-fast').catch(() => null),
   ], 13000);
 
@@ -287,7 +326,7 @@ export async function chatAI(jid, userMsg, systemPrompt) {
 
   // Phase 3: ch.at last resort
   if (!reply) {
-    reply = await tryChAt(userMsg).catch(() => null);
+    reply = await tryChAt(guardedMsg).catch(() => null);
   }
 
   if (!reply) throw new Error('AI unavailable — try again in a moment.');
@@ -300,6 +339,11 @@ export async function chatAI(jid, userMsg, systemPrompt) {
 // ── Fast chat function for .gf / .bf (speed-optimised, parallel GET + POST fallback) ─
 // Tries fast GET APIs in parallel first; falls back to POST only if needed.
 // systemPrompt is used for POST; GET APIs get a compact embedded context.
+// FIXED: DC APIs / Mistral / ch.at have no system-role support, so — same root
+// cause as chatAI() — they were getting zero language instruction and would
+// default to whatever the model felt like (usually Hindi). Now guarded the
+// same way, so Ayla replies in whatever language the user is actually using,
+// only naturally mixing (Hinglish) when the user's own message mixes.
 export async function chatAIFast(jid, userMsg, systemPrompt) {
   addHistory(jid, 'user', userMsg);
 
@@ -310,21 +354,24 @@ export async function chatAIFast(jid, userMsg, systemPrompt) {
     : '';
 
   // Compact system instruction embeddable in a single GET prompt
-  const compactSys = `You are Ayla, a warm, playful, caring AI girlfriend chatting on WhatsApp. Reply naturally in 1-3 lines like real texting. Use 1-2 emojis. Be flirty and sweet. Match the user's language exactly (Urdu/Roman Urdu/English). NEVER say you are an AI.`;
+  const compactSys = `You are Ayla, a warm, playful, caring AI girlfriend chatting on WhatsApp. Reply naturally in 1-3 lines like real texting. Use 1-2 emojis. Be flirty and sweet. ${LANG_RULE} Only mix languages if the user's own message mixes. NEVER say you are an AI.`;
   const getPrompt = `${compactSys}\n\n${ctxStr}User: ${userMsg}\nAyla:`;
+
+  // Guarded prompt for backends with NO system-role support (DC APIs, Mistral, ch.at)
+  const guardedMsg = withLangGuard(userMsg);
 
   let reply = null;
 
   // Phase 1: race all fast APIs in parallel — take whichever wins first (max 13s)
   // DC APIs work best with just the user message; ABZTech/ABLlama/Mistral use full context.
   reply = await raceSuccess([
-    tryDCGemini(userMsg).catch(() => null),
-    tryDCGpt5(userMsg).catch(() => null),
-    tryDCGrok(userMsg).catch(() => null),
-    tryDCClaude(userMsg).catch(() => null),
+    tryDCGemini(guardedMsg).catch(() => null),
+    tryDCGpt5(guardedMsg).catch(() => null),
+    tryDCGrok(guardedMsg).catch(() => null),
+    tryDCClaude(guardedMsg).catch(() => null),
     tryABZTechGemini(getPrompt).catch(() => null),
     tryABLlama(getPrompt).catch(() => null),
-    tryPollinationsMistral(userMsg).catch(() => null),
+    tryPollinationsMistral(guardedMsg).catch(() => null),
   ], 13000);
 
   // Phase 2: pollinations POST with full system prompt + conversation history
@@ -343,7 +390,7 @@ export async function chatAIFast(jid, userMsg, systemPrompt) {
 
   // Phase 4: ch.at last resort
   if (!reply) {
-    reply = await tryChAt(userMsg).catch(() => null);
+    reply = await tryChAt(guardedMsg).catch(() => null);
   }
 
   if (!reply) throw new Error('AI unavailable — try again in a moment.');
