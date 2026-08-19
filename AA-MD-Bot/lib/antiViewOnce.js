@@ -1,10 +1,8 @@
 // ============================================
 // AA MD Bot - Anti View Once
 // Developer: Ahsan Ali | AA Mods
-// Captures view-once media, stores for manual reveal
-// via !reveal <msgId>, and auto-reveals to owner's
-// private "You" chat when antiviewonce is ON or the
-// view-once caption contains the configured keyword.
+// Handles View-Once media caching, Auto-Reveal
+// to self-chat, and Emoji-based Reply Reveals.
 // ============================================
 
 import moment from "moment-timezone";
@@ -12,11 +10,9 @@ import { logger } from "./logger.js";
 import { db } from "./database.js";
 import config from "../config.js";
 
-// ── Direct-download helper ────────────────────────────────────────────────────
+// ── Direct-download helper for quoted media ──────────────────────────────────
 async function dlBufDirect(mediaMsg, type) {
-  const { downloadContentFromMessage } = await import(
-    "@whiskeysockets/baileys"
-  );
+  const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
   const stream = await downloadContentFromMessage(mediaMsg, type);
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
@@ -32,58 +28,31 @@ function extractQuotedMediaForReveal(quotedMsg) {
     quotedMsg?.viewOnceMessage?.message ||
     quotedMsg?.ephemeralMessage?.message ||
     quotedMsg;
+
   if (inner?.imageMessage)
-    return {
-      mediaMsg: inner.imageMessage,
-      isVid: false,
-      isAudio: false,
-      mime: inner.imageMessage.mimetype || "image/jpeg",
-    };
+    return { mediaMsg: inner.imageMessage, isVid: false, isAudio: false, mime: inner.imageMessage.mimetype || "image/jpeg" };
   if (inner?.videoMessage)
-    return {
-      mediaMsg: inner.videoMessage,
-      isVid: true,
-      isAudio: false,
-      mime: inner.videoMessage.mimetype || "video/mp4",
-    };
+    return { mediaMsg: inner.videoMessage, isVid: true, isAudio: false, mime: inner.videoMessage.mimetype || "video/mp4" };
   if (inner?.audioMessage)
-    return {
-      mediaMsg: inner.audioMessage,
-      isVid: false,
-      isAudio: true,
-      mime: inner.audioMessage.mimetype || "audio/mp4",
-    };
+    return { mediaMsg: inner.audioMessage, isVid: false, isAudio: true, mime: inner.audioMessage.mimetype || "audio/mp4" };
+
   if (quotedMsg?.imageMessage)
-    return {
-      mediaMsg: quotedMsg.imageMessage,
-      isVid: false,
-      isAudio: false,
-      mime: quotedMsg.imageMessage.mimetype || "image/jpeg",
-    };
+    return { mediaMsg: quotedMsg.imageMessage, isVid: false, isAudio: false, mime: quotedMsg.imageMessage.mimetype || "image/jpeg" };
   if (quotedMsg?.videoMessage)
-    return {
-      mediaMsg: quotedMsg.videoMessage,
-      isVid: true,
-      isAudio: false,
-      mime: quotedMsg.videoMessage.mimetype || "video/mp4",
-    };
+    return { mediaMsg: quotedMsg.videoMessage, isVid: true, isAudio: false, mime: quotedMsg.videoMessage.mimetype || "video/mp4" };
   if (quotedMsg?.audioMessage)
-    return {
-      mediaMsg: quotedMsg.audioMessage,
-      isVid: false,
-      isAudio: true,
-      mime: quotedMsg.audioMessage.mimetype || "audio/mp4",
-    };
+    return { mediaMsg: quotedMsg.audioMessage, isVid: false, isAudio: true, mime: quotedMsg.audioMessage.mimetype || "audio/mp4" };
+
   return null;
 }
 
-// ── Storage ───────────────────────────────────────────────────────────────────
+// ── Memory Storage ────────────────────────────────────────────────────────────
 export const viewOnceStore = new Map();
 const _MAX_STORE = 200;
 const _processed = new Set();
 const _PROCESSED_MAX = 200;
 
-// ── Periodic cleanup (60-minute in-memory TTL) ────────────────────────────────
+// ── Cache Cleanup ─────────────────────────────────────────────────────────────
 export function cleanViewOnceStore() {
   const now = Date.now();
   const MEM_TTL = 60 * 60 * 1000;
@@ -92,7 +61,7 @@ export function cleanViewOnceStore() {
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Utility Helpers ───────────────────────────────────────────────────────────
 function getPhoneNum(jid) {
   if (!jid) return null;
   return jid.split("@")[0].split(":")[0];
@@ -101,13 +70,6 @@ function getPhoneNum(jid) {
 function formatPhone(num) {
   if (!num) return "Unknown";
   return num.startsWith("+") ? num : `+${num}`;
-}
-
-function isSameJidOrLid(jid1, jid2) {
-  if (!jid1 || !jid2) return false;
-  const clean1 = String(jid1).split("@")[0].split(":")[0];
-  const clean2 = String(jid2).split("@")[0].split(":")[0];
-  return clean1 === clean2;
 }
 
 function isOptEnabled(val) {
@@ -122,18 +84,18 @@ function isOptEnabled(val) {
 function toUserJid(value) {
   const raw = Array.isArray(value) ? value[0] : value;
   if (!raw) return null;
-  if (String(raw).includes('@')) {
-    if (String(raw).includes('@lid')) return null;
+  if (String(raw).includes("@")) {
+    if (String(raw).includes("@lid")) return null;
     return String(raw);
   }
-  const num = String(raw).replace(/\D/g, '');
+  const num = String(raw).replace(/\D/g, "");
   return num ? `${num}@s.whatsapp.net` : null;
 }
 
 function getSelfJid(sock, sessionId) {
-  const rawUser = sock?.user?.id || sock?.user?.jid || sock?.authState?.creds?.me?.id || '';
-  if (rawUser && !rawUser.includes('@lid')) {
-    const num = rawUser.split('@')[0]?.split(':')[0];
+  const rawUser = sock?.user?.id || sock?.user?.jid || sock?.authState?.creds?.me?.id || "";
+  if (rawUser && !rawUser.includes("@lid")) {
+    const num = rawUser.split("@")[0]?.split(":")[0];
     if (num && /^\d+$/.test(num)) return `${num}@s.whatsapp.net`;
   }
 
@@ -149,55 +111,6 @@ function getSelfJid(sock, sessionId) {
     toUserJid(config?.superOwner) ||
     null
   );
-}
-
-// ── Reaction Sender Authorization (Supports Phone Numbers & LID) ─────────────
-function isAuthorizedReactionSender(msg, sock, sessionId) {
-  if (msg?.key?.fromMe || msg?.reaction?.key?.fromMe) return true;
-
-  const inGroup = msg?.key?.remoteJid?.endsWith("@g.us");
-  const reactionObj = msg?.message?.reactionMessage || msg?.reaction;
-
-  const senderJid =
-    msg?.key?.participant ||
-    reactionObj?.key?.participant ||
-    (inGroup ? null : msg?.key?.remoteJid) ||
-    null;
-
-  if (!senderJid) return false;
-
-  const senderNum = getPhoneNum(senderJid);
-
-  // 1. Match against Self Phone Number
-  const selfJid = getSelfJid(sock, sessionId);
-  const selfNum = getPhoneNum(selfJid);
-  if (senderNum && selfNum && senderNum === selfNum) return true;
-
-  // 2. Match against Self LID
-  const selfLid =
-    sock?.user?.lid ||
-    sock?.authState?.creds?.me?.lid ||
-    db?.sessionSettings?.getValue(sessionId, "botLid") ||
-    "";
-  if (selfLid && isSameJidOrLid(senderJid, selfLid)) return true;
-
-  // 3. Match against Bot JID
-  const botJid = db?.settings?.getValue("botJid");
-  if (senderNum && botJid && senderNum === getPhoneNum(botJid)) return true;
-
-  // 4. Match against Super Owner
-  const superOwner = String(db?.settings?.getValue("superOwner") || config?.superOwner || "");
-  if (senderNum && superOwner && getPhoneNum(superOwner) === senderNum) return true;
-
-  // 5. Match against Owners List
-  const owners = db?.settings?.getValue("owners") || config?.owners || [];
-  for (const owner of owners) {
-    if (!owner) continue;
-    if (senderNum && getPhoneNum(owner) === senderNum) return true;
-    if (isSameJidOrLid(senderJid, owner)) return true;
-  }
-
-  return false;
 }
 
 function normalizeMsg(message) {
@@ -220,11 +133,7 @@ function extractViewOnceMedia(message) {
   function scan(node, insideViewOnce = false, depth = 0) {
     if (!node || depth > 10) return null;
 
-    const wrappers = [
-      'viewOnceMessage',
-      'viewOnceMessageV2',
-      'viewOnceMessageV2Extension',
-    ];
+    const wrappers = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"];
     for (const wrapper of wrappers) {
       if (node[wrapper]?.message) {
         const found = scan(node[wrapper].message, true, depth + 1);
@@ -232,7 +141,7 @@ function extractViewOnceMedia(message) {
       }
     }
 
-    for (const wrapper of ['ephemeralMessage', 'documentWithCaptionMessage']) {
+    for (const wrapper of ["ephemeralMessage", "documentWithCaptionMessage"]) {
       if (node[wrapper]?.message) {
         const found = scan(node[wrapper].message, insideViewOnce, depth + 1);
         if (found) return found;
@@ -255,25 +164,22 @@ function extractViewOnceMedia(message) {
 }
 
 async function downloadBuffer(mediaMsg, isVid, isAudio = false) {
-  const { downloadContentFromMessage } = await import(
-    "@whiskeysockets/baileys"
-  );
+  const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
   const stream = await downloadContentFromMessage(
     mediaMsg,
-    isAudio ? "audio" : isVid ? "video" : "image",
+    isAudio ? "audio" : isVid ? "video" : "image"
   );
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks);
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
+// ── Main ViewOnce Listener & Auto-Reveal ─────────────────────────────────────
 export async function handleViewOnceMessage(msg, sock, sessionId) {
   if (!msg?.message || !msg?.key?.id) return;
 
   try {
     const msgId = msg.key.id;
-
     if (_processed.has(msgId)) return;
 
     const extracted = extractViewOnceMedia(msg.message);
@@ -287,15 +193,6 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     const senderJid = msg.key.participant || chatJid || "";
     const num = getPhoneNum(senderJid);
     const tz = config.timezone || "Asia/Karachi";
-    const time = new Date().toLocaleString("en-PK", {
-      timeZone: tz,
-      hour12: true,
-    });
-
-    logger.info(
-      { sessionId, msgId, chat: chatJid, isVid },
-      "👁️ ViewOnce detected — downloading",
-    );
 
     let buf = null;
     try {
@@ -306,20 +203,17 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     if (!buf?.length) return;
 
     _processed.add(msgId);
-    if (_processed.size > _PROCESSED_MAX)
-      _processed.delete(_processed.values().next().value);
+    if (_processed.size > _PROCESSED_MAX) _processed.delete(_processed.values().next().value);
 
     const senderName =
-      sock.contacts?.[senderJid]?.name ||
-      sock.contacts?.[senderJid]?.notify ||
-      formatPhone(num);
+      sock.contacts?.[senderJid]?.name || sock.contacts?.[senderJid]?.notify || formatPhone(num);
+
     const entry = {
       buf,
       mime,
       isVid,
       isAudio,
       num,
-      time,
       inGroup,
       caption,
       chatJid,
@@ -328,13 +222,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       timestamp: Date.now(),
     };
     viewOnceStore.set(msgId, entry);
-    if (viewOnceStore.size > _MAX_STORE)
-      viewOnceStore.delete(viewOnceStore.keys().next().value);
-
-    logger.info(
-      { sessionId, msgId, bytes: buf.length },
-      "✅ ViewOnce cached (memory only)",
-    );
+    if (viewOnceStore.size > _MAX_STORE) viewOnceStore.delete(viewOnceStore.keys().next().value);
 
     // Auto-reply to sender if configured
     const autoReply = db.settings.getValue("voAutoReply");
@@ -342,21 +230,14 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       await sock.sendMessage(chatJid, { text: autoReply }).catch(() => {});
     }
 
-    // Auto-forward to owner's self chat when antiViewOnce is enabled
-    const groupAntiVO = inGroup
-      ? db.groups.get(sessionId, chatJid)?.antiviewonce
-      : undefined;
+    // Auto-Reveal check across Group, Session, and Global settings
+    const groupAntiVO = inGroup ? db.groups.get(sessionId, chatJid)?.antiviewonce : undefined;
     const globalAntiVO = db.settings.getValue("antiViewOnce");
-    const sessAntiVO   = db.sessionSettings.getValue(sessionId, "antiViewOnce");
+    const sessAntiVO = db.sessionSettings.getValue(sessionId, "antiViewOnce");
     const antiVOActive = isOptEnabled(groupAntiVO) || isOptEnabled(globalAntiVO) || isOptEnabled(sessAntiVO);
 
     if (antiVOActive && !msg.key.fromMe) {
       const selfJid = getSelfJid(sock, sessionId);
-
-      logger.info(
-        { sessionId, selfJid },
-        "👁️ ViewOnce auto-reveal: sending to self-chat",
-      );
 
       if (selfJid) {
         const date = moment().tz(tz).format("DD/MM/YYYY");
@@ -368,6 +249,7 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
           `📅 *Date:* ${date}\n` +
           `📍 *Chat:* ${inGroup ? "Group" : "DM"}\n` +
           `\n> 👁️ *AA MD Bot*`;
+
         try {
           if (isAudio) {
             await sock.sendMessage(selfJid, {
@@ -381,42 +263,23 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
               selfJid,
               isVid
                 ? { video: buf, caption: cap, mimetype: mime }
-                : { image: buf, caption: cap, mimetype: mime },
+                : { image: buf, caption: cap, mimetype: mime }
             );
           }
-          logger.info({ sessionId, selfJid }, "✅ ViewOnce auto-reveal sent");
+          logger.info({ sessionId, selfJid }, "✅ ViewOnce auto-revealed to self-chat");
         } catch (sendErr) {
-          logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal send FAILED");
+          logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal failed");
         }
-      } else {
-        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid unavailable");
       }
     }
   } catch (e) {
-    logger.warn({ err: e.message, stack: e.stack }, "ViewOnce handler threw");
+    logger.warn({ err: e.message }, "ViewOnce handler error");
   }
 }
 
-// ── Helpers for reply reveal ──────────────────────────────────────────────────
-function extractText(m) {
-  if (!m) return "";
-  const norm = normalizeMsg(m);
-  return (
-    norm?.conversation ||
-    norm?.extendedTextMessage?.text ||
-    norm?.imageMessage?.caption ||
-    norm?.videoMessage?.caption ||
-    norm?.documentMessage?.caption ||
-    norm?.audioMessage?.caption ||
-    norm?.buttonsResponseMessage?.selectedDisplayText ||
-    norm?.listResponseMessage?.title ||
-    ""
-  );
-}
-
+// ── Context and Emoji Parser Helpers ──────────────────────────────────────────
 function extractContextInfo(m) {
   if (!m) return null;
-
   function* walk(obj, depth = 0) {
     if (!obj || depth > 8) return;
     for (const key of [
@@ -425,12 +288,6 @@ function extractContextInfo(m) {
       "videoMessage",
       "documentMessage",
       "audioMessage",
-      "buttonsResponseMessage",
-      "listResponseMessage",
-      "stickerMessage",
-      "contactMessage",
-      "locationMessage",
-      "templateButtonReplyMessage",
     ]) {
       if (obj[key]?.contextInfo) yield obj[key].contextInfo;
     }
@@ -455,7 +312,6 @@ function extractContextInfo(m) {
   return null;
 }
 
-// ── Emoji trigger detection ───────────────────────────────────────────────────
 function emojiSegmentsFromText(text) {
   if (!text) return [];
   const isEmoji = (s) => {
@@ -479,47 +335,35 @@ function emojiSegmentsFromText(text) {
 }
 
 function normalizeEmojiKey(emoji) {
-  return String(emoji || "").replace(/[\uFE0E\uFE0F]/g, "");
+  return String(emoji || "").replace(/[\uFE0E\uFE0F]/g, "").trim();
 }
 
+// ── Multi-Emoji Configuration Parser for .vvemoji ─────────────────────────────
 function getConfiguredVvEmojis() {
   const saved = db.settings.getValue("vvEmojiSet");
-  if (Array.isArray(saved)) return saved.filter(Boolean);
-  if (typeof saved === "string") return emojiSegmentsFromText(saved);
-  return ["👀", "🔓", "💠"];
+  let emojis = [];
+
+  if (Array.isArray(saved)) {
+    emojis = saved.flatMap((item) => emojiSegmentsFromText(String(item)));
+  } else if (typeof saved === "string") {
+    emojis = emojiSegmentsFromText(saved);
+  }
+
+  if (!emojis.length) {
+    emojis = ["👀", "🔓", "💠"];
+  }
+
+  return [...new Set(emojis.map(normalizeEmojiKey))];
 }
 
 function hasConfiguredVvEmoji(text) {
-  const allowed = new Set(getConfiguredVvEmojis().map(normalizeEmojiKey));
-  const emojis = emojiSegmentsFromText(text).map(normalizeEmojiKey);
-  if (!allowed.size || !emojis.length) return false;
-  return emojis.some((emoji) => allowed.has(emoji));
+  const allowed = new Set(getConfiguredVvEmojis());
+  const inputEmojis = emojiSegmentsFromText(text).map(normalizeEmojiKey);
+  if (!allowed.size || !inputEmojis.length) return false;
+  return inputEmojis.some((e) => allowed.has(e));
 }
 
-function legacyEmojiRevealEnabled() {
-  return isOptEnabled(db.settings.getValue("emojiRevealEnabled"));
-}
-
-function isVvReplyRevealEnabled() {
-  const explicit = db.settings.getValue("emojiReplyRevealEnabled");
-  return explicit === undefined ? legacyEmojiRevealEnabled() : isOptEnabled(explicit);
-}
-
-function isVvReactionRevealEnabled() {
-  const explicit = db.settings.getValue("emojiReactionRevealEnabled");
-  return explicit === undefined ? legacyEmojiRevealEnabled() : isOptEnabled(explicit);
-}
-
-function hasFourSameEmoji(text) {
-  const counts = {};
-  for (const e of emojiSegmentsFromText(text)) {
-    counts[e] = (counts[e] || 0) + 1;
-    if (counts[e] >= 4) return true;
-  }
-  return false;
-}
-
-// ── Reply-based reveal ───────────────────────────────────────────────────────
+// ── Reply-Based Emoji Reveal (.vvemoji Handler) ──────────────────────────────
 export async function handleReplyReveal(msg, sock, sessionId) {
   try {
     if (!msg?.key?.fromMe) return;
@@ -533,25 +377,15 @@ export async function handleReplyReveal(msg, sock, sessionId) {
 
     const voKeyword = db.settings.getValue("voKeyword");
     const prefix = db.settings.getValue("prefix") || ".";
-    const emojiEnabled = isVvReplyRevealEnabled();
 
-    const hasKeyword = !!(
-      voKeyword && msgText.toLowerCase().includes(voKeyword.toLowerCase())
-    );
+    const hasKeyword = !!(voKeyword && msgText.toLowerCase().includes(voKeyword.toLowerCase()));
+    const textBody = msgText.startsWith(prefix) ? msgText.slice(prefix.length) : msgText;
 
-    const textBody = msgText.startsWith(prefix)
-      ? msgText.slice(prefix.length)
-      : msgText;
-    const isEmojiTrigger =
-      emojiEnabled && textBody.length > 0 && (
-        hasConfiguredVvEmoji(textBody) || hasFourSameEmoji(textBody)
-      );
+    const isEmojiTrigger = hasConfiguredVvEmoji(textBody) || hasConfiguredVvEmoji(msgText);
 
     if (!hasKeyword && !isEmojiTrigger) return;
 
-    const triggerLabel = isEmojiTrigger
-      ? "emoji-trigger"
-      : `keyword(${voKeyword})`;
+    const triggerLabel = isEmojiTrigger ? `emoji-trigger (${msgText})` : `keyword (${voKeyword})`;
 
     const ctxInfo = extractContextInfo(msg.message);
     const ctxInfoDirect0 =
@@ -559,31 +393,19 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       msg.message?.imageMessage?.contextInfo ||
       msg.message?.videoMessage?.contextInfo ||
       null;
+
     const hasReply = !!(ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || ctxInfoDirect0?.quotedMessage);
     if (!hasReply) return;
 
     const stanzaId = ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || null;
-
     let stored = stanzaId ? viewOnceStore.get(stanzaId) : null;
 
     if (!stored && stanzaId) {
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 500));
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 300));
         stored = viewOnceStore.get(stanzaId);
         if (stored) break;
       }
-    }
-
-    if (!stored && stanzaId) {
-      const chatJid = msg.key.remoteJid;
-      const TTL = 60 * 60 * 1000;
-      let newest = null;
-      for (const [, entry] of viewOnceStore) {
-        if (entry.chatJid === chatJid) {
-          if (!newest || entry.timestamp > newest.timestamp) newest = entry;
-        }
-      }
-      if (newest && Date.now() - newest.timestamp < TTL) stored = newest;
     }
 
     const selfJid = getSelfJid(sock, sessionId);
@@ -593,21 +415,13 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     const date = moment().tz(tz).format("DD/MM/YYYY");
     const timeStr = moment().tz(tz).format("HH:mm:ss");
 
+    // 1. Try Direct Download from Quoted Message
     try {
-      const ctxInfoDirect =
-        msg.message?.extendedTextMessage?.contextInfo ||
-        msg.message?.imageMessage?.contextInfo ||
-        msg.message?.videoMessage?.contextInfo ||
-        null;
-      const quotedMsg = ctxInfoDirect?.quotedMessage;
+      const quotedMsg = ctxInfoDirect0?.quotedMessage;
       if (quotedMsg) {
         const extracted = extractQuotedMediaForReveal(quotedMsg);
         if (extracted) {
-          const type = extracted.isAudio
-            ? "audio"
-            : extracted.isVid
-              ? "video"
-              : "image";
+          const type = extracted.isAudio ? "audio" : extracted.isVid ? "video" : "image";
           const buf = await dlBufDirect(extracted.mediaMsg, type);
           if (buf?.length > 0) {
             const cap =
@@ -616,41 +430,21 @@ export async function handleReplyReveal(msg, sock, sessionId) {
               `⏰ *Time:* ${timeStr}\n` +
               `🔑 *Trigger:* ${triggerLabel}\n\n` +
               `> 👁️ *AA MD Bot*`;
+
             if (extracted.isAudio) {
-              await sock
-                .sendMessage(selfJid, {
-                  audio: buf,
-                  mimetype: extracted.mime,
-                  ptt: extracted.mediaMsg?.ptt || false,
-                })
-                .catch(() => {});
+              await sock.sendMessage(selfJid, { audio: buf, mimetype: extracted.mime, ptt: false }).catch(() => {});
             } else if (extracted.isVid) {
-              await sock
-                .sendMessage(selfJid, {
-                  video: buf,
-                  caption: cap,
-                  mimetype: extracted.mime,
-                })
-                .catch(() => {});
+              await sock.sendMessage(selfJid, { video: buf, caption: cap, mimetype: extracted.mime }).catch(() => {});
             } else {
-              await sock
-                .sendMessage(selfJid, {
-                  image: buf,
-                  caption: cap,
-                  mimetype: extracted.mime,
-                })
-                .catch(() => {});
+              await sock.sendMessage(selfJid, { image: buf, caption: cap, mimetype: extracted.mime }).catch(() => {});
             }
-            logger.info(
-              { sessionId, trigger: triggerLabel },
-              "🔑 ViewOnce revealed via emoji trigger (direct)",
-            );
             return;
           }
         }
       }
     } catch (_) {}
 
+    // 2. Fallback to Memory Store
     if (!stored) return;
 
     const cap =
@@ -664,150 +458,28 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       `> 👁️ *AA MD Bot*`;
 
     if (stored.isAudio) {
-      await sock
-        .sendMessage(selfJid, {
-          audio: stored.buf,
-          mimetype: stored.mime,
-          ptt: false,
-        })
-        .catch(() => {});
-      await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
-    } else {
-      await sock
-        .sendMessage(
-          selfJid,
-          stored.isVid
-            ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-            : { image: stored.buf, caption: cap, mimetype: stored.mime },
-        )
-        .catch(() => {});
-    }
-
-    logger.info(
-      { sessionId, stanzaId, trigger: triggerLabel },
-      "🔑 ViewOnce revealed via emoji trigger (store)",
-    );
-  } catch (e) {
-    logger.warn({ err: e.message }, "handleReplyReveal threw");
-  }
-}
-
-// ── Reaction-based reveal ─────────────────────────────────────────────────────
-export async function handleReactionReveal(rawMsg, sock, sessionId) {
-  try {
-    const msg =
-      rawMsg?.reaction && !rawMsg?.message
-        ? { key: rawMsg.key, message: { reactionMessage: rawMsg.reaction } }
-        : rawMsg;
-
-    const reaction = normalizeMsg(msg?.message)?.reactionMessage;
-    const emojiText = reaction?.text || "";
-    const targetKey = reaction?.key || null;
-    const targetId = targetKey?.id || null;
-
-    if (!targetId || !emojiText) {
-      logger.info(
-        { sessionId, hasTargetId: !!targetId, hasEmojiText: !!emojiText },
-        "👁️ ReactionReveal: skipped — missing targetId or emoji text",
-      );
-      return false;
-    }
-
-    if (!isAuthorizedReactionSender(msg, sock, sessionId)) {
-      logger.info(
-        { sessionId, targetId, fromMe: msg?.key?.fromMe, participant: msg?.key?.participant, remoteJid: msg?.key?.remoteJid },
-        "👁️ ReactionReveal: rejected — sender not authorized",
-      );
-      return false;
-    }
-
-    const emojiEnabled = isVvReactionRevealEnabled();
-    if (!emojiEnabled) {
-      logger.info({ sessionId, targetId }, "👁️ ReactionReveal: skipped — reaction reveal disabled in settings");
-      return false;
-    }
-
-    if (!hasConfiguredVvEmoji(emojiText)) {
-      logger.info(
-        { sessionId, targetId, emojiText, configured: getConfiguredVvEmojis() },
-        "👁️ ReactionReveal: skipped — emoji not in configured set",
-      );
-      return false;
-    }
-
-    let stored = viewOnceStore.get(targetId);
-    if (!stored) {
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 500));
-        stored = viewOnceStore.get(targetId);
-        if (stored) break;
-      }
-    }
-    if (!stored) {
-      const targetChat = targetKey?.remoteJid || msg.key?.remoteJid;
-      const TTL = 60 * 60 * 1000;
-      let newest = null;
-      for (const [, entry] of viewOnceStore) {
-        if (entry.chatJid === targetChat && (!newest || entry.timestamp > newest.timestamp)) newest = entry;
-      }
-      if (newest && Date.now() - newest.timestamp < TTL) stored = newest;
-    }
-    if (!stored) {
-      logger.info(
-        { sessionId, targetId, storeSize: viewOnceStore.size },
-        "👁️ ReactionReveal: skipped — target not found in viewOnceStore",
-      );
-      return false;
-    }
-
-    const selfJid = getSelfJid(sock, sessionId);
-    if (!selfJid) {
-      logger.warn({ sessionId }, "👁️ ReactionReveal: selfJid could not be resolved");
-      return false;
-    }
-
-    const tz = config.timezone || "Asia/Karachi";
-    const date = moment().tz(tz).format("DD/MM/YYYY");
-    const timeStr = moment().tz(tz).format("HH:mm:ss");
-    const cap =
-      `🔓 *View-Once Revealed*\n\n` +
-      `👤 *From:* ${formatPhone(stored.num)}\n` +
-      `📅 *Date:* ${date}\n` +
-      `⏰ *Time:* ${timeStr}\n` +
-      `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
-      `🔑 *Trigger:* reaction ${emojiText}\n` +
-      `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
-      `> 👁️ *AA MD Bot*`;
-
-    if (stored.isAudio) {
-      await sock.sendMessage(selfJid, {
-        audio: stored.buf,
-        mimetype: stored.mime,
-        ptt: false,
-      }).catch(() => {});
+      await sock.sendMessage(selfJid, { audio: stored.buf, mimetype: stored.mime, ptt: false }).catch(() => {});
       await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
     } else {
       await sock.sendMessage(
         selfJid,
         stored.isVid
           ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-          : { image: stored.buf, caption: cap, mimetype: stored.mime },
+          : { image: stored.buf, caption: cap, mimetype: stored.mime }
       ).catch(() => {});
     }
-
-    logger.info(
-      { sessionId, stanzaId: targetId, trigger: emojiText },
-      "🔑 ViewOnce revealed via reaction emoji",
-    );
-    return true;
   } catch (e) {
-    logger.warn({ err: e.message, stack: e.stack }, "handleReactionReveal threw");
-    return false;
+    logger.warn({ err: e.message }, "handleReplyReveal error");
   }
 }
 
-// ── Manual reveal ─────────────────────────────────────────────────────────────
-export async function handleManualReveal(msgId, sock, replyJid) {
+// ── Reaction Reveal Stub (Disabled) ──────────────────────────────────────────
+export async function handleReactionReveal() {
+  return false;
+}
+
+// ── Manual Reveal via Command ────────────────────────────────────────────────
+export async function handleManualReveal(msgId, sock) {
   const selfJid = getSelfJid(sock, null);
   if (!selfJid) return;
 
@@ -815,101 +487,32 @@ export async function handleManualReveal(msgId, sock, replyJid) {
   const stored = viewOnceStore.get(id);
 
   if (!stored) {
-    await sock
-      .sendMessage(selfJid, {
-        text:
-          `❌ *View-Once not found*\n\n` +
-          `Message ID not in cache.\n` +
-          `Make sure the bot was running when the view-once arrived,\n` +
-          `and that you're replying to the original message.\n\n` +
-          `> 👁️ *AA MD Bot*`,
-      })
-      .catch(() => {});
+    await sock.sendMessage(selfJid, { text: `❌ *View-Once not found in memory cache.*` }).catch(() => {});
     return;
   }
 
   const cap =
     `🔓 *View-Once Revealed (Manual)*\n\n` +
     `👤 *From:* ${formatPhone(stored.num)}\n` +
-    `🕐 *Time:* ${stored.time}\n` +
     `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
     `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
     `> 👁️ *AA MD Bot*`;
 
   if (stored.isAudio) {
-    await sock
-      .sendMessage(selfJid, {
-        audio: stored.buf,
-        mimetype: stored.mime,
-        ptt: false,
-      })
-      .catch(() => {});
+    await sock.sendMessage(selfJid, { audio: stored.buf, mimetype: stored.mime, ptt: false }).catch(() => {});
     await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
   } else {
-    await sock
-      .sendMessage(
-        selfJid,
-        stored.isVid
-          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-          : { image: stored.buf, caption: cap, mimetype: stored.mime },
-      )
-      .catch(() => {});
+    await sock.sendMessage(
+      selfJid,
+      stored.isVid
+        ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+        : { image: stored.buf, caption: cap, mimetype: stored.mime }
+    ).catch(() => {});
   }
 }
 
-// ── Reveal by quoted message ─────────────────────────────────────────────────
-export async function handleRevealByReply(msg, sock) {
-  const selfJid = getSelfJid(sock, null);
-  if (!selfJid) return false;
-
-  const ctxInfo = extractContextInfo(msg.message);
-  const stanzaId = ctxInfo?.stanzaId;
-  if (!stanzaId) return false;
-
-  const stored = viewOnceStore.get(stanzaId);
-  if (!stored) return false;
-
-  const tz = config.timezone || "Asia/Karachi";
-  const date = moment().tz(tz).format("DD/MM/YYYY");
-  const timeStr = moment().tz(tz).format("HH:mm:ss");
-
-  const cap =
-    `🔓 *View-Once Revealed*\n\n` +
-    `👤 *From:* ${formatPhone(stored.num)}\n` +
-    `📅 *Date:* ${date}\n` +
-    `⏰ *Time:* ${timeStr}\n` +
-    `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
-    `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
-    `> 👁️ *AA MD Bot*`;
-
-  if (stored.isAudio) {
-    await sock
-      .sendMessage(selfJid, {
-        audio: stored.buf,
-        mimetype: stored.mime,
-        ptt: false,
-      })
-      .catch(() => {});
-    await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
-  } else {
-    await sock
-      .sendMessage(
-        selfJid,
-        stored.isVid
-          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
-          : { image: stored.buf, caption: cap, mimetype: stored.mime },
-      )
-      .catch(() => {});
-  }
-
-  return true;
-}
-
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Initialization ───────────────────────────────────────────────────────────
 export function initViewOnce() {
   setInterval(cleanViewOnceStore, 60_000);
-  logger.info("👁️ ViewOnce feature initialized");
-  logger.info("👁️ Auto-reveal: .antiviewonce on/off");
-  logger.info("👁️ Emoji reveal: separate reply/react triggers via .vvemoji reply|react on/off");
-  logger.info("👁️ Manual reveal: .avv in reply to a view-once message");
+  logger.info("👁️ ViewOnce engine active | Reaction reveal disabled | Multi-emoji reply enabled");
 }
