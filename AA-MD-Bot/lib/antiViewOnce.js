@@ -78,20 +78,15 @@ function extractQuotedMediaForReveal(quotedMsg) {
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────
-// All view-once media is kept in memory only — zero disk writes.
-// Map keyed by message ID — stores buffer + metadata for manual/keyword reveal
 export const viewOnceStore = new Map();
 const _MAX_STORE = 200;
-
-// Dedup guard — WhatsApp often delivers view-once twice
-// (empty placeholder via messages.upsert, real content via messages.update)
 const _processed = new Set();
 const _PROCESSED_MAX = 200;
 
 // ── Periodic cleanup (60-minute in-memory TTL) ────────────────────────────────
 export function cleanViewOnceStore() {
   const now = Date.now();
-  const MEM_TTL = 60 * 60 * 1000; // 60 min — extended since no disk fallback
+  const MEM_TTL = 60 * 60 * 1000;
   for (const [key, val] of viewOnceStore.entries()) {
     if (now - val.timestamp > MEM_TTL) viewOnceStore.delete(key);
   }
@@ -108,33 +103,60 @@ function formatPhone(num) {
   return num.startsWith("+") ? num : `+${num}`;
 }
 
+function isSameJidOrLid(jid1, jid2) {
+  if (!jid1 || !jid2) return false;
+  const clean1 = String(jid1).split("@")[0].split(":")[0];
+  const clean2 = String(jid2).split("@")[0].split(":")[0];
+  return clean1 === clean2;
+}
 
-// ── FIXED: was previously falling back to reaction?.key?.participant /
-// reaction?.senderJid — those fields describe the message being REACTED TO
-// (the target), not who sent the reaction. That caused a real bug: in a DM,
-// if msg.key.fromMe didn't resolve truthy for some reason (MD sync timing),
-// the code would misattribute the reaction to the ORIGINAL SENDER of the
-// view-once (since msg.key.remoteJid in a DM is always the other party, not
-// you) — which is never in the owners list, so the reveal was silently
-// rejected as "unauthorized". The reactor's real identity is always on the
-// outer message envelope, exactly like any other message: key.participant
-// for groups, key.remoteJid for DMs (when not fromMe).
+// ── Reaction Sender Authorization (Supports Phone Numbers & LID) ─────────────
 function isAuthorizedReactionSender(msg, sock, sessionId) {
-  if (msg?.key?.fromMe) return true;
+  if (msg?.key?.fromMe || msg?.reaction?.key?.fromMe) return true;
 
-  const senderJid = msg?.key?.participant || msg?.key?.remoteJid || null;
+  const inGroup = msg?.key?.remoteJid?.endsWith("@g.us");
+  const reactionObj = msg?.message?.reactionMessage || msg?.reaction;
+
+  const senderJid =
+    msg?.key?.participant ||
+    reactionObj?.key?.participant ||
+    (inGroup ? null : msg?.key?.remoteJid) ||
+    null;
+
+  if (!senderJid) return false;
+
   const senderNum = getPhoneNum(senderJid);
-  const selfNum = getPhoneNum(getSelfJid(sock, sessionId));
+
+  // 1. Match against Self Phone Number
+  const selfJid = getSelfJid(sock, sessionId);
+  const selfNum = getPhoneNum(selfJid);
   if (senderNum && selfNum && senderNum === selfNum) return true;
 
-  const botNum = getPhoneNum(db.settings.getValue("botJid"));
-  if (senderNum && botNum && senderNum === botNum) return true;
+  // 2. Match against Self LID (WhatsApp MD sends LID JIDs on reactions)
+  const selfLid =
+    sock?.user?.lid ||
+    sock?.authState?.creds?.me?.lid ||
+    db.sessionSettings.getValue(sessionId, "botLid") ||
+    "";
+  if (selfLid && isSameJidOrLid(senderJid, selfLid)) return true;
 
+  // 3. Match against Bot JID
+  const botJid = db.settings.getValue("botJid");
+  if (senderNum && botJid && senderNum === getPhoneNum(botJid)) return true;
+
+  // 4. Match against Super Owner
   const superOwner = String(db.settings.getValue("superOwner") || config.superOwner || "");
-  if (senderNum && superOwner && senderNum === superOwner) return true;
+  if (senderNum && superOwner && getPhoneNum(superOwner) === senderNum) return true;
 
+  // 5. Match against Owners List
   const owners = db.settings.getValue("owners") || config.owners || [];
-  return owners.includes(senderNum) || owners.includes(senderJid);
+  for (const owner of owners) {
+    if (!owner) continue;
+    if (senderNum && getPhoneNum(owner) === senderNum) return true;
+    if (isSameJidOrLid(senderJid, owner)) return true;
+  }
+
+  return false;
 }
 
 function normalizeMsg(message) {
@@ -225,18 +247,12 @@ async function downloadBuffer(mediaMsg, isVid, isAudio = false) {
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
-// Call this from both messages.upsert and messages.update in sessionManager.
 export async function handleViewOnceMessage(msg, sock, sessionId) {
   if (!msg?.message || !msg?.key?.id) return;
 
   try {
     const msgId = msg.key.id;
 
-    // Dedup: skip if already successfully downloaded
-    // NOTE: we do NOT mark _processed here yet — we only mark it after the
-    // buffer download succeeds, so that a messages.update retry (which fires
-    // when WhatsApp delivers the real content after an empty placeholder) can
-    // still succeed if the first messages.upsert attempt had no media yet.
     if (_processed.has(msgId)) return;
 
     const extracted = extractViewOnceMedia(msg.message);
@@ -260,21 +276,18 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       "👁️ ViewOnce detected — downloading",
     );
 
-    // Download
     let buf = null;
     try {
       buf = await downloadBuffer(mediaMsg, isVid, isAudio);
     } catch (e) {
       logger.warn({ err: e.message }, "ViewOnce download failed");
     }
-    if (!buf?.length) return; // leave _processed clear so messages.update can retry
+    if (!buf?.length) return;
 
-    // Mark as successfully handled — prevents double-processing on retry events
     _processed.add(msgId);
     if (_processed.size > _PROCESSED_MAX)
       _processed.delete(_processed.values().next().value);
 
-    // Store in memory only — no disk writes
     const senderName =
       sock.contacts?.[senderJid]?.name ||
       sock.contacts?.[senderJid]?.notify ||
@@ -302,17 +315,13 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
       "✅ ViewOnce cached (memory only)",
     );
 
-    // ── Auto-reply to sender ──────────────────────────────────────────────────
+    // Auto-reply to sender
     const autoReply = db.settings.getValue("voAutoReply");
     if (autoReply && !msg.key.fromMe) {
       await sock.sendMessage(chatJid, { text: autoReply }).catch(() => {});
     }
 
-    // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
-    // Check group-level first, then global settings, then per-session settings
-    // (belt-and-suspenders: some callers may persist in sessionSettings instead)
-    // ── Auto-forward to owner's "You" chat — ONLY when .antiviewonce is ON ────
-    // Applies to BOTH groups and DMs — global flag covers all chats.
+    // Auto-forward to owner's self chat when antiViewOnce is enabled
     const groupAntiVO = inGroup
       ? db.groups.get(sessionId, chatJid)?.antiviewonce
       : undefined;
@@ -320,18 +329,8 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
     const sessAntiVO   = db.sessionSettings.getValue(sessionId, "antiViewOnce");
     const antiVOActive = !!(groupAntiVO || globalAntiVO === true || sessAntiVO);
 
-    logger.info(
-      { sessionId, antiVOActive, globalAntiVO, globalAntiVO_type: typeof globalAntiVO, sessAntiVO, groupAntiVO, fromMe: msg.key.fromMe },
-      "👁️ ViewOnce antiVO check",
-    );
-
     if (antiVOActive && !msg.key.fromMe) {
       const selfJid = getSelfJid(sock, sessionId);
-
-      logger.info(
-        { sessionId, selfJid },
-        "👁️ ViewOnce auto-reveal: sending to self-chat",
-      );
 
       if (selfJid) {
         const date = moment().tz(tz).format("DD/MM/YYYY");
@@ -363,8 +362,6 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
         } catch (sendErr) {
           logger.warn({ err: sendErr.message, selfJid }, "❌ ViewOnce auto-reveal send FAILED");
         }
-      } else {
-        logger.warn({ sessionId }, "👁️ ViewOnce auto-reveal: selfJid is null — sock.user, session botJid, and global botJid all unavailable");
       }
     }
   } catch (e) {
@@ -373,7 +370,6 @@ export async function handleViewOnceMessage(msg, sock, sessionId) {
 }
 
 // ── Helpers for reply reveal ──────────────────────────────────────────────────
-// Extract plain text from any message type
 function extractText(m) {
   if (!m) return "";
   const norm = normalizeMsg(m);
@@ -390,17 +386,11 @@ function extractText(m) {
   );
 }
 
-// Extract contextInfo from any message wrapper.
-// Handles ephemeral, documentWithCaption, viewOnce, and all standard message types.
-// Walks the full wrapper chain to find a contextInfo that contains a stanzaId.
 function extractContextInfo(m) {
   if (!m) return null;
 
-  // Walk the message tree: unwrap each known envelope type and collect contextInfo candidates
-  // We do a more thorough walk than normalizeMsg (which only handles 2 types).
   function* walk(obj, depth = 0) {
     if (!obj || depth > 8) return;
-    // Yield contextInfo from any known message type at this level
     for (const key of [
       "extendedTextMessage",
       "imageMessage",
@@ -416,7 +406,6 @@ function extractContextInfo(m) {
     ]) {
       if (obj[key]?.contextInfo) yield obj[key].contextInfo;
     }
-    // Walk into known envelope/wrapper types
     for (const wrapper of [
       "ephemeralMessage",
       "documentWithCaptionMessage",
@@ -425,15 +414,13 @@ function extractContextInfo(m) {
       "viewOnceMessageV2Extension",
     ]) {
       if (obj[wrapper]?.message) yield* walk(obj[wrapper].message, depth + 1);
-      if (obj[wrapper]) yield* walk(obj[wrapper], depth + 1); // some wrap without .message
+      if (obj[wrapper]) yield* walk(obj[wrapper], depth + 1);
     }
   }
 
-  // Return first contextInfo that has a stanzaId (the one that identifies the quoted message)
   for (const ctx of walk(m)) {
     if (ctx?.stanzaId) return ctx;
   }
-  // Fall back to first contextInfo found (even without stanzaId — caller checks)
   for (const ctx of walk(m)) {
     return ctx;
   }
@@ -441,9 +428,6 @@ function extractContextInfo(m) {
 }
 
 // ── Emoji trigger detection ───────────────────────────────────────────────────
-// Returns true if the text contains 4+ of the same emoji grapheme cluster.
-// Uses Intl.Segmenter for correct handling of ZWJ sequences, skin-tone
-// variants, flags, keycaps, and all multi-codepoint emoji combinations.
 function emojiSegmentsFromText(text) {
   if (!text) return [];
   const isEmoji = (s) => {
@@ -507,9 +491,7 @@ function hasFourSameEmoji(text) {
   return false;
 }
 
-// ── Reply-based reveal: voword keyword OR prefix+4-same-emoji ────────────────
-// Called for every fromMe message (sessionManager checks fromMe before calling).
-// Returns early with no side-effects when neither trigger matches.
+// ── Reply-based reveal ───────────────────────────────────────────────────────
 export async function handleReplyReveal(msg, sock, sessionId) {
   try {
     if (!msg?.key?.fromMe) return;
@@ -521,18 +503,14 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     ).trim();
     if (!msgText) return;
 
-    // ── Trigger check — must pass at least one ────────────────────────────────
     const voKeyword = db.settings.getValue("voKeyword");
     const prefix = db.settings.getValue("prefix") || ".";
-    const emojiEnabled = isVvReplyRevealEnabled(); // default ON, separate from reaction trigger
+    const emojiEnabled = isVvReplyRevealEnabled();
 
-    // Trigger 1: voword keyword present anywhere in the text
     const hasKeyword = !!(
       voKeyword && msgText.toLowerCase().includes(voKeyword.toLowerCase())
     );
 
-    // Trigger 2: 4 same emojis — works with OR without prefix
-    // e.g. 🔥🔥🔥🔥 OR .🔥🔥🔥🔥 both trigger reveal
     const textBody = msgText.startsWith(prefix)
       ? msgText.slice(prefix.length)
       : msgText;
@@ -541,16 +519,12 @@ export async function handleReplyReveal(msg, sock, sessionId) {
         hasConfiguredVvEmoji(textBody) || hasFourSameEmoji(textBody)
       );
 
-    if (!hasKeyword && !isEmojiTrigger) return; // not a reveal trigger — ignore
+    if (!hasKeyword && !isEmojiTrigger) return;
 
     const triggerLabel = isEmojiTrigger
       ? "emoji-trigger"
       : `keyword(${voKeyword})`;
 
-    // ── Safety: emoji trigger MUST be a proper reply to a message ────────────
-    // If there is no contextInfo at all the user just typed 4 emojis in free-air
-    // (not replying to anything).  We cannot know which viewonce they mean, so we
-    // abort here instead of guessing — prevents false triggers and wrong reveals.
     const ctxInfo = extractContextInfo(msg.message);
     const ctxInfoDirect0 =
       msg.message?.extendedTextMessage?.contextInfo ||
@@ -558,15 +532,13 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       msg.message?.videoMessage?.contextInfo ||
       null;
     const hasReply = !!(ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || ctxInfoDirect0?.quotedMessage);
-    if (!hasReply) return; // not a reply — ignore safely
+    if (!hasReply) return;
 
-    // ── Exact stanzaId lookup (works when owner used WhatsApp Reply) ──────────
     const stanzaId = ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || null;
 
     let stored = stanzaId ? viewOnceStore.get(stanzaId) : null;
 
     if (!stored && stanzaId) {
-      // Retry up to 10 s — handles race where messages.update hasn't arrived yet
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 500));
         stored = viewOnceStore.get(stanzaId);
@@ -574,10 +546,6 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       }
     }
 
-    // ── chatJid fallback scan (same chat only, stanzaId required) ────────────
-    // ONLY runs when: the user properly replied (stanzaId present) but the store
-    // entry wasn't found yet (timing race between messages.update handlers).
-    // NEVER does a global scan — that risks revealing a different person's content.
     if (!stored && stanzaId) {
       const chatJid = msg.key.remoteJid;
       const TTL = 60 * 60 * 1000;
@@ -589,7 +557,6 @@ export async function handleReplyReveal(msg, sock, sessionId) {
       }
       if (newest && Date.now() - newest.timestamp < TTL) stored = newest;
     }
-    // If stanzaId was null (no proper reply quote) we do NOT scan — abort below.
 
     const selfJid = getSelfJid(sock, sessionId);
     if (!selfJid) return;
@@ -598,9 +565,6 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     const date = moment().tz(tz).format("DD/MM/YYYY");
     const timeStr = moment().tz(tz).format("HH:mm:ss");
 
-    // ── Step 0: Direct download from quotedMessage media keys ────────────────
-    // Works for fresh view-once media (before the key expires).
-    // This is the PRIMARY path and doesn't require the in-memory store.
     try {
       const ctxInfoDirect =
         msg.message?.extendedTextMessage?.contextInfo ||
@@ -657,12 +621,9 @@ export async function handleReplyReveal(msg, sock, sessionId) {
           }
         }
       }
-    } catch (_) {
-      /* direct download failed — fall through to store */
-    }
+    } catch (_) {}
 
-    // ── Step 1+2: In-memory store lookup (fallback) ───────────────────────────
-    if (!stored) return; // no cached view-once found
+    if (!stored) return;
 
     const cap =
       `🔓 *View-Once Revealed*\n\n` +
@@ -703,24 +664,9 @@ export async function handleReplyReveal(msg, sock, sessionId) {
   }
 }
 
-
-// ── Reaction-based reveal: owner reacts to a cached view-once with a saved emoji ──
-//
-// FIXED (2 changes):
-//  1. isAuthorizedReactionSender() no longer misattributes DM reactions to the
-//     original sender (see comment on that function above).
-//  2. Normalizes two possible call shapes so this works no matter which one
-//     sessionManager passes in:
-//       a) a full "message-style" object: msg.message.reactionMessage = {...}
-//       b) Baileys' dedicated `messages.reaction` event payload: { key, reaction }
-//          (own-account reactions relayed from your phone are frequently
-//          delivered via this event instead of messages.upsert)
-//  3. Added step-by-step logging so if this still doesn't fire, the logs will
-//     show exactly which check failed (auth / emoji-disabled / emoji-mismatch /
-//     not-found-in-store) instead of failing completely silently.
+// ── Reaction-based reveal ─────────────────────────────────────────────────────
 export async function handleReactionReveal(rawMsg, sock, sessionId) {
   try {
-    // Normalize shape (b) into shape (a) so the rest of the function is unchanged
     const msg =
       rawMsg?.reaction && !rawMsg?.message
         ? { key: rawMsg.key, message: { reactionMessage: rawMsg.reaction } }
@@ -752,6 +698,7 @@ export async function handleReactionReveal(rawMsg, sock, sessionId) {
       logger.info({ sessionId, targetId }, "👁️ ReactionReveal: skipped — reaction reveal disabled in settings");
       return false;
     }
+
     if (!hasConfiguredVvEmoji(emojiText)) {
       logger.info(
         { sessionId, targetId, emojiText, configured: getConfiguredVvEmojis() },
@@ -780,7 +727,7 @@ export async function handleReactionReveal(rawMsg, sock, sessionId) {
     if (!stored) {
       logger.info(
         { sessionId, targetId, storeSize: viewOnceStore.size },
-        "👁️ ReactionReveal: skipped — target not found in viewOnceStore (media wasn't cached, or already expired/removed)",
+        "👁️ ReactionReveal: skipped — target not found in viewOnceStore",
       );
       return false;
     }
@@ -831,18 +778,16 @@ export async function handleReactionReveal(rawMsg, sock, sessionId) {
   }
 }
 
-// ── Manual reveal: by msgId (from !reveal, .reveal, or the reveal plugin) ─────
+// ── Manual reveal ─────────────────────────────────────────────────────────────
 export async function handleManualReveal(msgId, sock, replyJid) {
   const selfJid = getSelfJid(sock, null);
   if (!selfJid) return;
 
   const id = msgId?.trim();
 
-  // Check in-memory store (only source — no disk fallback)
   const stored = viewOnceStore.get(id);
 
   if (!stored) {
-    // ⚠️ Always send errors to owner's self-chat only — never to the group/DM
     await sock
       .sendMessage(selfJid, {
         text:
@@ -885,19 +830,15 @@ export async function handleManualReveal(msgId, sock, replyJid) {
   }
 }
 
-// ── Reveal by quoted/replied message — used by .reveal plugin ─────────────────
-// Pass the full `msg` of the owner's command message. Extracts the quoted msgId
-// and reveals that view-once. Returns true if found, false if not in cache.
+// ── Reveal by quoted message ─────────────────────────────────────────────────
 export async function handleRevealByReply(msg, sock) {
   const selfJid = getSelfJid(sock, null);
   if (!selfJid) return false;
 
-  // Extract the quoted message ID from contextInfo
   const ctxInfo = extractContextInfo(msg.message);
   const stanzaId = ctxInfo?.stanzaId;
   if (!stanzaId) return false;
 
-  // Check in-memory store (only source — no disk fallback)
   const stored = viewOnceStore.get(stanzaId);
   if (!stored) return false;
 
@@ -937,13 +878,11 @@ export async function handleRevealByReply(msg, sock) {
   return true;
 }
 
-// ── Init: call once at startup ────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────────────
 export function initViewOnce() {
   setInterval(cleanViewOnceStore, 60_000);
   logger.info("👁️ ViewOnce feature initialized");
   logger.info("👁️ Auto-reveal: .antiviewonce on/off");
-  logger.info(
-    "👁️ Emoji reveal: separate reply/react triggers via .vvemoji reply|react on/off",
-  );
+  logger.info("👁️ Emoji reveal: separate reply/react triggers via .vvemoji reply|react on/off");
   logger.info("👁️ Manual reveal: .avv in reply to a view-once message");
 }
