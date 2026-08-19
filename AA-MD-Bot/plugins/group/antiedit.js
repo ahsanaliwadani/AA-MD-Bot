@@ -1,38 +1,63 @@
 // ============================================
-// AA MD Bot - Anti Edit Plugin (FIXED & WORKING)
+// AA MD Bot - Anti Edit Plugin (FIXED v2 - with debug logging)
 // Developer: Ahsan Ali Wadani
 //
-// ROOT CAUSE OF THE OLD BUG:
-// The old file only had the `.antiedit on/off` command, which flipped a
-// database flag — but NOTHING was ever listening for real WhatsApp edit
-// events, so the flag was never actually read/used. Nothing could ever
-// reach your (You) chat because no listener existed at all.
+// WHAT WAS WRONG IN v1:
+// 1. Edit detection ONLY trusted `protocolMsg.type === 14`. On some
+//    Baileys/forks the numeric/enum value differs, so the check silently
+//    failed and NOTHING happened — no error, no message, nothing.
+// 2. `sock.sendMessage(...).catch(() => {})` swallowed every send error
+//    (auth issues, bad jid, rate limit, etc). You'd never know it failed.
+// 3. No logging anywhere, so there was no way to tell WHERE it broke:
+//    listener never attached? event never fired? detection failed?
+//    send failed? All looked identical from the outside: silence.
 //
-// HOW THIS FIXED VERSION WORKS:
-// 1. Every incoming message is cached in-memory: id → { text, sender, ts }
-// 2. WhatsApp delivers an edit as a NEW event: a `protocolMessage` with
-//    type MESSAGE_EDIT, whose `key.id` points back at the ORIGINAL
-//    message's id, and whose `editedMessage` holds the NEW content.
-// 3. We look the original id up in our cache, and — if anti-edit is ON for
-//    that chat — send the ORIGINAL text (plus the new text, for context)
-//    to your own number's self chat ("You"), exactly like Anti Delete does.
+// THE FIX:
+// - Detect edits primarily by the PRESENCE of `protocolMsg.editedMessage`
+//   (this is present on every edit regardless of the `type` enum value/
+//   naming across Baileys versions) — `type === 14` is now just a backup
+//   signal, not the only one.
+// - Every stage logs to console with an [AntiEdit] prefix so you can
+//   watch your terminal/PM2 logs while testing and see exactly where it
+//   stops working, if it ever does again.
+// - sendMessage errors are now logged instead of swallowed.
 //
-// The listener attaches itself to `sock.ev` automatically, the very first
-// time the `.antiedit` command runs (attachment happens synchronously
-// before the "ON ✅" reply is even sent) — and only once per connection,
-// guarded so reconnects/plugin-reloads never double-fire it.
+// ⚠️ IMPORTANT — DO THIS TOO:
+// The listener only attaches when `.antiedit` command RUNS. If the bot
+// restarts, you must run `.antiedit on` again, OR (recommended) call
+// `attachEditListener(sock, db)` directly in your connection.js right
+// after the socket connects, e.g.:
 //
-// ⚠️ NOTE: if the bot restarts while antiedit was already ON from before,
-// run `.antiedit on` once again after the restart so the listener attaches
-// for the new connection (or wire attachEditListener(sock, db) into your
-// main connection.js right after the socket is created, for guaranteed
-// coverage from boot — this file works standalone either way).
+//   import { attachEditListener } from './plugins/group/antiedit.js';
+//   ...
+//   sock.ev.on('connection.update', (update) => {
+//     if (update.connection === 'open') {
+//       attachEditListener(sock, db);
+//     }
+//   });
+//
+// This guarantees the listener is always live, even after reconnects,
+// without needing anyone to type the command again.
 // ============================================
-import { proto } from '@whiskeysockets/baileys'; // change to 'baileys' if that's the package name you use
+
+// Try both common package names so a wrong import never silently breaks
+// the whole plugin file from loading.
+let proto;
+try {
+  ({ proto } = await import('baileys'));
+} catch {
+  try {
+    ({ proto } = await import('@whiskeysockets/baileys'));
+  } catch (e) {
+    console.error('[AntiEdit] Could not import baileys proto — edit type enum fallback disabled:', e.message);
+  }
+}
+
 import { saveNow } from '../../lib/database.js';
 
+const LOG = (...args) => console.log('[AntiEdit]', ...args);
+
 // ── In-memory message cache ───────────────────────────────────────────────
-// key: `${jid}:${id}` → { text, jid, sender, pushName, isGroup, ts }
 const MAX_CACHE = 3000;
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const messageCache = new Map();
@@ -50,7 +75,6 @@ function pruneCache() {
   }
 }
 
-// ── Extract plain text from any message type we care about ────────────────
 function extractText(message) {
   if (!message) return '';
   return (
@@ -64,7 +88,6 @@ function extractText(message) {
   ).trim();
 }
 
-// ── Resolve anti-edit setting for a chat — same rules as the command ──────
 function isAntiEditEnabled(db, jid, isGroup) {
   if (isGroup) {
     return (
@@ -82,12 +105,30 @@ function selfJidOf(sock) {
   return raw.split(':')[0] + '@s.whatsapp.net';
 }
 
-// ── Attach the messages.upsert listener exactly ONCE per socket ───────────
+// ── Reliable edit detection ────────────────────────────────────────────
+// Presence of `editedMessage` is the strongest, version-independent signal.
+function isEditProtocolMessage(protocolMsg) {
+  if (!protocolMsg) return false;
+  if (protocolMsg.editedMessage) return true; // primary signal
+  const t = protocolMsg.type;
+  const enumVal = proto?.Message?.ProtocolMessage?.Type?.MESSAGE_EDIT;
+  return t === 14 || t === 'MESSAGE_EDIT' || (enumVal !== undefined && t === enumVal);
+}
+
 const attachedSockets = new WeakSet();
 
 export function attachEditListener(sock, db) {
-  if (!sock?.ev || attachedSockets.has(sock)) return;
+  if (!sock?.ev) {
+    console.error('[AntiEdit] sock.ev not found — this "sock" object is not the raw Baileys socket. ' +
+      'Wire attachEditListener(sock, db) where you have the ACTUAL socket returned by makeWASocket().');
+    return;
+  }
+  if (attachedSockets.has(sock)) {
+    LOG('Listener already attached for this socket — skipping duplicate attach.');
+    return;
+  }
   attachedSockets.add(sock);
+  LOG('Listener attached ✅ (messages.upsert)');
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
@@ -99,52 +140,63 @@ export function attachEditListener(sock, db) {
         const isGroup = jid.endsWith('@g.us');
         const protocolMsg = m.message?.protocolMessage;
 
-        // ── Any protocolMessage (edit / revoke / etc.) — handle & skip caching ──
         if (protocolMsg) {
-          const isEdit =
-            protocolMsg.type === proto.Message.ProtocolMessage.Type.MESSAGE_EDIT ||
-            protocolMsg.type === 14;
+          LOG(`protocolMessage seen | type=${protocolMsg.type} | hasEditedMessage=${!!protocolMsg.editedMessage} | fromMe=${m.key.fromMe}`);
 
-          if (isEdit && !m.key.fromMe && isAntiEditEnabled(db, jid, isGroup)) {
-            const originalId = protocolMsg.key?.id;
-            const cached = originalId ? messageCache.get(cacheKey(jid, originalId)) : null;
-            const newText = extractText(protocolMsg.editedMessage) || '(non-text content)';
+          const edit = isEditProtocolMessage(protocolMsg);
 
-            const senderJid = m.key.participant || m.key.remoteJid;
-            const senderName = m.pushName || senderJid.split('@')[0];
+          if (edit && !m.key.fromMe) {
+            const enabled = isAntiEditEnabled(db, jid, isGroup);
+            LOG(`Edit detected in ${jid} | antiedit enabled = ${enabled}`);
 
-            let chatLabel = `DM (${senderJid.split('@')[0]})`;
-            if (isGroup) {
-              const groupName = await sock.groupMetadata(jid).then((g) => g.subject).catch(() => jid);
-              chatLabel = `Group: ${groupName}`;
-            }
+            if (enabled) {
+              const originalId = protocolMsg.key?.id;
+              const cached = originalId ? messageCache.get(cacheKey(jid, originalId)) : null;
+              const newText = extractText(protocolMsg.editedMessage) || '(non-text content)';
 
-            const text =
-              `✏️ *EDITED MESSAGE DETECTED*\n\n` +
-              `👤 *From:* ${senderName} (${senderJid.split('@')[0]})\n` +
-              `💬 *Chat:* ${chatLabel}\n\n` +
-              `🔴 *Original:*\n${cached?.text ? cached.text : '_(not cached / unavailable)_'}\n\n` +
-              `🟢 *Edited to:*\n${newText}`;
+              const senderJid = m.key.participant || m.key.remoteJid;
+              const senderName = m.pushName || senderJid.split('@')[0];
 
-            await sock.sendMessage(selfJidOf(sock), { text }).catch(() => {});
+              let chatLabel = `DM (${senderJid.split('@')[0]})`;
+              if (isGroup) {
+                const groupName = await sock.groupMetadata(jid).then((g) => g.subject).catch(() => jid);
+                chatLabel = `Group: ${groupName}`;
+              }
 
-            // keep cache in sync so a 2nd edit on the same message still diffs correctly
-            if (originalId) {
-              messageCache.set(cacheKey(jid, originalId), {
-                text: newText,
-                jid,
-                sender: senderJid,
-                pushName: senderName,
-                isGroup,
-                ts: Date.now(),
-              });
+              const text =
+                `✏️ *EDITED MESSAGE DETECTED*\n\n` +
+                `👤 *From:* ${senderName} (${senderJid.split('@')[0]})\n` +
+                `💬 *Chat:* ${chatLabel}\n\n` +
+                `🔴 *Original:*\n${cached?.text ? cached.text : '_(not cached / unavailable)_'}\n\n` +
+                `🟢 *Edited to:*\n${newText}`;
+
+              const selfJid = selfJidOf(sock);
+              LOG(`Sending report to self jid: ${selfJid}`);
+
+              try {
+                await sock.sendMessage(selfJid, { text });
+                LOG('Report sent successfully ✅');
+              } catch (sendErr) {
+                console.error('[AntiEdit] FAILED to send report to self chat:', sendErr);
+              }
+
+              if (originalId) {
+                messageCache.set(cacheKey(jid, originalId), {
+                  text: newText,
+                  jid,
+                  sender: senderJid,
+                  pushName: senderName,
+                  isGroup,
+                  ts: Date.now(),
+                });
+              }
             }
           }
           continue; // never cache protocolMessage envelopes as normal text
         }
 
-        // ── Normal message → cache it for future edit detection ──────────
-        if (m.key.fromMe) continue; // no need to cache our own outgoing msgs
+        // Normal message → cache it
+        if (m.key.fromMe) continue;
         const text = extractText(m.message);
         if (!text || !m.key.id) continue;
 
@@ -158,7 +210,7 @@ export function attachEditListener(sock, db) {
         });
         pruneCache();
       } catch (e) {
-        console.error('[AntiEdit]', e.message);
+        console.error('[AntiEdit] Error processing message:', e);
       }
     }
   });
@@ -171,7 +223,6 @@ export default {
   category: 'group',
   usage: '.antiedit on/off',
   async execute({ sock, reply, jid, args, isOwner, isGroupMsg, db }) {
-    // Safe to call every time — only actually attaches once per connection.
     attachEditListener(sock, db);
 
     const toggle = args[0]?.toLowerCase();
