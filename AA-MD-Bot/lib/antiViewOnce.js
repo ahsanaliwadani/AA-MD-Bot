@@ -109,11 +109,20 @@ function formatPhone(num) {
 }
 
 
+// ── FIXED: was previously falling back to reaction?.key?.participant /
+// reaction?.senderJid — those fields describe the message being REACTED TO
+// (the target), not who sent the reaction. That caused a real bug: in a DM,
+// if msg.key.fromMe didn't resolve truthy for some reason (MD sync timing),
+// the code would misattribute the reaction to the ORIGINAL SENDER of the
+// view-once (since msg.key.remoteJid in a DM is always the other party, not
+// you) — which is never in the owners list, so the reveal was silently
+// rejected as "unauthorized". The reactor's real identity is always on the
+// outer message envelope, exactly like any other message: key.participant
+// for groups, key.remoteJid for DMs (when not fromMe).
 function isAuthorizedReactionSender(msg, sock, sessionId) {
   if (msg?.key?.fromMe) return true;
 
-  const reaction = normalizeMsg(msg?.message)?.reactionMessage;
-  const senderJid = msg?.key?.participant || msg?.participant || reaction?.participant || reaction?.senderJid || reaction?.key?.participant || msg?.key?.remoteJid || null;
+  const senderJid = msg?.key?.participant || msg?.key?.remoteJid || null;
   const senderNum = getPhoneNum(senderJid);
   const selfNum = getPhoneNum(getSelfJid(sock, sessionId));
   if (senderNum && selfNum && senderNum === selfNum) return true;
@@ -696,17 +705,60 @@ export async function handleReplyReveal(msg, sock, sessionId) {
 
 
 // ── Reaction-based reveal: owner reacts to a cached view-once with a saved emoji ──
-export async function handleReactionReveal(msg, sock, sessionId) {
+//
+// FIXED (2 changes):
+//  1. isAuthorizedReactionSender() no longer misattributes DM reactions to the
+//     original sender (see comment on that function above).
+//  2. Normalizes two possible call shapes so this works no matter which one
+//     sessionManager passes in:
+//       a) a full "message-style" object: msg.message.reactionMessage = {...}
+//       b) Baileys' dedicated `messages.reaction` event payload: { key, reaction }
+//          (own-account reactions relayed from your phone are frequently
+//          delivered via this event instead of messages.upsert)
+//  3. Added step-by-step logging so if this still doesn't fire, the logs will
+//     show exactly which check failed (auth / emoji-disabled / emoji-mismatch /
+//     not-found-in-store) instead of failing completely silently.
+export async function handleReactionReveal(rawMsg, sock, sessionId) {
   try {
-    const reaction = normalizeMsg(msg.message)?.reactionMessage;
+    // Normalize shape (b) into shape (a) so the rest of the function is unchanged
+    const msg =
+      rawMsg?.reaction && !rawMsg?.message
+        ? { key: rawMsg.key, message: { reactionMessage: rawMsg.reaction } }
+        : rawMsg;
+
+    const reaction = normalizeMsg(msg?.message)?.reactionMessage;
     const emojiText = reaction?.text || "";
     const targetKey = reaction?.key || null;
     const targetId = targetKey?.id || null;
-    if (!targetId || !emojiText) return false;
-    if (!isAuthorizedReactionSender(msg, sock, sessionId)) return false;
+
+    if (!targetId || !emojiText) {
+      logger.info(
+        { sessionId, hasTargetId: !!targetId, hasEmojiText: !!emojiText },
+        "👁️ ReactionReveal: skipped — missing targetId or emoji text",
+      );
+      return false;
+    }
+
+    if (!isAuthorizedReactionSender(msg, sock, sessionId)) {
+      logger.info(
+        { sessionId, targetId, fromMe: msg?.key?.fromMe, participant: msg?.key?.participant, remoteJid: msg?.key?.remoteJid },
+        "👁️ ReactionReveal: rejected — sender not authorized",
+      );
+      return false;
+    }
 
     const emojiEnabled = isVvReactionRevealEnabled();
-    if (!emojiEnabled || !hasConfiguredVvEmoji(emojiText)) return false;
+    if (!emojiEnabled) {
+      logger.info({ sessionId, targetId }, "👁️ ReactionReveal: skipped — reaction reveal disabled in settings");
+      return false;
+    }
+    if (!hasConfiguredVvEmoji(emojiText)) {
+      logger.info(
+        { sessionId, targetId, emojiText, configured: getConfiguredVvEmojis() },
+        "👁️ ReactionReveal: skipped — emoji not in configured set",
+      );
+      return false;
+    }
 
     let stored = viewOnceStore.get(targetId);
     if (!stored) {
@@ -725,10 +777,19 @@ export async function handleReactionReveal(msg, sock, sessionId) {
       }
       if (newest && Date.now() - newest.timestamp < TTL) stored = newest;
     }
-    if (!stored) return false;
+    if (!stored) {
+      logger.info(
+        { sessionId, targetId, storeSize: viewOnceStore.size },
+        "👁️ ReactionReveal: skipped — target not found in viewOnceStore (media wasn't cached, or already expired/removed)",
+      );
+      return false;
+    }
 
     const selfJid = getSelfJid(sock, sessionId);
-    if (!selfJid) return false;
+    if (!selfJid) {
+      logger.warn({ sessionId }, "👁️ ReactionReveal: selfJid could not be resolved");
+      return false;
+    }
 
     const tz = config.timezone || "Asia/Karachi";
     const date = moment().tz(tz).format("DD/MM/YYYY");
@@ -765,7 +826,7 @@ export async function handleReactionReveal(msg, sock, sessionId) {
     );
     return true;
   } catch (e) {
-    logger.warn({ err: e.message }, "handleReactionReveal threw");
+    logger.warn({ err: e.message, stack: e.stack }, "handleReactionReveal threw");
     return false;
   }
 }
