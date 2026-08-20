@@ -157,6 +157,25 @@ function _isAdmin(req) {
   return _parseCookies(req).adminToken === _makeToken();
 }
 
+const ACCESS_KEY_ENDPOINT_SECRET = process.env.ACCESS_KEY_ENDPOINT_SECRET || process.env.ACCESS_KEY_API_SECRET || '';
+
+function _readBearer(req) {
+  const auth = req.headers.authorization || '';
+  return auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+}
+
+function _safeEqualSecret(input, expected) {
+  if (!input || !expected) return false;
+  const inputDigest = crypto.createHash('sha256').update(String(input)).digest();
+  const expectedDigest = crypto.createHash('sha256').update(String(expected)).digest();
+  return crypto.timingSafeEqual(inputDigest, expectedDigest);
+}
+
+function _isAccessKeyEndpointAuthorized(req) {
+  const suppliedSecret = req.headers['x-access-key-secret'] || _readBearer(req);
+  return _safeEqualSecret(suppliedSecret, ACCESS_KEY_ENDPOINT_SECRET);
+}
+
 function printBanner() {
   console.log(chalk.cyan.bold(`
 ╔══════════════════════════════════════╗
@@ -177,7 +196,7 @@ async function startServer() {
       // ── Full CORS — required for Vercel / external frontends ──
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Access-Key-Secret');
       res.setHeader('Access-Control-Max-Age', '86400');
 
       // Handle preflight
@@ -404,6 +423,29 @@ async function startServer() {
           return sendJSON(res, result.ok ? 200 : 400, { ok: result.ok, authorized: result.ok, error: safeError, reason: result.ok ? undefined : result.reason });
         } catch {
           return sendJSON(res, 400, { ok: false, error: 'Bad request' });
+        }
+      }
+
+      // ── Secure API: generate Access Key ─────────────────────
+      if ((p === '/access-keys/generate' || p === '/generate-access-key') && req.method === 'POST') {
+        if (!ACCESS_KEY_ENDPOINT_SECRET) {
+          return sendJSON(res, 403, { ok: false, error: 'ACCESS_KEY_ENDPOINT_SECRET is not configured' });
+        }
+        if (!_isAccessKeyEndpointAuthorized(req)) {
+          return sendJSON(res, 401, { ok: false, error: 'Unauthorized' });
+        }
+        try {
+          const body = await readBody(req, 1);
+          const { phone, expiresAt = null, expiresInDays = null, connectionId = null, createdBy = 'secure-api' } = JSON.parse(body || '{}');
+          const days = expiresInDays === null || expiresInDays === undefined || expiresInDays === '' ? null : Number(expiresInDays);
+          if (days !== null && (!Number.isFinite(days) || days <= 0 || days > 3650)) {
+            return sendJSON(res, 400, { ok: false, error: 'expiresInDays must be between 1 and 3650' });
+          }
+          const exp = days ? Date.now() + days * 86400000 : expiresAt;
+          const out = await generateAccessKey({ phone, expiresAt: exp, createdBy: String(createdBy || 'secure-api').slice(0, 64), connectionId });
+          return sendJSON(res, 200, { ok: true, accessKey: out.key, record: out.record });
+        } catch (err) {
+          return sendJSON(res, 400, { ok: false, error: err.message });
         }
       }
 
