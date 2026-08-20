@@ -587,26 +587,19 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
   };
 
   // messages.update — fires for: read-receipts, ViewOnce unlocks, edits.
-  sock.ev.on('messages.update', async (updates) => {
+   sock.ev.on('messages.update', async (updates) => {
     for (const update of updates) {
       try {
         const content = update?.update?.message;
-        const reactions = Array.isArray(update?.update?.reactions) ? update.update.reactions : [];
-        for (const reaction of reactions) {
-          const reactionMsg = {
-            key: {
-              ...update.key,
-              fromMe: update.key?.fromMe || reaction?.key?.fromMe || false,
-              participant: reaction?.participant || reaction?.senderJid || reaction?.key?.participant || update.key?.participant,
-            },
-            message: { reactionMessage: reaction },
-          };
+        if (!content) continue;
+
+        const editEvent = { key: update.key, message: content };
 
         // ── Anti-Edit: edited messages can arrive through messages.update ─────
-        if (await handleAntiEdit(msg)) continue;
+        if (await handleAntiEdit(editEvent)) continue;
 
         // ── ViewOnce reveal ──────────────────────────────────────────────
-        try { await handleViewOnceMessage(msg, sock, sessionId); } catch {}
+        try { await handleViewOnceMessage(editEvent, sock, sessionId); } catch {}
 
       } catch {}
     }
