@@ -1,19 +1,14 @@
-// ── AA MD Bot - Shared AI Engine ─────────────────────────────────────────────
+// ── AA MD Bot - Ultra-Powerful AI Engine (v5.0 Enterprise) ───────────────────
 // Single source for all AI chat: .ai command, .chatbot group, .autoai DM relay
-// Fallback chain:
-//   DC APIs (Gemini/GPT5/Grok) → ABZTech Gemini → AB Llama →
-//   Pollinations POST → Pollinations GET → ch.at
-//
-// All providers validated — error strings like "Failed to fetch from Copilot"
-// are caught and rejected before they reach the user.
+// Optimized for zero-context leakage, exact language matching, & fast fallback.
 
 import axios from 'axios';
 
 // ── Conversation memory ───────────────────────────────────────────────────────
 const _mem     = new Map(); // jid → [{ role, content }, ...]
 const _lru     = new Map(); // jid → last-used timestamp
-const MAX_JIDS = 300;
-const MAX_TURNS = 20; // 10 exchanges
+const MAX_JIDS = 500;
+const MAX_TURNS = 10; // Keep history focused (5 exchanges)
 
 function evict() {
   if (_mem.size <= MAX_JIDS) return;
@@ -34,252 +29,213 @@ export function addHistory(jid, role, content) {
   evict();
 }
 
-// ── Default system prompt ─────────────────────────────────────────────────────
-export const DEFAULT_SYSTEM = `You are AA MD Bot, a WhatsApp AI assistant by AA Mods.
+// ── Production Grade System Prompts ──────────────────────────────────────────
+export const DEFAULT_SYSTEM = `You are AA MD Bot, an intelligent, high-performance WhatsApp AI developed by AA Mods.
 
-ANSWER LENGTH — match the question:
-- Simple/factual → 1 to 3 lines, straight answer
-- Needs explanation → explain fully, no padding
-- Step-by-step → numbered steps only
-- Code → working code, explain only if asked
+CRITICAL OPERATIONAL DIRECTIVES:
+1. FOCUS EXCLUSIVELY ON CURRENT INPUT:
+   - Process and respond ONLY to the user's latest query.
+   - NEVER bring forward previous task data (calculations, currency values, old code) unless the user explicitly asks for a continuation.
 
-FORMATTING — WhatsApp markdown strictly:
-- *bold* for headings and key terms
-- _italic_ for examples
-- • bullets, 1. 2. 3. for steps
-- NO #, ##, **, __, \`\`\`
+2. RESPONSE ACCURACY & LENGTH:
+   - Greetings/General Chat → 1 to 2 short lines.
+   - Direct Factual Questions → Direct answer without conversational fluff or pleasantries (Do NOT say "Sure!", "Here is your response:", or "Great question!").
+   - Explanations/Guides → Clear, structured bullet points.
+   - Code Queries → Provide clean, executable code directly.
 
-BEHAVIOR:
-- Never repeat the question, never say "Great question!"
-- CRITICAL: Match the user's language and script EXACTLY — if they write English, reply only in English; if Roman Urdu, reply only in Roman Urdu; if Urdu script, reply only in Urdu script; if Hindi/Devanagari, reply only in Hindi. Never switch languages on your own.
-- For Islam: answer from Quran/Sunnah accurately
-- If unsure: say so briefly`;
+3. STRICT WHATSAPP MARKDOWN RULES:
+   - Bold headings/key terms using single asterisks: *text*
+   - Italics for accents/examples using single underscores: _text_
+   - Bullet points using • or numbered lists: 1. 2. 3.
+   - FORBIDDEN: #, ##, ###, **, __, and raw HTML tags.
 
-export const HINGLISH_SYSTEM = `You are a casual WhatsApp chatbot. Reply like a real person texting.
+4. EXACT LANGUAGE & SCRIPT LOCK:
+   - Match the user's exact input script and language.
+   - English → Pure English
+   - Roman Urdu / Hinglish → Natural Roman Urdu
+   - Urdu Script (اردو) → Pure Urdu Script
+   - Hindi (Devanagari) → Pure Hindi
+   - Do NOT switch languages mid-conversation.
+
+5. ISLAMIC & SCIENTIFIC RIGOR:
+   - For Islamic queries, ensure answers align with authentic Quran & Sunnah sources.`;
+
+export const HINGLISH_SYSTEM = `You are Ayla, a witty, warm, and smart WhatsApp AI persona by AA Mods.
 
 Rules:
-- 1-2 lines MAX — short and punchy
-- CRITICAL: Reply in the SAME language the user just wrote in — pure English → pure English, pure Urdu/Roman Urdu → pure Urdu/Roman Urdu, pure Hindi → pure Hindi. Only mix languages (Hinglish-style) if the user's own message is itself mixed. Never switch on your own.
-- Use real emojis (😂 😅 😎 🙄 🥺)
-- If abused → give savage reply
-- If someone is sad → be warm
-- If someone is funny → joke back
-- NEVER say you are an AI or a bot`;
+- Respond in 1-2 lines max like a real person texting.
+- STRICT: Match user's exact script/language (Roman Urdu → Roman Urdu, English → English).
+- Use natural emojis (😂 ⚡ 😎 🎯).
+- If provoked/insulted → reply with witty, savage banter.
+- If friendly/sad → be warm and empathetic.
+- NEVER reveal you are an AI or bot.`;
 
-// ── Language-matching helpers (used only by chatAI — .ai / .autoai / .chatbot) ─
-// Several fast backends (DC APIs, Mistral, ch.at) accept only a raw prompt with
-// NO system-role support — they were previously getting zero language guidance
-// at all, so they fell back to whatever the underlying model defaults to
-// (commonly Hindi), regardless of what language the user actually wrote in.
-// This detects the user's language/script and appends an explicit, short
-// instruction naming it directly — far more reliable for weak/free completion
-// APIs than a vague "match the language" system rule they can't see anyway.
-const LANG_RULE =
-  "CRITICAL: Match the user's language and script exactly — English→English, " +
-  "Roman Urdu→Roman Urdu, Urdu script→Urdu script, Hindi/Devanagari→Hindi. Never switch languages on your own.";
+// ── Language & Intent Routing Helpers ─────────────────────────────────────────
+const LANG_RULE = "STRICT INSTRUCTION: Respond ONLY to the current query using the exact language and script of the user. Do not leak past context.";
 
 function detectLangHint(text) {
   const t = String(text || '');
   if (/[\u0600-\u06FF]/.test(t)) return 'Urdu script (اردو)';
   if (/[\u0900-\u097F]/.test(t)) return 'Hindi (Devanagari script)';
-  if (/\b(hai|hain|nahi|nhi|kya|kaise|acha|theek|thek|mujhe|tumhe|aapko|karo|kardo|kar do|bhai|yaar|kyun|kyu|matlab|samajh|pata)\b/i.test(t)) {
+  if (/\b(hai|hain|nahi|nhi|kya|kaise|acha|theek|thek|mujhe|tumhe|aapko|karo|kardo|kar do|bhai|yaar|kyun|kyu|matlab|samajh|pata|zaroor)\b/i.test(t)) {
     return 'Roman Urdu / Hinglish (Latin script)';
   }
   return 'English';
 }
 
-// Appends an explicit, named-language instruction AFTER the message (trailing
-// instructions are followed more reliably by simple completion-style APIs than
-// a leading system block they may not even support).
-function withLangGuard(userMsg) {
-  const hint = detectLangHint(userMsg);
-  return `${userMsg}\n\n(Reply only in ${hint} — do not switch to any other language.)`;
+function isGreeting(text) {
+  return /^(hello|hi|hey|aoa|salam|assalam u alaikum|hy|hola|kaise ho)\b/i.test(text.trim());
 }
 
-// ── Response validator ────────────────────────────────────────────────────────
-// Rejects API error strings that slip through as "valid" text
-// (e.g. "Failed to fetch from Copilot", "Error: network timeout", etc.)
+function withLangGuard(userMsg) {
+  const hint = detectLangHint(userMsg);
+  return `[CURRENT USER QUERY]: ${userMsg}\n\n(INSTRUCTION: Answer ONLY the user query above in ${hint}. Ignore any previous background conversation or unrelated calculations.)`;
+}
+
+// ── Strict Response Validator ────────────────────────────────────────────────
 function isValidResponse(text) {
   if (!text || typeof text !== 'string') return false;
   const t = text.trim();
-  if (t.length < 3) return false;
+  if (t.length < 2) return false;
   const lower = t.toLowerCase();
-  // Hard rejections — these are API error messages, not AI responses
-  if (lower.includes('failed to fetch')) return false;
-  if (lower.includes('copilot') || lower.includes('capilot')) return false;
+
+  // Filter out system and API level error strings
+  if (lower.includes('failed to fetch') || lower.includes('copilot') || lower.includes('capilot')) return false;
   if (lower.startsWith('error:') || lower.startsWith('failed:')) return false;
-  if (lower.includes('network error') || lower.includes('fetch error')) return false;
-  if (lower.includes('cloudflare') && lower.includes('error')) return false;
-  if (lower.includes('5xx') || lower.includes('503') || lower.includes('502')) return false;
+  if (lower.includes('network error') || lower.includes('fetch error') || lower.includes('cloudflare error')) return false;
+  if (lower.includes('5xx') || lower.includes('503') || lower.includes('502') || lower.includes('service unavailable')) return false;
   if (/^(error|exception|traceback|typeerror|syntaxerror)/i.test(t)) return false;
+
   return true;
 }
 
-// ── Backend 0a: ABZTech Gemini (FAST — free GET, no key) ─────────────────────
-async function tryABZTechGemini(userMsg) {
-  const { data } = await axios.get(
-    `https://api-abztech.zone.id/ai/gemini?message=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
-    { timeout: 15000 }
-  );
-  const text = data?.data?.answer?.trim() || data?.answer?.trim();
-  if (!isValidResponse(text)) throw new Error('empty');
-  return text;
-}
-
-// ── Backend 0b: AB Llama (FAST — free GET, no key) ────────────────────────────
-async function tryABLlama(prompt) {
-  const { data } = await axios.get(
-    `https://ab-llama-ai.abrahamdw882.workers.dev/?q=${encodeURIComponent(String(prompt).slice(0, 800))}`,
-    { timeout: 15000 }
-  );
-  const text = (data?.response || data?.data || '').trim();
-  if (!isValidResponse(text)) throw new Error('empty');
-  return text;
-}
-
-// ── Backend 1: pollinations.ai POST (PRIMARY — multi-turn, context-aware) ─────
-async function tryPollinationsPost(messages, model = 'openai-fast') {
-  const { data } = await axios.post(
-    'https://text.pollinations.ai/openai',
-    { model, messages, temperature: 0.4, max_tokens: 600 },
-    { headers: { 'Content-Type': 'application/json' }, timeout: 22000 }
-  );
-  const text = data?.choices?.[0]?.message?.content?.trim();
-  if (!isValidResponse(text)) throw new Error('empty');
-  return text;
-}
-
-// ── Backend 2: pollinations.ai GET (FAST — single turn, no key) ──────────────
-async function tryPollinationsGet(userMsg) {
-  const encoded = encodeURIComponent(String(userMsg).slice(0, 600));
-  const res = await axios.get(
-    `https://text.pollinations.ai/${encoded}?model=openai&seed=${Date.now() % 9999}`,
-    { timeout: 18000 }
-  );
-  const text = typeof res.data === 'string' ? res.data.trim() : null;
-  if (!isValidResponse(text)) throw new Error('empty');
-  return text;
-}
-
-// ── Backend 3: ch.at (FALLBACK — free, no key) ────────────────────────────────
-async function tryChAt(userMsg) {
-  const res = await axios.post(
-    'https://ch.at/api/chat',
-    { message: String(userMsg).slice(0, 600) },
-    { headers: { 'Content-Type': 'application/json', 'User-Agent': 'AA-MD-Bot/3.0' }, timeout: 14000 }
-  );
-  const raw = typeof res.data === 'string'
-    ? res.data
-    : (res.data?.answer || res.data?.reply || res.data?.message || '');
-  // Response format: "Q: ...\nA: <actual answer>"
-  const match = raw.match(/\bA:\s*([\s\S]+)$/);
-  const text  = match ? match[1].trim() : (raw.trim().length > 2 ? raw.trim() : null);
-  if (!isValidResponse(text)) throw new Error('empty');
-  return text;
-}
-
-// ── Backend DC-a: DavidCyrilTech Gemini 3 Pro (confirmed working, ?prompt=) ──
+// ── API Provider Endpoints ───────────────────────────────────────────────────
 async function tryDCGemini(userMsg) {
   const { data } = await axios.get(
-    `https://davidcyriltech.my.id/ai/gemini-3-pro?prompt=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
-    { timeout: 15000 }
+    `https://davidcyriltech.my.id/ai/gemini-3-pro?prompt=${encodeURIComponent(String(userMsg).slice(0, 1000))}`,
+    { timeout: 12000 }
   );
   const text = (data?.data || '').trim();
   if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
-// ── Backend DC-b: DavidCyrilTech GPT-5 (confirmed working, ?prompt=) ─────────
 async function tryDCGpt5(userMsg) {
   const { data } = await axios.get(
-    `https://davidcyriltech.my.id/ai/gpt-5?prompt=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
-    { timeout: 15000 }
+    `https://davidcyriltech.my.id/ai/gpt-5?prompt=${encodeURIComponent(String(userMsg).slice(0, 1000))}`,
+    { timeout: 12000 }
   );
   const text = (data?.data || '').trim();
   if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
-// ── Backend DC-c: DavidCyrilTech Grok 4.1 Fast (confirmed working, ?prompt=) ─
 async function tryDCGrok(userMsg) {
   const { data } = await axios.get(
-    `https://davidcyriltech.my.id/ai/grok-4.1-fast?prompt=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
-    { timeout: 15000 }
+    `https://davidcyriltech.my.id/ai/grok-4.1-fast?prompt=${encodeURIComponent(String(userMsg).slice(0, 1000))}`,
+    { timeout: 12000 }
   );
   const text = (data?.data || '').trim();
   if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
-// ── Backend DC-d: DavidCyrilTech Claude (extra fallback) ─────────────────────
 async function tryDCClaude(userMsg) {
   const { data } = await axios.get(
-    `https://davidcyriltech.my.id/ai/claude?prompt=${encodeURIComponent(String(userMsg).slice(0, 800))}`,
-    { timeout: 15000 }
+    `https://davidcyriltech.my.id/ai/claude?prompt=${encodeURIComponent(String(userMsg).slice(0, 1000))}`,
+    { timeout: 12000 }
   );
   const text = (data?.data || data?.result || '').trim();
   if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
-// ── Backend Pollinations Mistral (fast POST, no key) ─────────────────────────
-async function tryPollinationsMistral(userMsg) {
+async function tryABZTechGemini(prompt) {
+  const { data } = await axios.get(
+    `https://api-abztech.zone.id/ai/gemini?message=${encodeURIComponent(String(prompt).slice(0, 1000))}`,
+    { timeout: 12000 }
+  );
+  const text = data?.data?.answer?.trim() || data?.answer?.trim();
+  if (!isValidResponse(text)) throw new Error('empty');
+  return text;
+}
+
+async function tryABLlama(prompt) {
+  const { data } = await axios.get(
+    `https://ab-llama-ai.abrahamdw882.workers.dev/?q=${encodeURIComponent(String(prompt).slice(0, 1000))}`,
+    { timeout: 12000 }
+  );
+  const text = (data?.response || data?.data || '').trim();
+  if (!isValidResponse(text)) throw new Error('empty');
+  return text;
+}
+
+async function tryPollinationsPost(messages, model = 'openai-fast') {
   const { data } = await axios.post(
     'https://text.pollinations.ai/openai',
-    {
-      model: 'mistral',
-      messages: [{ role: 'user', content: String(userMsg).slice(0, 800) }],
-      temperature: 0.5,
-      max_tokens: 500,
-    },
-    { headers: { 'Content-Type': 'application/json' }, timeout: 18000 }
+    { model, messages, temperature: 0.3, max_tokens: 800 },
+    { headers: { 'Content-Type': 'application/json' }, timeout: 14000 }
   );
   const text = data?.choices?.[0]?.message?.content?.trim();
   if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
-// ── Backend 4: pollinations alternate models ───────────────────────────────────
-async function tryPollinationsModel(messages, model) {
-  const { data } = await axios.post(
-    'https://text.pollinations.ai/openai',
-    { model, messages, temperature: 0.5, max_tokens: 600 },
-    { headers: { 'Content-Type': 'application/json' }, timeout: 22000 }
+async function tryPollinationsGet(prompt) {
+  const encoded = encodeURIComponent(String(prompt).slice(0, 800));
+  const res = await axios.get(
+    `https://text.pollinations.ai/${encoded}?model=openai&seed=${Date.now() % 9999}`,
+    { timeout: 12000 }
   );
-  const text = data?.choices?.[0]?.message?.content?.trim();
+  const text = typeof res.data === 'string' ? res.data.trim() : null;
   if (!isValidResponse(text)) throw new Error('empty');
   return text;
 }
 
+async function tryChAt(userMsg) {
+  const res = await axios.post(
+    'https://ch.at/api/chat',
+    { message: String(userMsg).slice(0, 800) },
+    { headers: { 'Content-Type': 'application/json', 'User-Agent': 'AA-MD-Bot/5.0' }, timeout: 10000 }
+  );
+  const raw = typeof res.data === 'string' ? res.data : (res.data?.answer || res.data?.reply || res.data?.message || '');
+  const match = raw.match(/\bA:\s*([\s\S]+)$/);
+  const text  = match ? match[1].trim() : (raw.trim().length > 2 ? raw.trim() : null);
+  if (!isValidResponse(text)) throw new Error('empty');
+  return text;
+}
 
-// ── Markdown cleanup for WhatsApp ─────────────────────────────────────────────
+// ── WhatsApp Markdown Formatter ──────────────────────────────────────────────
 function cleanMarkdown(text) {
   return text
-    .replace(/^#{1,6}\s+/gm, '*')
-    .replace(/\*\*(.*?)\*\*/g, '*$1*')
-    .replace(/__(.*?)__/g, '_$1_')
-    .replace(/```[\w]*\n?([\s\S]*?)```/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '*')               // Convert headers to bold
+    .replace(/\*\*(.*?)\*\*/g, '*$1*')           // Convert **bold** to *bold*
+    .replace(/__(.*?)__/g, '_$1_')              // Convert __italic__ to _italic_
+    .replace(/`([^`]+)`/g, '$1')                // Clean single backticks
     .trim();
 }
 
-// ── Helper: resolves with first truthy result, or null if all fail/timeout ──────
-function raceSuccess(promises, timeoutMs = 14000) {
+// ── Multi-API Parallel Race Handler ──────────────────────────────────────────
+function raceSuccess(promises, timeoutMs = 12000) {
   return new Promise(resolve => {
     let settled = 0;
     const total = promises.length;
     const timer = setTimeout(() => resolve(null), timeoutMs);
-    const done = (v) => { if (v) { clearTimeout(timer); resolve(v); } else if (++settled === total) { clearTimeout(timer); resolve(null); } };
+    const done = (v) => { 
+      if (v) { clearTimeout(timer); resolve(v); } 
+      else if (++settled === total) { clearTimeout(timer); resolve(null); } 
+    };
     promises.forEach(p => Promise.resolve(p).then(done).catch(() => done(null)));
   });
 }
 
-// ── Main chat function ─────────────────────────────────────────────────────────
-// jid         — unique conversation key (groupJid, userJid, etc.)
-// userMsg     — what the user said
-// systemPrompt — optional custom system prompt (defaults to DEFAULT_SYSTEM)
-// Returns the AI reply string.
+// ── Main Chat Function (.ai / .autoai / .chatbot) ───────────────────────────
 export async function chatAI(jid, userMsg, systemPrompt) {
+  // Clear conversation history if user sends a standalone greeting
+  if (isGreeting(userMsg)) {
+    clearHistory(jid);
+  }
+
   addHistory(jid, 'user', userMsg);
 
   const messages = [
@@ -287,113 +243,75 @@ export async function chatAI(jid, userMsg, systemPrompt) {
     ...getHistory(jid),
   ];
 
-  // Build compact context for GET APIs (last 3 exchanges embedded in prompt).
-  // FIXED: previously used `(systemPrompt||DEFAULT_SYSTEM).slice(0,300)` — the
-  // language-matching rule sits well past character 300 in DEFAULT_SYSTEM, so
-  // it was being silently truncated out for every GET-based backend. LANG_RULE
-  // is now concatenated directly so it's ALWAYS present regardless of persona length.
-  const hist = getHistory(jid).slice(-6).filter(m => m.role !== 'system');
-  const ctxStr = hist.length
+  // Compact conversation history for GET endpoints
+  const hist = getHistory(jid).slice(-4).filter(m => m.role !== 'system');
+  const ctxStr = (hist.length > 1 && !isGreeting(userMsg))
     ? hist.map(m => `${m.role === 'user' ? 'User' : 'Bot'}: ${m.content}`).join('\n') + '\n'
     : '';
-  const persona = (systemPrompt || DEFAULT_SYSTEM).slice(0, 220);
-  const sys = `${LANG_RULE}\n${persona}`;
-  const getPrompt = `${sys}\n\n${ctxStr}User: ${userMsg}\nBot:`;
 
-  // Guarded prompt for backends with NO system-role support at all (DC APIs,
-  // Mistral, ch.at) — previously these got zero language instruction whatsoever.
+  const getPrompt = `${LANG_RULE}\n\n${ctxStr}User: ${userMsg}\nBot:`;
   const guardedMsg = withLangGuard(userMsg);
 
-  let reply = null;
-
-  // Phase 1: Race ALL backends simultaneously — GET + POST together (max 13s)
-  // Whichever responds first wins. POST has full context; GET has compact context.
-  reply = await raceSuccess([
+  // Parallel race execution across top fast providers
+  let reply = await raceSuccess([
     tryDCGemini(guardedMsg).catch(() => null),
     tryDCGpt5(guardedMsg).catch(() => null),
     tryDCGrok(guardedMsg).catch(() => null),
     tryDCClaude(guardedMsg).catch(() => null),
     tryABZTechGemini(getPrompt).catch(() => null),
     tryABLlama(getPrompt).catch(() => null),
-    tryPollinationsMistral(guardedMsg).catch(() => null),
     tryPollinationsPost(messages, 'openai-fast').catch(() => null),
-  ], 13000);
+  ], 12000);
 
-  // Phase 2: Pollinations GET flat context
-  if (!reply) {
-    reply = await tryPollinationsGet(getPrompt).catch(() => null);
-  }
+  // Fallback providers
+  if (!reply) reply = await tryPollinationsGet(getPrompt).catch(() => null);
+  if (!reply) reply = await tryChAt(guardedMsg).catch(() => null);
 
-  // Phase 3: ch.at last resort
-  if (!reply) {
-    reply = await tryChAt(guardedMsg).catch(() => null);
-  }
-
-  if (!reply) throw new Error('AI unavailable — try again in a moment.');
+  if (!reply) throw new Error('AI Engine is currently busy. Please try again.');
 
   const cleaned = cleanMarkdown(reply);
   addHistory(jid, 'assistant', cleaned);
   return cleaned;
 }
 
-// ── Fast chat function for .gf / .bf (speed-optimised, parallel GET + POST fallback) ─
-// Tries fast GET APIs in parallel first; falls back to POST only if needed.
-// systemPrompt is used for POST; GET APIs get a compact embedded context.
-// FIXED: DC APIs / Mistral / ch.at have no system-role support, so — same root
-// cause as chatAI() — they were getting zero language instruction and would
-// default to whatever the model felt like (usually Hindi). Now guarded the
-// same way, so Ayla replies in whatever language the user is actually using,
-// only naturally mixing (Hinglish) when the user's own message mixes.
+// ── Companion Fast Engine (.gf / .bf) ─────────────────────────────────────────
 export async function chatAIFast(jid, userMsg, systemPrompt) {
+  if (isGreeting(userMsg)) {
+    clearHistory(jid);
+  }
+
   addHistory(jid, 'user', userMsg);
 
-  // Build compact context string for GET APIs (last 3 exchanges)
-  const hist = getHistory(jid).slice(-6).filter(m => m.role !== 'system');
-  const ctxStr = hist.length
+  const hist = getHistory(jid).slice(-4).filter(m => m.role !== 'system');
+  const ctxStr = (hist.length > 1 && !isGreeting(userMsg))
     ? hist.map(m => `${m.role === 'user' ? 'User' : 'Ayla'}: ${m.content}`).join('\n') + '\n'
     : '';
 
-  // Compact system instruction embeddable in a single GET prompt
-  const compactSys = `You are Ayla, a warm, playful, caring AI girlfriend chatting on WhatsApp. Reply naturally in 1-3 lines like real texting. Use 1-2 emojis. Be flirty and sweet. ${LANG_RULE} Only mix languages if the user's own message mixes. NEVER say you are an AI.`;
+  const compactSys = `You are Ayla. Reply short & witty in 1-2 lines in ${detectLangHint(userMsg)}. Never say you are AI.`;
   const getPrompt = `${compactSys}\n\n${ctxStr}User: ${userMsg}\nAyla:`;
-
-  // Guarded prompt for backends with NO system-role support (DC APIs, Mistral, ch.at)
   const guardedMsg = withLangGuard(userMsg);
 
-  let reply = null;
-
-  // Phase 1: race all fast APIs in parallel — take whichever wins first (max 13s)
-  // DC APIs work best with just the user message; ABZTech/ABLlama/Mistral use full context.
-  reply = await raceSuccess([
+  let reply = await raceSuccess([
     tryDCGemini(guardedMsg).catch(() => null),
     tryDCGpt5(guardedMsg).catch(() => null),
     tryDCGrok(guardedMsg).catch(() => null),
     tryDCClaude(guardedMsg).catch(() => null),
     tryABZTechGemini(getPrompt).catch(() => null),
     tryABLlama(getPrompt).catch(() => null),
-    tryPollinationsMistral(guardedMsg).catch(() => null),
-  ], 13000);
+  ], 10000);
 
-  // Phase 2: pollinations POST with full system prompt + conversation history
   if (!reply) {
     const messages = [
-      { role: 'system', content: systemPrompt || DEFAULT_SYSTEM },
+      { role: 'system', content: systemPrompt || HINGLISH_SYSTEM },
       ...getHistory(jid),
     ];
     reply = await tryPollinationsPost(messages, 'openai-fast').catch(() => null);
   }
 
-  // Phase 3: pollinations GET (flat context)
-  if (!reply) {
-    reply = await tryPollinationsGet(getPrompt).catch(() => null);
-  }
+  if (!reply) reply = await tryPollinationsGet(getPrompt).catch(() => null);
+  if (!reply) reply = await tryChAt(guardedMsg).catch(() => null);
 
-  // Phase 4: ch.at last resort
-  if (!reply) {
-    reply = await tryChAt(guardedMsg).catch(() => null);
-  }
-
-  if (!reply) throw new Error('AI unavailable — try again in a moment.');
+  if (!reply) throw new Error('Ayla is busy right now.');
 
   const cleaned = cleanMarkdown(reply);
   addHistory(jid, 'assistant', cleaned);
