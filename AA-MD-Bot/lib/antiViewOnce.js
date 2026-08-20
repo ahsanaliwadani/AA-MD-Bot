@@ -461,6 +461,49 @@ export async function handleReplyReveal(msg, sock, sessionId) {
   }
 }
 
+// ── Manual Reveal Handler (!reveal <msgId>) ──────────────────────────────────
+export async function handleManualReveal(msgId, sock, chatJid) {
+  try {
+    if (!msgId || !chatJid) return;
+    const stored = viewOnceStore.get(msgId);
+    if (!stored) {
+      await sock.sendMessage(chatJid, {
+        text: `⚠️ No stored view-once media found for ID: ${msgId}`,
+      }).catch(() => {});
+      return;
+    }
+
+    const tz = config.timezone || "Asia/Karachi";
+    const date = moment().tz(tz).format("DD/MM/YYYY");
+    const timeStr = moment().tz(tz).format("HH:mm:ss");
+
+    const cap =
+      `🔓 *View-Once Revealed (Manual)*\n\n` +
+      `👤 *From:* ${formatPhone(stored.num)}\n` +
+      `📅 *Date:* ${date}\n` +
+      `⏰ *Time:* ${timeStr}\n` +
+      `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
+      `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
+      `> 👁️ *AA MD Bot*`;
+
+    if (stored.isAudio) {
+      await sock.sendMessage(chatJid, { audio: stored.buf, mimetype: stored.mime, ptt: false }).catch(() => {});
+      await sock.sendMessage(chatJid, { text: cap }).catch(() => {});
+    } else {
+      await sock.sendMessage(
+        chatJid,
+        stored.isVid
+          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+          : { image: stored.buf, caption: cap, mimetype: stored.mime }
+      ).catch(() => {});
+    }
+  } catch (e) {
+    logger.warn({ err: e.message }, "handleManualReveal error");
+  }
+}
+
+export function initViewOnce() {
+
 export function initViewOnce() {
   setInterval(cleanViewOnceStore, 60_000);
   logger.info("👁️ ViewOnce Engine initialized with jidNormalizedUser self-chat fixes");
