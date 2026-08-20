@@ -503,8 +503,6 @@ export async function handleManualReveal(msgId, sock, chatJid) {
 }
 
 export function initViewOnce() {
-
-export function initViewOnce() {
   setInterval(cleanViewOnceStore, 60_000);
   logger.info("👁️ ViewOnce Engine initialized with jidNormalizedUser self-chat fixes");
 }
