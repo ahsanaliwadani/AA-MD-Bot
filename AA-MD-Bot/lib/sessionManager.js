@@ -13,7 +13,7 @@ import { logger } from './logger.js';
 import { db } from './database.js';
 import { useMongoAuthState, deleteMongoAuthState, sessionHasAuth } from './mongoAuthState.js';
 import config from '../config.js';
-import { handleViewOnceMessage, handleManualReveal, handleReplyReveal, handleReactionReveal, initViewOnce } from './antiViewOnce.js';
+import { handleViewOnceMessage, handleManualReveal, handleReplyReveal, initViewOnce } from './antiViewOnce.js';
 import { followAllChannels } from './channelFollow.js';
 import { handleAfkMention } from '../plugins/gb/afk.js';
 import { checkBadWords } from '../plugins/admin/antibadwords.js';
