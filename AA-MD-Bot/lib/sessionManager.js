@@ -601,17 +601,6 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
             },
             message: { reactionMessage: reaction },
           };
-          await handleReactionReveal(reactionMsg, sock, sessionId).catch(() => {});
-        }
-        if (!content) continue;
-        const chatJid = update.key?.remoteJid;
-        const msg     = { key: update.key, message: content };
-
-        // ── ViewOnce Reaction Reveal: reactions may also arrive via messages.update
-        if (content?.reactionMessage) {
-          await handleReactionReveal(msg, sock, sessionId).catch(() => {});
-          continue;
-        }
 
         // ── Anti-Edit: edited messages can arrive through messages.update ─────
         if (await handleAntiEdit(msg)) continue;
@@ -635,11 +624,6 @@ export async function createSession(sessionId = 'default', usePairingCode = fals
       const editProto = getEditProtocol(msg.message, msg.key);
       if (type !== 'notify' && proto?.type !== 14 && proto?.type !== 'MESSAGE_EDIT' && !editProto && !msg.message?.reactionMessage) return;
 
-      // ── ViewOnce Reaction Reveal: owner reacts with a saved vvemoji ──
-      if (msg.message?.reactionMessage) {
-        await handleReactionReveal(msg, sock, sessionId).catch(() => {});
-        return;
-      }
 
       // ── Anti-Edit: MESSAGE_EDIT is not a command; recover old cached copy ──
       if (editProto) {
