@@ -502,6 +502,64 @@ export async function handleManualReveal(msgId, sock, chatJid) {
   }
 }
 
+// ── Reaction Reveal Handler (owner reacts with a saved vvEmoji) ──────────────
+export async function handleReactionReveal(msg, sock, sessionId) {
+  try {
+    const reaction = msg?.message?.reactionMessage;
+    if (!reaction) return;
+
+    // Only act on the owner's own reactions
+    if (!msg?.key?.fromMe && !reaction?.key?.fromMe) return;
+
+    const emojiText = reaction.text || "";
+    if (!emojiText || !hasConfiguredVvEmoji(emojiText)) return;
+
+    const stanzaId = reaction.key?.id;
+    if (!stanzaId) return;
+
+    let stored = viewOnceStore.get(stanzaId);
+    if (!stored) {
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 300));
+        stored = viewOnceStore.get(stanzaId);
+        if (stored) break;
+      }
+    }
+    if (!stored) return;
+
+    const selfJid = getSelfJid(sock, sessionId);
+    if (!selfJid) return;
+
+    const tz = config.timezone || "Asia/Karachi";
+    const date = moment().tz(tz).format("DD/MM/YYYY");
+    const timeStr = moment().tz(tz).format("HH:mm:ss");
+
+    const cap =
+      `🔓 *View-Once Revealed (Reaction)*\n\n` +
+      `👤 *From:* ${formatPhone(stored.num)}\n` +
+      `📅 *Date:* ${date}\n` +
+      `⏰ *Time:* ${timeStr}\n` +
+      `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
+      `🔑 *Trigger:* emoji (${emojiText})\n` +
+      `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
+      `> 👁️ *AA MD Bot*`;
+
+    if (stored.isAudio) {
+      await sock.sendMessage(selfJid, { audio: stored.buf, mimetype: stored.mime, ptt: false }).catch(() => {});
+      await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+    } else {
+      await sock.sendMessage(
+        selfJid,
+        stored.isVid
+          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+          : { image: stored.buf, caption: cap, mimetype: stored.mime }
+      ).catch(() => {});
+    }
+  } catch (e) {
+    logger.warn({ err: e.message }, "handleReactionReveal error");
+  }
+}
+
 export function initViewOnce() {
   setInterval(cleanViewOnceStore, 60_000);
   logger.info("👁️ ViewOnce Engine initialized with jidNormalizedUser self-chat fixes");
