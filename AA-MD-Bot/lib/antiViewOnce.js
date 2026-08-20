@@ -559,6 +559,58 @@ export async function handleReactionReveal(msg, sock, sessionId) {
     logger.warn({ err: e.message }, "handleReactionReveal error");
   }
 }
+// ── Reveal By Reply Handler (msg, sock) → boolean ─────────────────────────────
+// Used by .good/.reveal commands: walks the quoted-message contextInfo for a
+// stanzaId, looks it up in viewOnceStore, and sends the media to self-chat.
+// Returns true if something was found & sent, false otherwise.
+export async function handleRevealByReply(msg, sock, sessionId) {
+  try {
+    const ctxInfo = extractContextInfo(msg?.message);
+    const ctxInfoDirect =
+      msg?.message?.extendedTextMessage?.contextInfo ||
+      msg?.message?.imageMessage?.contextInfo ||
+      msg?.message?.videoMessage?.contextInfo ||
+      null;
+
+    const stanzaId = ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || null;
+    if (!stanzaId) return false;
+
+    const stored = viewOnceStore.get(stanzaId);
+    if (!stored) return false;
+
+    const selfJid = getSelfJid(sock, sessionId || msg?.key?.remoteJid);
+    if (!selfJid) return false;
+
+    const tz = config.timezone || "Asia/Karachi";
+    const date = moment().tz(tz).format("DD/MM/YYYY");
+    const timeStr = moment().tz(tz).format("HH:mm:ss");
+
+    const cap =
+      `🔓 *View-Once Revealed*\n\n` +
+      `👤 *From:* ${formatPhone(stored.num)}\n` +
+      `📅 *Date:* ${date}\n` +
+      `⏰ *Time:* ${timeStr}\n` +
+      `📍 *Chat:* ${stored.inGroup ? "Group" : "DM"}\n` +
+      `💬 *Caption:* "${stored.caption || "None"}"\n\n` +
+      `> 👁️ *AA MD Bot*`;
+
+    if (stored.isAudio) {
+      await sock.sendMessage(selfJid, { audio: stored.buf, mimetype: stored.mime, ptt: false }).catch(() => {});
+      await sock.sendMessage(selfJid, { text: cap }).catch(() => {});
+    } else {
+      await sock.sendMessage(
+        selfJid,
+        stored.isVid
+          ? { video: stored.buf, caption: cap, mimetype: stored.mime }
+          : { image: stored.buf, caption: cap, mimetype: stored.mime }
+      ).catch(() => {});
+    }
+    return true;
+  } catch (e) {
+    logger.warn({ err: e.message }, "handleRevealByReply error");
+    return false;
+  }
+}
 
 export function initViewOnce() {
   setInterval(cleanViewOnceStore, 60_000);
