@@ -636,14 +636,14 @@
             <p>Create one cryptographically-random key for one WhatsApp number. The key is saved so admins can view and copy it again later.</p>
             <input class="db-search" id="akPhone" placeholder="WhatsApp number with country code" style="width:100%;margin-bottom:8px"/>
             <select class="bc-select" id="akExpiry">
-              <option value="">Lifetime</option><option value="30">30 Days</option><option value="90">90 Days</option><option value="180">180 Days</option><option value="365">1 Year</option>
+              <option value="">Lifetime (no expiry)</option><option value="30">30 Days</option><option value="90">90 Days</option><option value="180">180 Days</option><option value="365">1 Year</option>
             </select>
             <button class="btn-save" onclick="generateAccessKeyUI()">Generate Key</button>
             <div id="akGenerated" class="bc-result"></div>
           </div>
           <div class="bc-card">
             <h3>🔎 Search Keys</h3>
-            <p>Search by phone number or key ID. Saved keys are listed for admin copy/reuse.</p>
+            <p>Search by phone number, key ID, or saved access key. Saved keys are listed for admin copy/reuse.</p>
             <input class="db-search" id="akSearch" placeholder="Search phone or ID…" oninput="loadAccessKeys()" style="width:100%"/>
           </div>
         </div>
@@ -943,7 +943,7 @@ const PAGE_META = {
   overview:  ['Overview',   'Bot stats and sessions at a glance'],
   sessions:  ['Sessions',   'Manage all connected WhatsApp numbers'],
   broadcast: ['Broadcast',  'Send messages to connected sessions'],
-  accesskeys:['Access Keys','Generate, view, revoke and disable paid access keys'],
+  accesskeys:['Access Keys','Generate, search, assign, activate, suspend, revoke and view lifetime access keys'],
   servers:   ['Servers',    'Open other AA MD Bot server dashboards'],
   database:  ['Database',   'View and manage all bot database collections'],
   logs:      ['Live Logs',  'Real-time bot log stream'],
@@ -1364,8 +1364,10 @@ async function loadAccessKeys() {
     <td style="white-space:nowrap">
       <button class="btn-sm" onclick="accessKeyAction('${k.id}','regenerate')">Regenerate</button>
       <button class="btn-sm" onclick="accessKeyAction('${k.id}','activate')">Activate</button>
-      <button class="btn-sm" onclick="accessKeyAction('${k.id}','disable')">Disable</button>
+      <button class="btn-sm" onclick="assignAccessKeyUI('${k.id}', '${k.assignedPhone}')">Assign</button>
+      <button class="btn-sm" onclick="accessKeyAction('${k.id}','suspend')">Suspend</button>
       <button class="btn-sm" onclick="accessKeyAction('${k.id}','revoke')">Revoke</button>
+      <button class="btn-sm" onclick="viewAccessKeyHistory('${k.id}')">History</button>
       <button class="btn-sm" style="color:var(--red)" onclick="accessKeyAction('${k.id}','delete')">Delete</button>
     </td></tr>`).join('');
 }
@@ -1392,6 +1394,21 @@ async function accessKeyAction(id, action) {
   if (r.ok && r.accessKey) alert('Replacement key generated and saved in database. Copy now or from the Access Keys table:\n\n'+r.accessKey);
   else if (!r.ok) alert(r.error || 'Action failed');
   await loadAccessKeys();
+}
+
+async function assignAccessKeyUI(id, currentPhone) {
+  const phone = prompt('Assign this access key to WhatsApp number:', currentPhone || '');
+  if (!phone) return;
+  const r = await fetch(`/admin/access-keys/${encodeURIComponent(id)}/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ phone })}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  if (!r.ok) alert(r.error || 'Assign failed');
+  await loadAccessKeys();
+}
+
+async function viewAccessKeyHistory(id) {
+  const r = await fetch(`/admin/access-keys/${encodeURIComponent(id)}/history`,{method:'POST'}).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  if (!r.ok) return alert(r.error || 'History failed');
+  const lines = (r.history || []).map(h => `${fmtTime(h.at)} - ${h.action}${h.actor ? ' by '+h.actor : ''}${h.assignedPhone ? ' phone +'+h.assignedPhone : ''}${h.fromPhone ? ' from +'+h.fromPhone : ''}${h.reason ? ' ('+h.reason+')' : ''}`);
+  alert(lines.length ? lines.join('\n') : 'No history recorded.');
 }
 
 // ══════════════════════════════════════════════════════════

@@ -39,7 +39,7 @@ import { cleanTemp, formatDuration } from './lib/helper.js';
 import { startBirthdayScheduler } from './plugins/utility/birthday.js';
 import { initTelegramAdmin }    from './lib/telegramAdmin.js';
 import { initTelegramFeatures } from './lib/telegramFeatures.js';
-import { generateAccessKey, listAccessKeys, updateAccessKeyStatus, deleteAccessKey, verifyAccessKey, isAuthorized, normalizePhone, getAccessKeySecuritySettings } from './lib/accessKeys.js';
+import { generateAccessKey, listAccessKeys, getAccessKey, getAccessKeyHistory, assignAccessKey, updateAccessKeyStatus, deleteAccessKey, verifyAccessKey, isAuthorized, normalizePhone, getAccessKeySecuritySettings } from './lib/accessKeys.js';
 
 // ── AntiEdit Listener Import ──────────────────────────────────────────────
 import { attachEditListener } from './plugins/group/antiedit.js';
@@ -449,6 +449,75 @@ async function startServer() {
         }
       }
 
+      // ── Secure API: full Access Key management ──────────────
+      if (p === '/access-keys' && req.method === 'GET') {
+        if (!ACCESS_KEY_ENDPOINT_SECRET) {
+          return sendJSON(res, 403, { ok: false, error: 'ACCESS_KEY_ENDPOINT_SECRET is not configured' });
+        }
+        if (!_isAccessKeyEndpointAuthorized(req)) {
+          return sendJSON(res, 401, { ok: false, error: 'Unauthorized' });
+        }
+        const id = url.searchParams.get('id');
+        const search = url.searchParams.get('search') || '';
+        try {
+          if (id) return sendJSON(res, 200, { ok: true, record: getAccessKey(id) });
+          return sendJSON(res, 200, { ok: true, keys: listAccessKeys({ search }) });
+        } catch (err) {
+          return sendJSON(res, 404, { ok: false, error: err.message });
+        }
+      }
+
+      if (p === '/access-keys/history' && req.method === 'GET') {
+        if (!ACCESS_KEY_ENDPOINT_SECRET) {
+          return sendJSON(res, 403, { ok: false, error: 'ACCESS_KEY_ENDPOINT_SECRET is not configured' });
+        }
+        if (!_isAccessKeyEndpointAuthorized(req)) {
+          return sendJSON(res, 401, { ok: false, error: 'Unauthorized' });
+        }
+        try {
+          const id = url.searchParams.get('id');
+          if (!id) throw new Error('Access key id is required');
+          return sendJSON(res, 200, { ok: true, history: getAccessKeyHistory(id) });
+        } catch (err) {
+          return sendJSON(res, 400, { ok: false, error: err.message });
+        }
+      }
+
+      if (p === '/access-keys/action' && req.method === 'POST') {
+        if (!ACCESS_KEY_ENDPOINT_SECRET) {
+          return sendJSON(res, 403, { ok: false, error: 'ACCESS_KEY_ENDPOINT_SECRET is not configured' });
+        }
+        if (!_isAccessKeyEndpointAuthorized(req)) {
+          return sendJSON(res, 401, { ok: false, error: 'Unauthorized' });
+        }
+        try {
+          const body = await readBody(req, 1);
+          const { action, id, phone, search = '', expiresAt = null, expiresInDays = null, connectionId = null, createdBy = 'secure-api' } = JSON.parse(body || '{}');
+          const actor = String(createdBy || 'secure-api').slice(0, 64);
+          const normalizedAction = String(action || '').toLowerCase();
+          if (normalizedAction === 'generate') {
+            const days = expiresInDays === null || expiresInDays === undefined || expiresInDays === '' ? null : Number(expiresInDays);
+            if (days !== null && (!Number.isFinite(days) || days <= 0 || days > 3650)) {
+              return sendJSON(res, 400, { ok: false, error: 'expiresInDays must be between 1 and 3650' });
+            }
+            const exp = days ? Date.now() + days * 86400000 : expiresAt;
+            const out = await generateAccessKey({ phone, expiresAt: exp, createdBy: actor, connectionId });
+            return sendJSON(res, 200, { ok: true, accessKey: out.key, record: out.record });
+          }
+          if (normalizedAction === 'search') return sendJSON(res, 200, { ok: true, keys: listAccessKeys({ search: search || phone || id || '' }) });
+          if (!id) throw new Error('Access key id is required');
+          if (normalizedAction === 'view') return sendJSON(res, 200, { ok: true, record: getAccessKey(id) });
+          if (normalizedAction === 'history') return sendJSON(res, 200, { ok: true, history: getAccessKeyHistory(id) });
+          if (normalizedAction === 'assign') return sendJSON(res, 200, { ok: true, record: await assignAccessKey(id, phone, actor) });
+          if (normalizedAction === 'activate') return sendJSON(res, 200, { ok: true, record: await updateAccessKeyStatus(id, 'active', actor) });
+          if (normalizedAction === 'suspend') return sendJSON(res, 200, { ok: true, record: await updateAccessKeyStatus(id, 'disabled', actor) });
+          if (normalizedAction === 'revoke') return sendJSON(res, 200, { ok: true, record: await updateAccessKeyStatus(id, 'revoked', actor) });
+          throw new Error('Unsupported action. Use generate, search, view, assign, activate, suspend, revoke, or history.');
+        } catch (err) {
+          return sendJSON(res, 400, { ok: false, error: err.message });
+        }
+      }
+
       // ── Admin: Access Keys ──────────────────────────────────
       if (p === '/admin/access-keys' && req.method === 'GET') {
         if (!_isAdmin(req)) { return sendJSON(res, 401, { error: 'Unauthorized' }); }
@@ -469,20 +538,26 @@ async function startServer() {
         }
       }
 
-      const akAction = p.match(/^\/admin\/access-keys\/([^/]+)\/(revoke|disable|activate|delete|regenerate)$/);
+      const akAction = p.match(/^\/admin\/access-keys\/([^/]+)\/(revoke|disable|suspend|activate|assign|delete|regenerate|history)$/);
       if (akAction && req.method === 'POST') {
         if (!_isAdmin(req)) { return sendJSON(res, 401, { error: 'Unauthorized' }); }
         try {
           const [, id, action] = akAction;
           if (action === 'delete') { await deleteAccessKey(id); return sendJSON(res, 200, { ok: true }); }
+          if (action === 'history') return sendJSON(res, 200, { ok: true, history: getAccessKeyHistory(id) });
+          if (action === 'assign') {
+            const body = await readBody(req).catch(() => '{}');
+            const { phone } = JSON.parse(body || '{}');
+            return sendJSON(res, 200, { ok: true, record: await assignAccessKey(id, phone, 'admin-panel') });
+          }
           if (action === 'regenerate') {
             const old = db.accessKeys.get(id);
             if (!old) throw new Error('Access key not found');
             const out = await generateAccessKey({ phone: old.assignedPhone, expiresAt: old.expiresAt, createdBy: 'admin-panel', connectionId: old.connectionId });
             return sendJSON(res, 200, { ok: true, accessKey: out.key, record: out.record });
           }
-          const status = action === 'revoke' ? 'revoked' : action === 'disable' ? 'disabled' : 'active';
-          const record = await updateAccessKeyStatus(id, status);
+          const status = action === 'revoke' ? 'revoked' : ['disable', 'suspend'].includes(action) ? 'disabled' : 'active';
+          const record = await updateAccessKeyStatus(id, status, 'admin-panel');
           return sendJSON(res, 200, { ok: true, record });
         } catch (err) {
           return sendJSON(res, 400, { ok: false, error: err.message });
