@@ -1356,7 +1356,11 @@ async function loadAccessKeys() {
   const body = document.getElementById('akBody');
   if (!body) return;
   const search = document.getElementById('akSearch')?.value || '';
-  const d = await fetch('/admin/access-keys?search='+encodeURIComponent(search)).then(r=>r.json()).catch(()=>({ok:false}));
+  const d = await fetch('/admin/access-keys?search='+encodeURIComponent(search)).then(r=>r.json()).catch(()=>({ok:false,error:'Network error'}));
+  if (!d.ok) {
+    body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--red);padding:20px">${d.error || 'Unable to load access keys.'}</td></tr>`;
+    return;
+  }
   const keys = d.keys || [];
   if (!keys.length) { body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text2);padding:20px">No access keys found.</td></tr>'; return; }
   body.innerHTML = keys.map(k => `<tr>

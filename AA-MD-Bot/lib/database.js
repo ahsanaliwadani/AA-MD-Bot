@@ -98,15 +98,37 @@ async function mongoSaveCollection(name, data) {
       await col.replaceOne({ _id: '__settings__' }, { _id: '__settings__', ...data }, { upsert: true });
       return;
     }
-    // Key-value map: bulk upsert each entry, delete removed entries
+    // Key-value map: bulk upsert each entry. Deletes are performed with the
+    // targeted deleteDocument helper below. A collection-wide delete here can
+    // erase writes made by another bot instance that shares the same database.
     const ops = Object.entries(data).map(([key, val]) => ({
       replaceOne: { filter: { _id: key }, replacement: { _id: key, ...val }, upsert: true },
     }));
     if (ops.length) await col.bulkWrite(ops, { ordered: false });
-    // No deletion of removed keys here — keeps it simple and safe
   } catch (e) {
     console.error(`[DB] MongoDB save ${name} failed:`, e.message);
   }
+}
+
+// Delete exactly one persisted record. This is intentionally separate from a
+// cache flush so API lifecycle deletes never depend on a stale cache snapshot.
+export async function deleteDocument(name, id) {
+  const mdb = await getDb();
+  if (!mdb) return false;
+  const result = await mdb.collection(name).deleteOne({ _id: id });
+  return result.acknowledged;
+}
+
+// Write one authoritative document immediately for critical lifecycle data.
+export async function replaceDocument(name, id, data) {
+  const mdb = await getDb();
+  if (!mdb) return false;
+  const result = await mdb.collection(name).replaceOne(
+    { _id: id },
+    { _id: id, ...data },
+    { upsert: true }
+  );
+  return result.acknowledged;
 }
 
 // ── Debounced write-through ───────────────────────────────────────────────────

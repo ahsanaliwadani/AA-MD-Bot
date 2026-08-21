@@ -106,6 +106,55 @@ pm2 restart aa-md-bot
 | `OCR_SPACE_KEY` | `.ocr` command |
 | `HF_TOKEN` | AI commands |
 
+### Access Key API
+
+Access keys generated through the secure endpoints and the dashboard use the
+same MongoDB `accessKeys` collection. They therefore appear in the dashboard
+immediately, and deleting a key removes its database document and any linked
+authorizations. Set `ACCESS_KEY_ENDPOINT_SECRET` before using these endpoints.
+
+#### Lifetime keys and Access Key sheet
+
+Omit both `expiresAt` and `expiresInDays` to generate a **lifetime** key. Every
+generate, verification, assignment, status change, and delete is mirrored to
+the `Access Keys` tab in the configured Google Sheet. The row headings are
+`Access Key ID`, `Access Key`, `WhatsApp Number`, `Status`, `Type`, timestamps,
+creator, connection ID, and last event; deleted keys stay in the sheet with
+`Status = deleted` for audit history.
+
+1. Create a Google Cloud service account, enable the Google Sheets API, and
+   share the supplied spreadsheet with the service account's `client_email` as
+   an **Editor**. An edit-link alone does not give a server/API caller a Google
+   identity.
+2. Set `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` to the complete one-line service
+   account JSON (or set its base64 form in
+   `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON_BASE64`).
+3. Optionally set `ACCESS_KEY_SHEET_ID`; when omitted, the supplied Access Key
+   sheet is used.
+
+> `GOOGLE_SHEETS_API_KEY` is supported as a configuration diagnostic only. A
+> Google API key can access public read endpoints, but cannot create, update,
+> or delete Google Sheet rows. Keep the API key in an environment secret and
+> use the service-account credentials above for Access Key sheet writes.
+
+```bash
+# Generate a lifetime key (no expiry fields)
+curl -X POST http://localhost:5000/access-keys/generate \
+  -H 'Content-Type: application/json' \
+  -H 'X-Access-Key-Secret: YOUR_SECRET' \
+  -d '{"phone":"923001234567"}'
+
+# List keys (the same records shown in the dashboard)
+curl 'http://localhost:5000/access-keys' \
+  -H 'X-Access-Key-Secret: YOUR_SECRET'
+
+# Delete a key by its returned record.id
+curl -X POST http://localhost:5000/access-keys/action \
+  -H 'Content-Type: application/json' \
+  -H 'X-Access-Key-Secret: YOUR_SECRET' \
+  -d '{"action":"delete","id":"ACCESS_KEY_ID"}'
+```
+
 ---
 
 ## 🔧 PM2 Commands
