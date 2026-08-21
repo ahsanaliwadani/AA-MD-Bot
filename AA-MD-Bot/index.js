@@ -512,7 +512,11 @@ async function startServer() {
           if (normalizedAction === 'activate') return sendJSON(res, 200, { ok: true, record: await updateAccessKeyStatus(id, 'active', actor) });
           if (normalizedAction === 'suspend') return sendJSON(res, 200, { ok: true, record: await updateAccessKeyStatus(id, 'disabled', actor) });
           if (normalizedAction === 'revoke') return sendJSON(res, 200, { ok: true, record: await updateAccessKeyStatus(id, 'revoked', actor) });
-          throw new Error('Unsupported action. Use generate, search, view, assign, activate, suspend, revoke, or history.');
+          if (normalizedAction === 'delete') {
+            await deleteAccessKey(id);
+            return sendJSON(res, 200, { ok: true, deletedId: id });
+          }
+          throw new Error('Unsupported action. Use generate, search, view, assign, activate, suspend, revoke, delete, or history.');
         } catch (err) {
           return sendJSON(res, 400, { ok: false, error: err.message });
         }

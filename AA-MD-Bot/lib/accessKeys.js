@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { db, saveNow } from './database.js';
+import { db, deleteDocument, replaceDocument, saveNow } from './database.js';
+import { getAccessKeySheetConfiguration, syncAccessKeyToSheet } from './accessKeySheet.js';
 
 const KEY_STATUSES = new Set(['pending', 'active', 'revoked', 'expired', 'disabled']);
 const KEY_LENGTH = 32;
@@ -18,6 +19,7 @@ export function getAccessKeySecuritySettings() {
     ACCESS_KEY_VERIFY_WINDOW_MS: intSetting('ACCESS_KEY_VERIFY_WINDOW_MS', 15 * 60 * 1000),
     ACCESS_KEY_HASH_ITERATIONS: intSetting('ACCESS_KEY_HASH_ITERATIONS', 210000),
     ACCESS_KEY_PEPPER_SET: !!(db.settings.getValue('ACCESS_KEY_PEPPER') || process.env.ACCESS_KEY_PEPPER || process.env.SESSION_SECRET),
+    accessKeySheet: getAccessKeySheetConfiguration(),
   };
 }
 
@@ -97,13 +99,32 @@ function withHistory(record, action, actor, details = {}) {
   return { ...record, history: [...(Array.isArray(record.history) ? record.history : []), historyEntry(action, actor, details)] };
 }
 
+async function syncSheet(record, event) {
+  try {
+    await syncAccessKeyToSheet(record, event);
+  } catch (error) {
+    // A reporting failure must never prevent a valid customer key from being
+    // generated, verified, or deleted in the authorization database.
+    console.error('[ACCESS SHEET] Sync failed:', error.message);
+  }
+}
+
+async function persistAccessKey(record) {
+  if (!await replaceDocument('accessKeys', record.id, record)) {
+    throw new Error('MongoDB is not configured; access key was not saved');
+  }
+}
+
 export async function generateAccessKey({ phone, expiresAt = null, createdBy = 'admin', connectionId = null } = {}) {
   const assignedPhone = normalizePhone(phone);
   if (!assignedPhone) throw new Error('Valid WhatsApp phone number is required');
 
   for (const record of Object.values(db.accessKeys.all())) {
     if (record.assignedPhone === assignedPhone && ['pending', 'active'].includes(record.status)) {
-      db.accessKeys.set(record.id, withHistory({ ...record, status: 'revoked', revokedAt: now(), revokedReason: 'replaced' }, 'revoke', createdBy, { reason: 'replaced' }));
+      const revoked = withHistory({ ...record, status: 'revoked', revokedAt: now(), revokedReason: 'replaced' }, 'revoke', createdBy, { reason: 'replaced' });
+      await persistAccessKey(revoked);
+      db.accessKeys.set(record.id, revoked);
+      await syncSheet(publicRecord(revoked), 'replaced');
     }
   }
 
@@ -131,8 +152,10 @@ export async function generateAccessKey({ phone, expiresAt = null, createdBy = '
     connectionId,
     history: [historyEntry('generate', createdBy, { assignedPhone, expiresAt: expiresAt ? Number(expiresAt) : null, connectionId })],
   };
+  await persistAccessKey(record);
   db.accessKeys.set(id, record);
   await saveNow('accessKeys').catch(() => {});
+  await syncSheet(publicRecord(record), 'generated');
   console.log('[ACCESS] Access Key generated', { id, phone: assignedPhone, createdBy });
   return { key: plainKey, record: publicRecord(record) };
 }
@@ -231,6 +254,7 @@ export async function verifyAccessKey({ plainKey, phone, sessionId }) {
     lastUsedAt: now(),
     connectionId: sessionId || matched.connectionId || null,
   };
+  await persistAccessKey(activated);
   db.accessKeys.set(matched.id, activated);
   db.accessAuthorizations.set(`phone:${assignedPhone}`, {
     id: `phone:${assignedPhone}`,
@@ -243,6 +267,7 @@ export async function verifyAccessKey({ plainKey, phone, sessionId }) {
   });
   await saveNow('accessKeys').catch(() => {});
   await saveNow('accessAuthorizations').catch(() => {});
+  await syncSheet(publicRecord(activated), 'verified');
   clearFailures(assignedPhone, sessionId);
   console.log('[ACCESS] Access Key verified', { id: matched.id, phone: assignedPhone, sessionId });
   return { ok: true, record: publicRecord(activated) };
@@ -272,9 +297,11 @@ export async function assignAccessKey(id, phone, actor = 'admin') {
   for (const [authId, auth] of Object.entries(db.accessAuthorizations.all())) {
     if (auth.accessKeyId === id) db.accessAuthorizations.delete(authId);
   }
+  await persistAccessKey(patch);
   db.accessKeys.set(id, patch);
   await saveNow('accessKeys').catch(() => {});
   await saveNow('accessAuthorizations').catch(() => {});
+  await syncSheet(publicRecord(patch), 'assigned');
   console.log('[ACCESS] Key assigned', { id, phone: assignedPhone });
   return publicRecord(patch);
 }
@@ -295,9 +322,11 @@ export async function updateAccessKeyStatus(id, status, actor = 'admin') {
       if (auth.accessKeyId === id) db.accessAuthorizations.delete(authId);
     }
   }
+  await persistAccessKey(patch);
   db.accessKeys.set(id, patch);
   await saveNow('accessKeys').catch(() => {});
   await saveNow('accessAuthorizations').catch(() => {});
+  await syncSheet(publicRecord(patch), status);
   console.log(`[ACCESS] Key ${status}`, { id, phone: record.assignedPhone });
   return publicRecord(patch);
 }
@@ -305,12 +334,19 @@ export async function updateAccessKeyStatus(id, status, actor = 'admin') {
 export async function deleteAccessKey(id) {
   const record = db.accessKeys.get(id);
   if (!record) throw new Error('Access key not found');
+  const authorizationIds = Object.entries(db.accessAuthorizations.all())
+    .filter(([, auth]) => auth.accessKeyId === id)
+    .map(([authId]) => authId);
+  // Do not rely on the cache flush for deletion: remove the exact documents
+  // from MongoDB before reporting a successful endpoint response.
+  if (!await deleteDocument('accessKeys', id)) throw new Error('MongoDB is not configured; access key was not deleted');
+  const authorizationDeletes = await Promise.all(authorizationIds.map(authId => deleteDocument('accessAuthorizations', authId)));
+  if (authorizationDeletes.some(deleted => !deleted)) throw new Error('MongoDB is not configured; authorization was not deleted');
   db.accessKeys.delete(id);
-  for (const [authId, auth] of Object.entries(db.accessAuthorizations.all())) {
-    if (auth.accessKeyId === id) db.accessAuthorizations.delete(authId);
-  }
+  for (const authId of authorizationIds) db.accessAuthorizations.delete(authId);
   await saveNow('accessKeys').catch(() => {});
   await saveNow('accessAuthorizations').catch(() => {});
+  await syncSheet({ ...publicRecord(record), status: 'deleted', deletedAt: now() }, 'deleted');
   console.log('[ACCESS] Key deleted', { id, phone: record.assignedPhone });
 }
 
