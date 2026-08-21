@@ -89,13 +89,21 @@ function markExpired(record) {
   return record;
 }
 
+function historyEntry(action, actor = 'system', details = {}) {
+  return { action, actor, at: now(), ...details };
+}
+
+function withHistory(record, action, actor, details = {}) {
+  return { ...record, history: [...(Array.isArray(record.history) ? record.history : []), historyEntry(action, actor, details)] };
+}
+
 export async function generateAccessKey({ phone, expiresAt = null, createdBy = 'admin', connectionId = null } = {}) {
   const assignedPhone = normalizePhone(phone);
   if (!assignedPhone) throw new Error('Valid WhatsApp phone number is required');
 
   for (const record of Object.values(db.accessKeys.all())) {
     if (record.assignedPhone === assignedPhone && ['pending', 'active'].includes(record.status)) {
-      db.accessKeys.set(record.id, { ...record, status: 'revoked', revokedAt: now(), revokedReason: 'replaced' });
+      db.accessKeys.set(record.id, withHistory({ ...record, status: 'revoked', revokedAt: now(), revokedReason: 'replaced' }, 'revoke', createdBy, { reason: 'replaced' }));
     }
   }
 
@@ -121,6 +129,7 @@ export async function generateAccessKey({ phone, expiresAt = null, createdBy = '
     revokedAt: null,
     createdBy,
     connectionId,
+    history: [historyEntry('generate', createdBy, { assignedPhone, expiresAt: expiresAt ? Number(expiresAt) : null, connectionId })],
   };
   db.accessKeys.set(id, record);
   await saveNow('accessKeys').catch(() => {});
@@ -243,16 +252,43 @@ export function listAccessKeys({ search = '' } = {}) {
   const q = normalizePhone(search) || String(search || '').toLowerCase();
   return Object.values(db.accessKeys.all())
     .map(markExpired)
-    .filter(r => !q || r.assignedPhone.includes(q) || String(r.id).toLowerCase().includes(q))
+    .filter(r => !q || r.assignedPhone.includes(q) || String(r.id).toLowerCase().includes(q) || String(r.plainKey || '').toLowerCase().includes(q))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .map(publicRecord);
 }
 
-export async function updateAccessKeyStatus(id, status) {
+export function getAccessKey(id) {
+  const record = markExpired(db.accessKeys.get(id));
+  if (!record) throw new Error('Access key not found');
+  return publicRecord(record);
+}
+
+export async function assignAccessKey(id, phone, actor = 'admin') {
+  const assignedPhone = normalizePhone(phone);
+  if (!assignedPhone) throw new Error('Valid WhatsApp phone number is required');
+  const record = db.accessKeys.get(id);
+  if (!record) throw new Error('Access key not found');
+  const patch = withHistory({ ...record, assignedPhone }, 'assign', actor, { fromPhone: record.assignedPhone, assignedPhone });
+  for (const [authId, auth] of Object.entries(db.accessAuthorizations.all())) {
+    if (auth.accessKeyId === id) db.accessAuthorizations.delete(authId);
+  }
+  db.accessKeys.set(id, patch);
+  await saveNow('accessKeys').catch(() => {});
+  await saveNow('accessAuthorizations').catch(() => {});
+  console.log('[ACCESS] Key assigned', { id, phone: assignedPhone });
+  return publicRecord(patch);
+}
+
+export function getAccessKeyHistory(id) {
+  return getAccessKey(id).history || [];
+}
+
+export async function updateAccessKeyStatus(id, status, actor = 'admin') {
+  if (status === 'suspended') status = 'disabled';
   if (!KEY_STATUSES.has(status)) throw new Error('Invalid status');
   const record = db.accessKeys.get(id);
   if (!record) throw new Error('Access key not found');
-  const patch = { ...record, status };
+  let patch = withHistory({ ...record, status }, status === 'disabled' ? 'suspend' : status, actor);
   if (status === 'revoked') patch.revokedAt = now();
   if (['revoked', 'disabled', 'expired'].includes(status)) {
     for (const [authId, auth] of Object.entries(db.accessAuthorizations.all())) {
