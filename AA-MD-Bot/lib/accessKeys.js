@@ -36,6 +36,22 @@ export function isAccessEnforced() {
 export function normalizePhone(value = '') {
   let num = String(value).split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
   if (num.startsWith('00')) num = num.slice(2);
+
+  // WhatsApp JIDs always use international format (for example 92300...)
+  // while admins commonly enter local numbers (0300...). Store and compare a
+  // single canonical value so a freshly generated key does not verify as
+  // `wrong_phone` for the same real number. Pakistan is the project default;
+  // deployments can override it with ACCESS_KEY_DEFAULT_COUNTRY_CODE.
+  if (num.startsWith('0') && num.length > 1) {
+    const countryCode = String(
+      db.settings.getValue('ACCESS_KEY_DEFAULT_COUNTRY_CODE') ||
+      process.env.ACCESS_KEY_DEFAULT_COUNTRY_CODE ||
+      process.env.DEFAULT_COUNTRY_CODE ||
+      '92'
+    ).replace(/[^0-9]/g, '');
+    if (countryCode) num = countryCode + num.replace(/^0+/, '');
+  }
+
   return num;
 }
 
@@ -120,7 +136,7 @@ export async function generateAccessKey({ phone, expiresAt = null, createdBy = '
   if (!assignedPhone) throw new Error('Valid WhatsApp phone number is required');
 
   for (const record of Object.values(db.accessKeys.all())) {
-    if (record.assignedPhone === assignedPhone && ['pending', 'active'].includes(record.status)) {
+    if (normalizePhone(record.assignedPhone) === assignedPhone && ['pending', 'active'].includes(record.status)) {
       const revoked = withHistory({ ...record, status: 'revoked', revokedAt: now(), revokedReason: 'replaced' }, 'revoke', createdBy, { reason: 'replaced' });
       await persistAccessKey(revoked);
       db.accessKeys.set(record.id, revoked);
@@ -190,7 +206,7 @@ export function getAuthorization(sessionId, phone) {
   const auth = db.accessAuthorizations.get(`phone:${normalizedPhone}`) || db.accessAuthorizations.get(sessionId) || null;
   if (!auth || auth.phone !== normalizedPhone || !auth.accessKeyId) return null;
   const record = markExpired(db.accessKeys.get(auth.accessKeyId));
-  if (!record || record.assignedPhone !== normalizedPhone || record.status !== 'active') return null;
+  if (!record || normalizePhone(record.assignedPhone) !== normalizedPhone || record.status !== 'active') return null;
   return { ...auth, key: publicRecord(record) };
 }
 
@@ -228,7 +244,7 @@ export async function verifyAccessKey({ plainKey, phone, sessionId }) {
     return { ok: false, reason: blocked ? 'rate_limited' : 'invalid' };
   }
 
-  if (matched.assignedPhone !== assignedPhone) {
+  if (normalizePhone(matched.assignedPhone) !== assignedPhone) {
     recordFailure(assignedPhone, sessionId);
     console.log('[ACCESS] Access Key assigned-phone mismatch', { id: matched.id, phone: assignedPhone, sessionId });
     return { ok: false, reason: 'wrong_phone' };
@@ -277,7 +293,7 @@ export function listAccessKeys({ search = '' } = {}) {
   const q = normalizePhone(search) || String(search || '').toLowerCase();
   return Object.values(db.accessKeys.all())
     .map(markExpired)
-    .filter(r => !q || r.assignedPhone.includes(q) || String(r.id).toLowerCase().includes(q) || String(r.plainKey || '').toLowerCase().includes(q))
+    .filter(r => !q || normalizePhone(r.assignedPhone).includes(q) || String(r.assignedPhone || '').includes(q) || String(r.id).toLowerCase().includes(q) || String(r.plainKey || '').toLowerCase().includes(q))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .map(publicRecord);
 }

@@ -50,6 +50,14 @@ function deepFind(obj, regex, depth = 0, seen = new Set()) {
 
 // ── Race helper: run all promises in parallel, return the FIRST truthy result.
 // Faster than sequential try-one-then-next-then-next.
+
+function withTimeout(promise, ms, fallback = null) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 function firstSuccess(promises) {
   return new Promise((resolve) => {
     let pending = promises.length;
@@ -189,7 +197,7 @@ function scoreMatch(title, query) {
 async function searchNexrayPlay(query) {
   const { data } = await axios.get(
     `https://api.nexray.eu.cc/downloader/ytplay?q=${encodeURIComponent(query)}`,
-    { timeout: 20000 },
+    { timeout: 2500 },
   );
   const r = data?.result;
   if (!data?.status || !r) return null;
@@ -213,87 +221,51 @@ async function searchNexrayPlay(query) {
 }
 
 // ── Search (Nexray ytplay primary → play-dl → davidcyriltech fallback) ───────
+async function searchPlayDl(query) {
+  const playdl = (await import("play-dl")).default;
+  const res = await playdl.search(query, { source: { youtube: "video" }, limit: 5 });
+  if (!res?.length) return null;
+  const scored = res.map((r) => ({ r, score: scoreMatch(r.title, query) }));
+  scored.sort((a, b) => b.score - a.score);
+  const r = scored[0].r;
+  const m = Math.floor((r.durationInSec || 0) / 60);
+  const s = String((r.durationInSec || 0) % 60).padStart(2, "0");
+  return {
+    url: r.url,
+    title: r.title || query,
+    thumbnail: r.thumbnails?.[0]?.url || "",
+    duration: r.durationInSec ? `${m}:${s}` : "",
+    author: r.channel?.name || "",
+    views: r.views ?? "",
+  };
+}
+
+async function searchDavidCyril(query) {
+  const { data } = await axios.get(
+    `https://apis.davidcyriltech.my.id/youtube/search?query=${encodeURIComponent(query)}`,
+    { timeout: 3000 },
+  );
+  const results = data?.result || data?.results || data?.data || [];
+  if (!Array.isArray(results) || !results.length) return null;
+  const r = results[0];
+  return {
+    url: r.url || r.link || r.videoUrl || "",
+    title: r.title || deepFind(r, /title/i) || query,
+    thumbnail: r.thumbnail || r.image || r.thumbnails?.[0]?.url || r.thumbnails?.[0] || deepFind(r, /thumb|image|cover/i) || "",
+    duration: r.duration || r.timestamp || r.length || deepFind(r, /duration|length|timestamp/i) || "",
+    views: r.views || r.viewCount || r.view_count || r.viewsCount || deepFind(r, /view/i) || "",
+    author: r.channel || r.channelTitle || r.author?.name || r.author || r.uploader || deepFind(r, /channel|author|uploader/i) || "",
+  };
+}
+
 async function searchYT(query) {
-  // NEW primary: nexray ytplay (also yields a bonus direct audio link)
-  try {
-    const found = await searchNexrayPlay(query);
-    if (found?.url) return found;
-  } catch {}
-
-  // Fallback: play-dl (no external API, fastest, and picks the BEST of 5 matches
-  // instead of just trusting whatever result an API puts first)
-  try {
-    const playdl = (await import("play-dl")).default;
-    const res = await playdl.search(query, {
-      source: { youtube: "video" },
-      limit: 5,
-    });
-    if (res?.length) {
-      const scored = res.map((r) => ({ r, score: scoreMatch(r.title, query) }));
-      scored.sort((a, b) => b.score - a.score);
-      const r = scored[0].r;
-      const m = Math.floor((r.durationInSec || 0) / 60);
-      const s = String((r.durationInSec || 0) % 60).padStart(2, "0");
-      return {
-        url: r.url,
-        title: r.title || query,
-        thumbnail: r.thumbnails?.[0]?.url || "",
-        duration: r.durationInSec ? `${m}:${s}` : "",
-        author: r.channel?.name || "",
-        // Raw numeric view count — formatViews() applies the K/M/B suffix
-        // later. Do NOT pre-abbreviate here, or the suffix gets lost.
-        views: r.views ?? "",
-      };
-    }
-  } catch {}
-
-  // Fallback: davidcyriltech search (deep-scanned for odd/renamed field keys)
-  try {
-    const { data } = await axios.get(
-      `https://apis.davidcyriltech.my.id/youtube/search?query=${encodeURIComponent(query)}`,
-      { timeout: 15000 },
-    );
-    const results = data?.result || data?.results || data?.data || [];
-    if (Array.isArray(results) && results.length) {
-      const r = results[0];
-      return {
-        url: r.url || r.link || r.videoUrl || "",
-        title: r.title || deepFind(r, /title/i) || query,
-        thumbnail:
-          r.thumbnail ||
-          r.image ||
-          r.thumbnails?.[0]?.url ||
-          r.thumbnails?.[0] ||
-          deepFind(r, /thumb|image|cover/i) ||
-          "",
-        duration:
-          r.duration ||
-          r.timestamp ||
-          r.length ||
-          deepFind(r, /duration|length|timestamp/i) ||
-          "",
-        // Raw view count (number or numeric string) — same rule as above,
-        // formatViews() is the single place that adds K/M/B.
-        views:
-          r.views ||
-          r.viewCount ||
-          r.view_count ||
-          r.viewsCount ||
-          deepFind(r, /view/i) ||
-          "",
-        author:
-          r.channel ||
-          r.channelTitle ||
-          r.author?.name ||
-          r.author ||
-          r.uploader ||
-          deepFind(r, /channel|author|uploader/i) ||
-          "",
-      };
-    }
-  } catch {}
-
-  return null;
+  // Race independent search sources so the info card is not blocked by one
+  // slow provider. This keeps thumbnail/title/details in the 2-3 second path.
+  return firstSuccess([
+    withTimeout(searchNexrayPlay(query), 2800),
+    withTimeout(searchPlayDl(query), 3000),
+    withTimeout(searchDavidCyril(query), 3200),
+  ]);
 }
 
 // ── YouTube oEmbed fallback (used for direct links). Free, official, no key. ──
@@ -374,7 +346,7 @@ async function getAudioCandidates(ytUrl, meta) {
   // NEW: nexray v1/ytmp3 — extra dedicated audio download API.
   const pNexrayV1 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp3?url=${enc}`, {
-      timeout: 30000,
+      timeout: 8000,
     })
     .then(({ data: d }) => {
       const r = d?.result || d;
@@ -391,7 +363,7 @@ async function getAudioCandidates(ytUrl, meta) {
 
   const p1 = axios
     .get(`https://apis.davidcyriltech.my.id/download/ytmp3?url=${enc}`, {
-      timeout: 30000,
+      timeout: 8000,
     })
     .then(({ data: d }) => {
       const r = d?.result || d;
@@ -408,7 +380,7 @@ async function getAudioCandidates(ytUrl, meta) {
 
   const p2 = axios
     .get(`https://api-abztech.zone.id/download/ytdlv3?url=${enc}`, {
-      timeout: 30000,
+      timeout: 8000,
     })
     .then(({ data: d }) => {
       const url = d?.downloadUrl || d?.download_url || d?.url || d?.result?.url;
@@ -428,7 +400,7 @@ async function getAudioCandidates(ytUrl, meta) {
 
   const p3 = axios
     .get(`https://eliteprotech-apis.zone.id/ytdown?url=${enc}&format=mp3`, {
-      timeout: 30000,
+      timeout: 8000,
     })
     .then(({ data: d }) => {
       const url =
@@ -460,7 +432,7 @@ async function getVideoCandidates(ytUrl) {
   // NEW: nexray v1/ytmp4 — extra dedicated video download API (1080p).
   const pNexrayV1 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${enc}&resolusi=1080`, {
-      timeout: 30000,
+      timeout: 8000,
     })
     .then(({ data: d }) => {
       const r = d?.result || d;
@@ -477,7 +449,7 @@ async function getVideoCandidates(ytUrl) {
 
   const pElite = axios
     .get(`https://eliteprotech-apis.zone.id/ytdown?url=${enc}&format=mp4`, {
-      timeout: 30000,
+      timeout: 8000,
     })
     .then(({ data: d }) => {
       const url =
@@ -498,7 +470,7 @@ async function getVideoCandidates(ytUrl) {
 
   const pDavid = axios
     .get(`https://apis.davidcyriltech.my.id/download/ytmp4?url=${enc}`, {
-      timeout: 30000,
+      timeout: 8000,
     })
     .then(({ data: d }) => {
       const r = d?.result || d;
@@ -515,7 +487,7 @@ async function getVideoCandidates(ytUrl) {
 
   const pAbz = axios
     .get(`https://api-abztech.zone.id/download/ytdl4?url=${enc}`, {
-      timeout: 30000,
+      timeout: 8000,
     })
     .then(({ data: d }) => {
       const url = d?.downloadUrl || d?.download_url || d?.url || d?.result?.url;
@@ -681,7 +653,7 @@ export default {
       if (candidates[0].title) meta.title = meta.title || candidates[0].title;
 
       // 4) Race downloads from ALL candidates in parallel — first valid buffer wins
-      const timeout = isVideoCmd ? 120000 : 90000;
+      const timeout = isVideoCmd ? 40000 : 30000;
       const minSize = isVideoCmd ? 50000 : 10000;
       const result = await downloadFirstWorking(candidates, timeout, minSize);
 
