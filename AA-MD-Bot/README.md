@@ -113,6 +113,95 @@ same MongoDB `accessKeys` collection. They therefore appear in the dashboard
 immediately, and deleting a key removes its database document and any linked
 authorizations. Set `ACCESS_KEY_ENDPOINT_SECRET` before using these endpoints.
 
+#### SSH / VPS: recommended generation endpoint
+
+Use `POST /access-keys/generate`. It is the dedicated, authenticated endpoint
+for creating keys, and accepts either `X-Access-Key-Secret` or a Bearer token.
+On the server, configure a strong secret and restart the bot first:
+
+```bash
+cd /path/to/AA-MD-Bot
+SECRET="$(openssl rand -hex 32)"
+printf '\nACCESS_KEY_ENDPOINT_SECRET=%s\n' "$SECRET" >> .env
+pm2 restart aa-md-bot --update-env
+```
+
+Then run this on the same SSH server (replace the phone number with the full
+international WhatsApp number, without `+`, spaces, or dashes). The local URL
+is the reliable SSH test because it does not depend on Oracle firewall rules,
+Nginx, HTTPS certificates, or public DNS:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request POST 'http://127.0.0.1:5000/api/access-keys/generate' \
+  --header 'Content-Type: application/json' \
+  --header "X-Access-Key-Secret: $SECRET" \
+  --data '{"phone":"923001234567","createdBy":"ssh-admin"}'
+```
+
+If this returns `401 Unauthorized`, the supplied value does not exactly match
+the `ACCESS_KEY_ENDPOINT_SECRET` in the bot process's `.env`. Use this exact
+shell syntax (do **not** write `ACCESS_KEY_export`, `=(`, or surrounding
+parentheses), then retry:
+
+```bash
+export ACCESS_KEY_ENDPOINT_SECRET='the_exact_value_from_your_bot_env_file'
+printf '%s\n' "$ACCESS_KEY_ENDPOINT_SECRET" | wc -c
+```
+
+The bot must be restarted after changing `.env`: `pm2 restart aa-md-bot`.
+
+`{"ok":true,"accessKey":"...","record":{...}}` confirms success. To
+create an expiring key, add `"expiresInDays":30` to the JSON body; omit it for
+a lifetime key. Keep this endpoint on `127.0.0.1` when running it over SSH, or
+place it behind HTTPS and do not expose the secret in shell history.
+
+For a repeatable SSH command that prompts for the secret without displaying it,
+use the included helper:
+
+```bash
+chmod +x scripts/generate-access-key.sh
+./scripts/generate-access-key.sh 923001234567 30 Owner
+```
+
+#### External website management API
+
+An external website can use the same secret in `X-Access-Key-Secret` (or
+`Authorization: Bearer <secret>`). Do not place this secret in browser
+JavaScript; make these server-to-server requests from the website backend.
+
+```bash
+# List or search keys
+curl --silent --show-error 'http://127.0.0.1:5000/api/access-keys?search=923316041183' \
+  -H "X-Access-Key-Secret: $ACCESS_KEY_ENDPOINT_SECRET"
+
+# Update a returned record ID: assign, activate, suspend, revoke, delete, or history
+curl --fail-with-body --silent --show-error \
+  --request POST 'http://127.0.0.1:5000/api/access-keys/action' \
+  --header 'Content-Type: application/json' \
+  --header "X-Access-Key-Secret: $ACCESS_KEY_ENDPOINT_SECRET" \
+  --data '{"action":"suspend","id":"ACCESS_KEY_ID","createdBy":"website-backend"}'
+```
+
+#### If a public HTTPS request times out
+
+`https://IP.nip.io/...` uses **port 443**, which is served by Nginx—not by the
+bot process. A timeout means the request did not reach the app. First verify
+the bot and endpoint locally, then check the HTTPS proxy:
+
+```bash
+curl --fail-with-body --silent --show-error http://127.0.0.1:5000/api
+pm2 status
+sudo systemctl status nginx --no-pager
+sudo nginx -t
+sudo ss -ltnp '( sport = :443 or sport = :5000 )'
+```
+
+Use **one** slash before `api` (`/api/...`, not `//api/...`) and put the
+backslash at the very end of each continued `curl` line—there must be no space
+after it. For a public request, use the same path only after port 443 is open
+in the Oracle VCN security list and host firewall and Nginx is running.
+
 #### Lifetime keys and Access Key sheet
 
 Omit both `expiresAt` and `expiresInDays` to generate a **lifetime** key. Every

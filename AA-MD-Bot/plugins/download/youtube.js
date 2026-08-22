@@ -20,6 +20,17 @@ const extractUrl = (t) => {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
+function timeoutFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 1000 ? value : fallback;
+}
+
+// Provider links can take several seconds to prepare on a first request.
+// Keep the metadata card fast, but give media providers enough time to finish.
+const YT_PROVIDER_TIMEOUT_MS = timeoutFromEnv("YT_PROVIDER_TIMEOUT_MS", 30000);
+const YT_AUDIO_DOWNLOAD_TIMEOUT_MS = timeoutFromEnv("YT_AUDIO_DOWNLOAD_TIMEOUT_MS", 90000);
+const YT_VIDEO_DOWNLOAD_TIMEOUT_MS = timeoutFromEnv("YT_VIDEO_DOWNLOAD_TIMEOUT_MS", 120000);
+
 // ── Deep-scan fallback: search an arbitrary API response for a field whose KEY
 // name matches a pattern (title/channel/duration/views/thumbnail), regardless
 // of the exact schema. Used only when the direct known field names don't hit.
@@ -77,7 +88,7 @@ function firstSuccess(promises) {
 
 // ── Buffer downloader with two header strategies (some CDNs want a browser
 // UA, some block anything that looks like a browser — so we try both) ────────
-async function tryDownload(url, timeout) {
+async function tryDownload(url, timeout, signal) {
   const attempts = [
     {
       headers: {
@@ -97,6 +108,7 @@ async function tryDownload(url, timeout) {
         maxRedirects: 10,
         maxContentLength: 300 * 1024 * 1024,
         validateStatus: (s) => s >= 200 && s < 300,
+        signal,
         ...cfg,
       });
       const ct = String(res.headers?.["content-type"] || "").toLowerCase();
@@ -105,6 +117,7 @@ async function tryDownload(url, timeout) {
       const buf = Buffer.from(res.data);
       if (buf.length > 0) return buf;
     } catch (e) {
+      if (e.code === "ERR_CANCELED" || signal?.aborted) return null;
       console.error(
         "[YT download attempt failed]",
         url,
@@ -118,19 +131,48 @@ async function tryDownload(url, timeout) {
 
 // ── Race ALL candidates in parallel — first valid buffer wins (huge speed win
 // over trying them one at a time) ─────────────────────────────────────────────
-async function downloadFirstWorking(candidates, timeout, minSize) {
-  const valid = candidates.filter((c) => c?.url);
-  if (!valid.length) return null;
+async function downloadFirstWorking(createCandidateRequests, timeout, minSize) {
+  // Start provider-link requests and media downloads as one streaming race.
+  // A quick provider no longer waits for slow providers to return their links.
+  const controller = new AbortController();
+  return new Promise((resolve) => {
+    const requests = createCandidateRequests(controller.signal);
+    let pendingProviders = requests.length;
+    let activeDownloads = 0;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      controller.abort();
+      resolve(result);
+    };
 
-  const result = await firstSuccess(
-    valid.map(async (c) => {
-      const buf = await tryDownload(c.url, timeout);
-      if (buf && buf.length >= minSize) return { buf, meta: c };
-      return null;
-    }),
-  );
+    const finishIfExhausted = () => {
+      if (pendingProviders === 0 && activeDownloads === 0) finish(null);
+    };
 
-  return result;
+    for (const request of requests) {
+      Promise.resolve(request)
+        .then((candidate) => {
+          if (!candidate?.url || settled) return;
+          activeDownloads += 1;
+          return tryDownload(candidate.url, timeout, controller.signal)
+            .then((buf) => {
+              if (buf && buf.length >= minSize) finish({ buf, meta: candidate });
+            })
+            .catch(() => {})
+            .finally(() => {
+              activeDownloads -= 1;
+              finishIfExhausted();
+            });
+        })
+        .catch(() => {})
+        .finally(() => {
+          pendingProviders -= 1;
+          finishIfExhausted();
+        });
+    }
+  });
 }
 
 // ── Format helpers ─────────────────────────────────────────────────────────────
@@ -293,9 +335,11 @@ async function resolveMeta(query) {
   const directUrl = extractUrl(query);
 
   if (directUrl) {
+    // Keep the info card on the fast path even if YouTube's oEmbed endpoint
+    // is slow. Search providers still fill in any missing details.
     const [oEmbedResult, found] = await Promise.all([
-      oEmbedInfo(directUrl).catch(() => null),
-      searchYT(query).catch(() => null),
+      withTimeout(oEmbedInfo(directUrl), 2800),
+      withTimeout(searchYT(query), 3200),
     ]);
 
     let meta = oEmbedResult || {};
@@ -329,7 +373,7 @@ async function resolveMeta(query) {
 }
 
 // ── Audio provider candidates (all fetched IN PARALLEL) ───────────────────────
-async function getAudioCandidates(ytUrl, meta) {
+function getAudioCandidates(ytUrl, meta, signal) {
   const enc = encodeURIComponent(ytUrl);
 
   // NEW: free fast-path candidate — reuse the direct audio link nexray's
@@ -346,7 +390,8 @@ async function getAudioCandidates(ytUrl, meta) {
   // NEW: nexray v1/ytmp3 — extra dedicated audio download API.
   const pNexrayV1 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp3?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
+      signal,
     })
     .then(({ data: d }) => {
       const r = d?.result || d;
@@ -363,7 +408,8 @@ async function getAudioCandidates(ytUrl, meta) {
 
   const p1 = axios
     .get(`https://apis.davidcyriltech.my.id/download/ytmp3?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
+      signal,
     })
     .then(({ data: d }) => {
       const r = d?.result || d;
@@ -380,7 +426,8 @@ async function getAudioCandidates(ytUrl, meta) {
 
   const p2 = axios
     .get(`https://api-abztech.zone.id/download/ytdlv3?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
+      signal,
     })
     .then(({ data: d }) => {
       const url = d?.downloadUrl || d?.download_url || d?.url || d?.result?.url;
@@ -400,7 +447,8 @@ async function getAudioCandidates(ytUrl, meta) {
 
   const p3 = axios
     .get(`https://eliteprotech-apis.zone.id/ytdown?url=${enc}&format=mp3`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
+      signal,
     })
     .then(({ data: d }) => {
       const url =
@@ -419,20 +467,18 @@ async function getAudioCandidates(ytUrl, meta) {
     })
     .catch(() => null);
 
-  const settled = await Promise.allSettled([pDirect, pNexrayV1, p1, p2, p3]);
-  return settled
-    .map((s) => (s.status === "fulfilled" ? s.value : null))
-    .filter(Boolean);
+  return [pDirect, pNexrayV1, p1, p2, p3];
 }
 
 // ── Video provider candidates (all fetched IN PARALLEL) ───────────────────────
-async function getVideoCandidates(ytUrl) {
+function getVideoCandidates(ytUrl, signal) {
   const enc = encodeURIComponent(ytUrl);
 
   // NEW: nexray v1/ytmp4 — extra dedicated video download API (1080p).
   const pNexrayV1 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${enc}&resolusi=1080`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
+      signal,
     })
     .then(({ data: d }) => {
       const r = d?.result || d;
@@ -449,7 +495,8 @@ async function getVideoCandidates(ytUrl) {
 
   const pElite = axios
     .get(`https://eliteprotech-apis.zone.id/ytdown?url=${enc}&format=mp4`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
+      signal,
     })
     .then(({ data: d }) => {
       const url =
@@ -470,7 +517,8 @@ async function getVideoCandidates(ytUrl) {
 
   const pDavid = axios
     .get(`https://apis.davidcyriltech.my.id/download/ytmp4?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
+      signal,
     })
     .then(({ data: d }) => {
       const r = d?.result || d;
@@ -487,7 +535,8 @@ async function getVideoCandidates(ytUrl) {
 
   const pAbz = axios
     .get(`https://api-abztech.zone.id/download/ytdl4?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
+      signal,
     })
     .then(({ data: d }) => {
       const url = d?.downloadUrl || d?.download_url || d?.url || d?.result?.url;
@@ -505,12 +554,7 @@ async function getVideoCandidates(ytUrl) {
     })
     .catch(() => null);
 
-  // Order preserved: nexray v1 first, eliteprotech second, david third,
-  // abztech fourth — but all four network calls already ran in parallel above.
-  const settled = await Promise.allSettled([pNexrayV1, pElite, pDavid, pAbz]);
-  return settled
-    .map((s) => (s.status === "fulfilled" ? s.value : null))
-    .filter(Boolean);
+  return [pNexrayV1, pElite, pDavid, pAbz];
 }
 
 // ── Quick INFO CARD (sent within 1-2 sec, before any download starts) ─────────
@@ -636,26 +680,19 @@ export default {
         isVideoCmd ? "video" : "audio",
       );
 
-      // 3) Get ALL provider links — fetched in parallel now
-      const candidates = isVideoCmd
-        ? await getVideoCandidates(ytUrl)
-        : await getAudioCandidates(ytUrl, meta);
-      if (!candidates.length) {
-        await react("❌");
-        return reply(
-          `❌ *${isVideoCmd ? "Video" : "Audio"} download failed*\n\n` +
-            `All ${isVideoCmd ? "video" : "audio"} providers are unavailable right now — please try again later.` +
-            (isVideoCmd
-              ? ""
-              : `\n💡 Want video instead? *${prefix}video* ${query}`),
-        );
-      }
-      if (candidates[0].title) meta.title = meta.title || candidates[0].title;
-
-      // 4) Race downloads from ALL candidates in parallel — first valid buffer wins
-      const timeout = isVideoCmd ? 40000 : 30000;
+      // 3) Fetch every provider link in parallel and begin each download the
+      // instant its link arrives. The first valid media response wins.
+      const timeout = isVideoCmd
+        ? YT_VIDEO_DOWNLOAD_TIMEOUT_MS
+        : YT_AUDIO_DOWNLOAD_TIMEOUT_MS;
       const minSize = isVideoCmd ? 50000 : 10000;
-      const result = await downloadFirstWorking(candidates, timeout, minSize);
+      const result = await downloadFirstWorking(
+        (signal) => isVideoCmd
+          ? getVideoCandidates(ytUrl, signal)
+          : getAudioCandidates(ytUrl, meta, signal),
+        timeout,
+        minSize,
+      );
 
       if (!result) {
         await react("❌");
@@ -665,7 +702,9 @@ export default {
         );
       }
 
-      // 5) Send the actual media — plain, no ad-card, no contextInfo, no link
+      if (result.meta.title) meta.title = meta.title || result.meta.title;
+
+      // 4) Send the actual media — plain, no ad-card, no contextInfo, no link
       if (isVideoCmd) {
         await sock.sendMessage(
           jid,
