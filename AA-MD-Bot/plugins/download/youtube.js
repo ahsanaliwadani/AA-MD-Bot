@@ -20,6 +20,17 @@ const extractUrl = (t) => {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
+function timeoutFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 1000 ? value : fallback;
+}
+
+// Provider links can take several seconds to prepare on a first request.
+// Keep the metadata card fast, but give media providers enough time to finish.
+const YT_PROVIDER_TIMEOUT_MS = timeoutFromEnv("YT_PROVIDER_TIMEOUT_MS", 30000);
+const YT_AUDIO_DOWNLOAD_TIMEOUT_MS = timeoutFromEnv("YT_AUDIO_DOWNLOAD_TIMEOUT_MS", 90000);
+const YT_VIDEO_DOWNLOAD_TIMEOUT_MS = timeoutFromEnv("YT_VIDEO_DOWNLOAD_TIMEOUT_MS", 120000);
+
 // ── Deep-scan fallback: search an arbitrary API response for a field whose KEY
 // name matches a pattern (title/channel/duration/views/thumbnail), regardless
 // of the exact schema. Used only when the direct known field names don't hit.
@@ -379,7 +390,7 @@ function getAudioCandidates(ytUrl, meta, signal) {
   // NEW: nexray v1/ytmp3 — extra dedicated audio download API.
   const pNexrayV1 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp3?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
       signal,
     })
     .then(({ data: d }) => {
@@ -397,7 +408,7 @@ function getAudioCandidates(ytUrl, meta, signal) {
 
   const p1 = axios
     .get(`https://apis.davidcyriltech.my.id/download/ytmp3?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
       signal,
     })
     .then(({ data: d }) => {
@@ -415,7 +426,7 @@ function getAudioCandidates(ytUrl, meta, signal) {
 
   const p2 = axios
     .get(`https://api-abztech.zone.id/download/ytdlv3?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
       signal,
     })
     .then(({ data: d }) => {
@@ -436,7 +447,7 @@ function getAudioCandidates(ytUrl, meta, signal) {
 
   const p3 = axios
     .get(`https://eliteprotech-apis.zone.id/ytdown?url=${enc}&format=mp3`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
       signal,
     })
     .then(({ data: d }) => {
@@ -466,7 +477,7 @@ function getVideoCandidates(ytUrl, signal) {
   // NEW: nexray v1/ytmp4 — extra dedicated video download API (1080p).
   const pNexrayV1 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${enc}&resolusi=1080`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
       signal,
     })
     .then(({ data: d }) => {
@@ -484,7 +495,7 @@ function getVideoCandidates(ytUrl, signal) {
 
   const pElite = axios
     .get(`https://eliteprotech-apis.zone.id/ytdown?url=${enc}&format=mp4`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
       signal,
     })
     .then(({ data: d }) => {
@@ -506,7 +517,7 @@ function getVideoCandidates(ytUrl, signal) {
 
   const pDavid = axios
     .get(`https://apis.davidcyriltech.my.id/download/ytmp4?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
       signal,
     })
     .then(({ data: d }) => {
@@ -524,7 +535,7 @@ function getVideoCandidates(ytUrl, signal) {
 
   const pAbz = axios
     .get(`https://api-abztech.zone.id/download/ytdl4?url=${enc}`, {
-      timeout: 8000,
+      timeout: YT_PROVIDER_TIMEOUT_MS,
       signal,
     })
     .then(({ data: d }) => {
@@ -671,7 +682,9 @@ export default {
 
       // 3) Fetch every provider link in parallel and begin each download the
       // instant its link arrives. The first valid media response wins.
-      const timeout = isVideoCmd ? 40000 : 30000;
+      const timeout = isVideoCmd
+        ? YT_VIDEO_DOWNLOAD_TIMEOUT_MS
+        : YT_AUDIO_DOWNLOAD_TIMEOUT_MS;
       const minSize = isVideoCmd ? 50000 : 10000;
       const result = await downloadFirstWorking(
         (signal) => isVideoCmd
