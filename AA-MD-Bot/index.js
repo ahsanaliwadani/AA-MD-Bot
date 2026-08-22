@@ -215,7 +215,9 @@ async function startServer() {
         });
       }
 
-      const p = stripApi(url.pathname);
+      // Be forgiving of accidental double slashes in copied curl/API URLs.
+      // This still preserves the normal `/api/...` route shape.
+      const p = stripApi(url.pathname.replace(/\/{2,}/g, '/'));
 
       // ── Dashboard HTML ─────────────────────────────────────
       if (p === '/' || p === '' || p === '/dashboard') {
