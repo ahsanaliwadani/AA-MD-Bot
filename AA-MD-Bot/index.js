@@ -869,6 +869,21 @@ async function startServer() {
         return;
       }
 
+      // ── Dashboard assets ────────────────────────────────────
+      const DASHBOARD_ASSETS = {
+        '/assets/dashboard.css': 'text/css; charset=utf-8',
+        '/assets/dashboard.js': 'application/javascript; charset=utf-8',
+      };
+      if (DASHBOARD_ASSETS[p]) {
+        const assetPath = path.join(__dirname, 'public', path.basename(p));
+        try {
+          const data = await fs.readFile(assetPath);
+          res.writeHead(200, { 'Content-Type': DASHBOARD_ASSETS[p], 'Cache-Control': 'public, max-age=3600' });
+          res.end(data);
+        } catch { res.writeHead(404); res.end('Not found'); }
+        return;
+      }
+
       // ── Static images ──────────────────────────────────────
       const STATIC_IMAGES = {
         '/banner.webp': 'image/webp',

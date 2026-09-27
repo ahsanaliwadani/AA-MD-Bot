@@ -107,6 +107,57 @@ async function sendDownloaded(sock, jid, msg, file, caption) {
   return sock.sendMessage(jid, { document: file.buf, mimetype: file.mimetype, fileName: file.filename, caption }, { quoted: msg });
 }
 
+// ── NexRay AIO resolver (primary for .dl) ────────────────────────────────────
+const NEXRAY_AIO = 'https://api.nexray.eu.cc/downloader/aio';
+
+function collectAioFiles(value, sourceUrl, out = [], seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return out;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) collectAioFiles(item, sourceUrl, out, seen);
+    return out;
+  }
+
+  const candidate = value.download_url || value.downloadUrl || value.direct_url || value.directUrl || value.dlink || value.media_url || value.mediaUrl || value.url || value.link;
+  if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate) && candidate !== sourceUrl) {
+    out.push({
+      url: candidate,
+      filename: value.filename || value.file_name || value.fileName || value.name || value.title || '',
+      mimetype: value.mimetype || value.mime || value.content_type || '',
+      size: value.size || value.file_size || value.fileSize || '',
+    });
+  }
+  for (const key of ['result', 'data', 'media', 'medias', 'files', 'file', 'downloads', 'items', 'links']) {
+    collectAioFiles(value[key], sourceUrl, out, seen);
+  }
+  return out;
+}
+
+async function resolveNexrayAio(url) {
+  try {
+    const { data } = await api.get(NEXRAY_AIO, { params: { url }, timeout: 35000 });
+    const files = collectAioFiles(data, url)
+      .filter(file => file.url && !/^(?:https?:\/\/)?(?:www\.)?(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|facebook\.com|twitter\.com|x\.com)\b/i.test(file.url));
+    const unique = [...new Map(files.map(file => [file.url, file])).values()];
+    return { files: unique.slice(0, 3), title: data?.result?.title || data?.data?.title || data?.title || '' };
+  } catch {
+    return { files: [], title: '' };
+  }
+}
+
+async function tryNexrayAio(sock, jid, msg, url) {
+  const { files, title } = await resolveNexrayAio(url);
+  if (!files.length) return false;
+  for (const item of files) {
+    const file = await downloadAnyBuffer(item.url);
+    file.filename = item.filename || file.filename;
+    file.mimetype = item.mimetype || file.mimetype;
+    file.kind = mimeKind(file.mimetype, file.filename);
+    await sendDownloaded(sock, jid, msg, file, `⚡ *Universal Download*${title ? `\n🎬 ${title}` : ''}\n📄 ${file.filename}\n🔗 NexRay AIO`);
+  }
+  return true;
+}
+
 // ── yt-dlp download → buffer (uses execFile — no shell injection) ──────────────
 async function ytdlpVideo(url) {
   await fs.ensureDir(TEMP);
@@ -256,8 +307,8 @@ async function mediafireDirect(url) {
 // ── Main handler ───────────────────────────────────────────────────────────────
 export default {
   command: 'dl',
-  alias: ['download', 'save'],
-  description: 'Universal downloader: TikTok, Instagram, Facebook, Twitter/X, Pinterest, Threads, SoundCloud, Spotify, YouTube, MediaFire, TeraBox, direct files',
+  alias: ['download', 'save', 'aio', 'nexdl'],
+  description: 'Universal downloader with NexRay AIO primary and platform fallbacks',
   category: 'download',
 
   async execute({ sock, msg, jid, text, react, reply, prefix }) {
@@ -280,6 +331,17 @@ export default {
 
     try {
       const { type, url } = detected;
+
+      // NexRay AIO is the primary resolver. It supports many public platforms
+      // from one endpoint; dedicated flows below remain reliable fallbacks.
+      try {
+        if (await tryNexrayAio(sock, jid, msg, url)) {
+          await react('✅');
+          return;
+        }
+      } catch (aioError) {
+        console.warn('[dl] NexRay AIO media delivery failed:', aioError.message);
+      }
 
       // ── TikTok ──────────────────────────────────────────────────────────────
       if (type === 'tt') {

@@ -1,10 +1,9 @@
 // ============================================
 // AA MD Bot - Facebook Downloader
-// Method 1: DavidCyrilTech API (PRIMARY)
-// Method 2: fdownloader.net JSON API
-// Method 3: getvideourl.com API
-// Method 4: Direct HTML scrape (public posts)
-// Method 5: yt-dlp (last resort)
+// Method 1: fdownloader.net JSON API
+// Method 2: getvideourl.com API
+// Method 3: Direct HTML scrape (public posts)
+// Method 4: yt-dlp (last resort)
 // ============================================
 
 import axios from 'axios';
@@ -15,25 +14,7 @@ import { YTDLP, getCookiesArgs } from '../../lib/ytdlp.js';
 const execFileP = promisify(execFile);
 const FB_RX     = /https?:\/\/(www\.|m\.|web\.)?facebook\.com\/[^\s]+|https?:\/\/fb\.watch\/[^\s]+/i;
 const UA        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-const DC        = 'https://apis.davidcyriltech.my.id';
-
-// ── Method 1: DavidCyrilTech ─────────────────────────────────────────────────
-async function davidCyrilFb(url) {
-  const { data } = await axios.get(`${DC}/facebook`, {
-    params: { url },
-    headers: { 'User-Agent': UA },
-    timeout: 20000,
-  });
-  if (!data?.success && !data?.download_url && !data?.hd && !data?.sd && !data?.url) {
-    throw new Error('DC: no video url');
-  }
-  const d = data?.result || data;
-  const videoUrl = d?.hd || d?.sd || d?.download_url || d?.url || d?.video;
-  if (!videoUrl) throw new Error('DC: no video url');
-  return videoUrl;
-}
-
-// ── Method 2: fdownloader.net ─────────────────────────────────────────────────
+// ── Method 1: fdownloader.net ─────────────────────────────────────────────────
 async function fdownloader(url) {
   const res = await axios.post(
     'https://fdownloader.net/api/ajaxSearch',
@@ -167,7 +148,6 @@ export default {
     );
 
     const methods = [
-      ['DavidCyrilTech', () => davidCyrilFb(url).then(send)],
       ['fdownloader',    () => fdownloader(url).then(send)],
       ['getvideourl',    () => getvideourl(url).then(send)],
       ['scrape',         () => scrapeFbPage(url).then(send)],

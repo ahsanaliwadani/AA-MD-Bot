@@ -177,7 +177,7 @@ async function downloadFirstWorking(createCandidateRequests, timeout, minSize) {
 
 // ── Format helpers ─────────────────────────────────────────────────────────────
 // NOTE: this is the ONLY place a views value gets its final "K/M/B views"
-// text form. Every source (play-dl, davidcyriltech, nexray, etc.) must hand
+// text form. Every source (play-dl, NexRay, etc.) must hand
 // this function a RAW number (or a plain numeric string) — never a value
 // that's already been abbreviated — otherwise the K/M/B suffix gets
 // stripped when this function tries to parse it back into a number and the
@@ -262,7 +262,7 @@ async function searchNexrayPlay(query) {
   };
 }
 
-// ── Search (Nexray ytplay primary → play-dl → davidcyriltech fallback) ───────
+// ── Search (Nexray ytplay primary → play-dl fallback) ─────────────────────
 async function searchPlayDl(query) {
   const playdl = (await import("play-dl")).default;
   const res = await playdl.search(query, { source: { youtube: "video" }, limit: 5 });
@@ -282,31 +282,12 @@ async function searchPlayDl(query) {
   };
 }
 
-async function searchDavidCyril(query) {
-  const { data } = await axios.get(
-    `https://apis.davidcyriltech.my.id/youtube/search?query=${encodeURIComponent(query)}`,
-    { timeout: 3000 },
-  );
-  const results = data?.result || data?.results || data?.data || [];
-  if (!Array.isArray(results) || !results.length) return null;
-  const r = results[0];
-  return {
-    url: r.url || r.link || r.videoUrl || "",
-    title: r.title || deepFind(r, /title/i) || query,
-    thumbnail: r.thumbnail || r.image || r.thumbnails?.[0]?.url || r.thumbnails?.[0] || deepFind(r, /thumb|image|cover/i) || "",
-    duration: r.duration || r.timestamp || r.length || deepFind(r, /duration|length|timestamp/i) || "",
-    views: r.views || r.viewCount || r.view_count || r.viewsCount || deepFind(r, /view/i) || "",
-    author: r.channel || r.channelTitle || r.author?.name || r.author || r.uploader || deepFind(r, /channel|author|uploader/i) || "",
-  };
-}
-
 async function searchYT(query) {
   // Race independent search sources so the info card is not blocked by one
   // slow provider. This keeps thumbnail/title/details in the 2-3 second path.
   return firstSuccess([
     withTimeout(searchNexrayPlay(query), 2800),
     withTimeout(searchPlayDl(query), 3000),
-    withTimeout(searchDavidCyril(query), 3200),
   ]);
 }
 
@@ -406,24 +387,6 @@ function getAudioCandidates(ytUrl, meta, signal) {
     })
     .catch(() => null);
 
-  const p1 = axios
-    .get(`https://apis.davidcyriltech.my.id/download/ytmp3?url=${enc}`, {
-      timeout: YT_PROVIDER_TIMEOUT_MS,
-      signal,
-    })
-    .then(({ data: d }) => {
-      const r = d?.result || d;
-      const url = r?.download_url || r?.downloadUrl || r?.url || d?.url;
-      if (typeof url === "string" && url.startsWith("http"))
-        return {
-          url,
-          title: r?.title || d?.title || "",
-          filename: r?.filename || "audio.mp3",
-        };
-      return null;
-    })
-    .catch(() => null);
-
   const p2 = axios
     .get(`https://api-abztech.zone.id/download/ytdlv3?url=${enc}`, {
       timeout: YT_PROVIDER_TIMEOUT_MS,
@@ -467,7 +430,7 @@ function getAudioCandidates(ytUrl, meta, signal) {
     })
     .catch(() => null);
 
-  return [pDirect, pNexrayV1, p1, p2, p3];
+  return [pDirect, pNexrayV1, p2, p3];
 }
 
 // ── Video provider candidates (all fetched IN PARALLEL) ───────────────────────
@@ -515,24 +478,6 @@ function getVideoCandidates(ytUrl, signal) {
     })
     .catch(() => null);
 
-  const pDavid = axios
-    .get(`https://apis.davidcyriltech.my.id/download/ytmp4?url=${enc}`, {
-      timeout: YT_PROVIDER_TIMEOUT_MS,
-      signal,
-    })
-    .then(({ data: d }) => {
-      const r = d?.result || d;
-      const url = r?.download_url || r?.downloadUrl || r?.url || d?.url;
-      if (typeof url === "string" && url.startsWith("http"))
-        return {
-          url,
-          title: r?.title || d?.title || "",
-          filename: r?.filename || "video.mp4",
-        };
-      return null;
-    })
-    .catch(() => null);
-
   const pAbz = axios
     .get(`https://api-abztech.zone.id/download/ytdl4?url=${enc}`, {
       timeout: YT_PROVIDER_TIMEOUT_MS,
@@ -554,7 +499,7 @@ function getVideoCandidates(ytUrl, signal) {
     })
     .catch(() => null);
 
-  return [pNexrayV1, pElite, pDavid, pAbz];
+  return [pNexrayV1, pElite, pAbz];
 }
 
 // ── Quick INFO CARD (sent within 1-2 sec, before any download starts) ─────────
@@ -686,13 +631,29 @@ export default {
         ? YT_VIDEO_DOWNLOAD_TIMEOUT_MS
         : YT_AUDIO_DOWNLOAD_TIMEOUT_MS;
       const minSize = isVideoCmd ? 50000 : 10000;
-      const result = await downloadFirstWorking(
-        (signal) => isVideoCmd
-          ? getVideoCandidates(ytUrl, signal)
-          : getAudioCandidates(ytUrl, meta, signal),
-        timeout,
-        minSize,
-      );
+      // Audio starts with NexRay only; other providers are used only when its
+      // request or media download fails, keeping NexRay the real primary source.
+      let result;
+      if (!isVideoCmd) {
+        result = await downloadFirstWorking(
+          (signal) => getAudioCandidates(ytUrl, meta, signal).slice(0, 2),
+          timeout,
+          minSize,
+        );
+        if (!result) {
+          result = await downloadFirstWorking(
+            (signal) => getAudioCandidates(ytUrl, meta, signal).slice(2),
+            timeout,
+            minSize,
+          );
+        }
+      } else {
+        result = await downloadFirstWorking(
+          (signal) => getVideoCandidates(ytUrl, signal),
+          timeout,
+          minSize,
+        );
+      }
 
       if (!result) {
         await react("❌");

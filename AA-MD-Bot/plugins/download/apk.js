@@ -1,41 +1,12 @@
 // AA MD Bot - APK Downloader
-// Method 1: DavidCyrilTech API (PRIMARY — confirmed working)
-// Method 2: Aptoide API v7
-// Method 3: APKCombo scrape
-// Method 4: Uptodown search
+// Method 1: Aptoide API v7
+// Method 2: APKCombo scrape
+// Method 3: Uptodown search
 import axios from 'axios';
 
 const UA  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const api = axios.create({ timeout: 20000, headers: { 'User-Agent': UA } });
-const DC  = 'https://apis.davidcyriltech.my.id';
-
-// ── Method 1: DavidCyrilTech ──────────────────────────────────────────────────
-async function searchDavidCyril(query) {
-  const { data } = await api.get(`${DC}/download/apk`, { params: { text: query } });
-
-  if (!data?.status) throw new Error(data?.message || 'API returned status false');
-
-  // Actual response shape: { status, owner, apk: { name, lastUpdated, package, icon, downloadLink } }
-  const d = data.apk || data.result || data.data || data;
-  if (!d) throw new Error('no data');
-
-  const dlUrl = d.downloadLink || d.download_link || d.apk_link || d.link || d.url || d.dlUrl || null;
-  if (!dlUrl) throw new Error('no download link');
-
-  return {
-    name:    d.name    || d.app_name    || query,
-    // Note: this API stores the version string under "lastUpdated"
-    version: d.lastUpdated || d.version || d.versionName || '?',
-    size:    parseFloat(d.size || 0),
-    pkg:     d.package || d.packageName || d.pkg || '',
-    dlUrl,
-    icon:    d.icon    || d.logo        || null,
-    rating:  d.rating  || 'N/A',
-    source:  'DavidCyrilTech',
-  };
-}
-
-// ── Method 2: Aptoide ─────────────────────────────────────────────────────────
+// ── Method 1: Aptoide ─────────────────────────────────────────────────────────
 async function searchAptoide(query) {
   const { data } = await api.get('https://ws75.aptoide.com/api/7/apps/search', {
     params: { query, limit: 5, store_name: 'bazaar' },
@@ -122,7 +93,6 @@ export default {
 
     // Try each source in order until one returns a valid download link
     for (const [name, fn] of [
-      ['DavidCyrilTech', () => searchDavidCyril(text)],
       ['Aptoide',        () => searchAptoide(text)],
       ['APKCombo',       () => searchApkCombo(text)],
       ['Uptodown',       () => searchUptodown(text)],

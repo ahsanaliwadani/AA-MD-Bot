@@ -8,7 +8,7 @@
 //
 // Sends clean audio only — no cards, no attachments, no source references.
 // Download chain:
-//   1. YouTube search (duration-checked) → race davidcyriltech + eliteprotech
+//   1. YouTube search (duration-checked) → NexRay primary + secondary fallback
 //   2. SoundCloud fallback via yt-dlp
 // ============================================
 
@@ -30,17 +30,18 @@ const api       = axios.create({ timeout: 25000, headers: { 'User-Agent': UA } }
 
 await fs.ensureDir(TEMP);
 
-// ── Method 1a: davidcyriltech ─────────────────────────────────────────────────
-async function tryDavidCyril(ytUrl) {
+// ── Method 1a: NexRay (primary) ─────────────────────────────────────────────
+async function tryNexRay(ytUrl) {
   const { data } = await api.get(
-    `https://apis.davidcyriltech.my.id/download/ytmp3?url=${encodeURIComponent(ytUrl)}`,
+    `https://api.nexray.eu.cc/downloader/v1/ytmp3?url=${encodeURIComponent(ytUrl)}`,
     { timeout: 40000 }
   );
-  const url = data?.result?.download_url || data?.url || data?.download_url;
+  const result = data?.result || data;
+  const url = result?.url || result?.download_url || result?.downloadUrl || data?.url;
   if (typeof url === 'string' && url.startsWith('http')) {
-    return { url, title: data?.result?.title || data?.title || '' };
+    return { url, title: result?.title || data?.title || '' };
   }
-  throw new Error('davidcyriltech: no URL');
+  throw new Error('nexray: no URL');
 }
 
 // ── Method 1b: eliteprotech ───────────────────────────────────────────────────
@@ -56,20 +57,10 @@ async function tryEliteProtech(ytUrl) {
   throw new Error('eliteprotech: no URL');
 }
 
-// ── Race both API methods ─────────────────────────────────────────────────────
+// ── NexRay first, then use the secondary provider only if needed ─────────────────────────────────────────────────────
 async function getAudioFromYT(ytUrl) {
-  const p1 = tryDavidCyril(ytUrl).catch(() => null);
-  const p2 = tryEliteProtech(ytUrl).catch(() => null);
-
-  return new Promise(resolve => {
-    let settled = 0;
-    const check = v => {
-      if (v) return resolve(v);
-      if (++settled === 2) resolve(null);
-    };
-    p1.then(check);
-    p2.then(check);
-  });
+  try { return await tryNexRay(ytUrl); } catch {}
+  try { return await tryEliteProtech(ytUrl); } catch { return null; }
 }
 
 // ── YouTube search (duration-filtered) ───────────────────────────────────────
