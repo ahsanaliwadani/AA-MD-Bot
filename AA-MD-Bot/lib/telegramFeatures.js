@@ -125,16 +125,14 @@ async function ytSearchInfo(query) {
 // ── Audio API sources ────────────────────────────────────────────────────────
 const mkYtUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
 
-async function mp3David(id)  { try { const d = await fetchUrl(`https://apis.davidcyriltech.my.id/download/ytmp3?url=${encodeURIComponent(mkYtUrl(id))}`,30000); return pickUrl(d,'result.download_url','result.downloadUrl','result.url','url','link'); } catch { return null; } }
 async function mp3Keith(id)  { try { const d = await fetchUrl(`https://apis-keith.vercel.app/download/dlmp3?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'result.data.downloadUrl','result.downloadUrl','result.url'); } catch { return null; } }
 async function mp3Faa(id)    { try { const d = await fetchUrl(`https://api-faa.my.id/faa/ytmp3?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'result.mp3','result.url','url'); } catch { return null; } }
-async function mp3Nexray(id) { try { const d = await fetchUrl(`https://api.nexray.web.id/downloader/ytmp3?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'result.url','data.url','url'); } catch { return null; } }
+async function mp3Nexray(id) { try { const d = await fetchUrl(`https://api.nexray.eu.cc/downloader/v1/ytmp3?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'result.url','data.url','url'); } catch { return null; } }
 
 // ── Video API sources ────────────────────────────────────────────────────────
-async function mp4David(id)  { try { const d = await fetchUrl(`https://apis.davidcyriltech.my.id/download/ytmp4?url=${encodeURIComponent(mkYtUrl(id))}`,30000); return pickUrl(d,'result.download_url','result.downloadUrl','result.url','url','link'); } catch { return null; } }
 async function mp4Keith(id)  { try { const d = await fetchUrl(`https://apis-keith.vercel.app/download/dlmp4?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'result.data.downloadUrl','result.downloadUrl','result.url'); } catch { return null; } }
 async function mp4Faa(id)    { try { const d = await fetchUrl(`https://api-faa.my.id/faa/ytmp4?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'result.download_url','result.url','url'); } catch { return null; } }
-async function mp4Nexray(id) { try { const d = await fetchUrl(`https://api.nexray.web.id/downloader/ytmp4?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'result.url','data.url','url'); } catch { return null; } }
+async function mp4Nexray(id) { try { const d = await fetchUrl(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'result.url','data.url','url'); } catch { return null; } }
 async function mp4Agatz(id)  { try { const d = await fetchUrl(`https://api.agatz.xyz/api/ytmp4?url=${encodeURIComponent(mkYtUrl(id))}`); return pickUrl(d,'data.url','url','result'); } catch { return null; } }
 async function mp4Gtech(id)  {
   try {
@@ -148,8 +146,8 @@ async function mp4Gtech(id)  {
   return null;
 }
 
-const resolveAudio = (id) => raceFirst([mp3David(id), mp3Keith(id), mp3Faa(id), mp3Nexray(id)]);
-const resolveVideo = (id) => raceFirst([mp4David(id), mp4Keith(id), mp4Faa(id), mp4Nexray(id), mp4Agatz(id), mp4Gtech(id)]);
+const resolveAudio = (id) => raceFirst([mp3Nexray(id), mp3Keith(id), mp3Faa(id)]);
+const resolveVideo = (id) => raceFirst([mp4Nexray(id), mp4Keith(id), mp4Faa(id), mp4Agatz(id), mp4Gtech(id)]);
 
 // ── TikTok ───────────────────────────────────────────────────────────────────
 const TT_RX = /https?:\/\/(www\.)?(vm\.|vt\.|m\.)?tiktok\.com\/\S+/i;
@@ -188,17 +186,7 @@ async function igDl(url) {
     if (vid && typeof vid === 'string' && vid.startsWith('http')) return vid;
   } catch {}
 
-  // API 2: davidcyriltech
-  try {
-    const { data } = await axios.get(
-      `https://apis.davidcyriltech.my.id/download/instagram?url=${encodeURIComponent(url)}`,
-      { timeout: 25000, headers: { 'User-Agent': 'Mozilla/5.0' } }
-    );
-    const link = pickUrl(data, 'result.video_url', 'result.url', 'url', 'video_url');
-    if (link) return link;
-  } catch {}
-
-  // API 3: saveig
+  // API 2: saveig
   try {
     const { data } = await axios.get(
       `https://api.saveig.app/api?url=${encodeURIComponent(url)}`,
