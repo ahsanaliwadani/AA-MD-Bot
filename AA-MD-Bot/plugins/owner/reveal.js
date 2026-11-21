@@ -71,7 +71,18 @@ export default {
       const msgId = args[0].trim();
       await handleManualReveal(msgId, sock, selfJid); return;
 
-      
+      if (!inMem) {
+        await react('❌');
+        return reply(
+          `❌ *View-Once not found*\n\n` +
+          `No cached media for that ID.\n\n` +
+          `💡 *Better way:* Reply directly to the view-once and send *.reveal* — no ID needed.\n\n` +
+          `> 👁️ *AA MD Bot*`
+        );
+      }
+      await handleManualReveal(msgId, sock, selfJid);
+      return;
+    }
 
     // ══ MODE B: Reply to a view-once ══════════════════════════════════════════
     const msgContent = msg.message || {};

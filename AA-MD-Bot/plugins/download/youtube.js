@@ -54,7 +54,6 @@ function firstSuccess(promises) {
   });
 }
 
-// Download directly without Referer first (CDNs accept plain requests fastest), fallback to UA
 async function tryDownload(url, timeout, signal) {
   const attempts = [
     { headers: { "User-Agent": UA, Accept: "*/*" } },
@@ -313,7 +312,6 @@ function getAudioCandidates(ytUrl, meta, signal) {
 function getVideoCandidates(ytUrl, signal) {
   const enc = encodeURIComponent(ytUrl);
 
-  // 720p is 3x faster and prevents heavy RAM spikes while staying crisp on mobile
   const pNexrayV1 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${enc}&resolusi=720`, {
       timeout: YT_PROVIDER_TIMEOUT_MS,
@@ -461,7 +459,6 @@ export default {
       const timeout = isVideoCmd ? YT_VIDEO_DOWNLOAD_TIMEOUT_MS : YT_AUDIO_DOWNLOAD_TIMEOUT_MS;
       const minSize = isVideoCmd ? 50000 : 10000;
 
-      // Run info card AND media download in PARALLEL (no waiting for thumbnail upload)
       const [, result] = await Promise.all([
         sendInfoCard(sock, jid, msg, meta, botName, isVideoCmd ? "video" : "audio"),
         downloadFirstWorking(
