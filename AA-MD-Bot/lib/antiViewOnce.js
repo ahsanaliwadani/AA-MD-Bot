@@ -4,6 +4,8 @@
 // Auto-Reveal + Reply/Emoji/Reaction Reveal Engine
 // ============================================
 
+import fs from "fs";
+import path from "path";
 import moment from "moment-timezone";
 import { jidNormalizedUser, downloadContentFromMessage } from "@whiskeysockets/baileys";
 import { logger } from "./logger.js";
@@ -59,37 +61,103 @@ function mediaType(isVid, isAudio) {
   return isAudio ? "audio" : isVid ? "video" : "image";
 }
 
-// ── Store management (RAM safe) ──────────────────────────────────────────────
+// ── Store management (Disk-Persistent + RAM safe) ──────────────────────────
+const DISK_DIR = path.join(process.cwd(), "cache", "viewonce");
+const DISK_TTL = 2 * 60 * 60 * 1000; // Keep on disk for 2 hours across restarts
+try { fs.mkdirSync(DISK_DIR, { recursive: true }); } catch {}
+
+function safeId(id) {
+  return String(id || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function getFromDisk(id) {
+  try {
+    const sid = safeId(id);
+    const metaPath = path.join(DISK_DIR, sid + ".json");
+    const binPath = path.join(DISK_DIR, sid + ".bin");
+    if (!fs.existsSync(metaPath) || !fs.existsSync(binPath)) return null;
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    if (Date.now() - (meta.timestamp || 0) > DISK_TTL) {
+      storeDelete(id);
+      return null;
+    }
+    const buf = fs.readFileSync(binPath);
+    return { ...meta, buf };
+  } catch {
+    return null;
+  }
+}
+
+function storeGet(id) {
+  if (!id) return null;
+  const mem = storeGet(id);
+  if (mem && mem.buf) return mem;
+  const disk = getFromDisk(id);
+  if (disk) return disk;
+  return null;
+}
+
 function storeDelete(id) {
-  const e = viewOnceStore.get(id);
+  const e = storeGet(id);
   if (e) {
     totalBytes -= e.buf?.length || 0;
     viewOnceStore.delete(id);
   }
+  try {
+    const sid = safeId(id);
+    fs.unlinkSync(path.join(DISK_DIR, sid + ".json"));
+  } catch {}
+  try {
+    const sid = safeId(id);
+    fs.unlinkSync(path.join(DISK_DIR, sid + ".bin"));
+  } catch {}
 }
 
 function storeAdd(id, entry) {
-  if (viewOnceStore.has(id)) storeDelete(id);
-  viewOnceStore.set(id, entry);
-  totalBytes += entry.buf.length;
-  while ((viewOnceStore.size > MAX_ENTRIES || totalBytes > MAX_TOTAL_BYTES) && viewOnceStore.size > 1) {
-    storeDelete(viewOnceStore.keys().next().value);
+  if (viewOnceStore.has(id)) {
+    const old = storeGet(id);
+    totalBytes -= old?.buf?.length || 0;
+    viewOnceStore.delete(id);
+  }
+  // Save media buffer & metadata to disk so it survives bot restarts
+  try {
+    const sid = safeId(id);
+    const { buf, ...meta } = entry;
+    fs.writeFileSync(path.join(DISK_DIR, sid + ".bin"), buf);
+    fs.writeFileSync(path.join(DISK_DIR, sid + ".json"), JSON.stringify(meta));
+  } catch {}
+
+  // Keep only small metadata in RAM (buf stays on disk -> saves 200MB+ RAM)
+  const { buf, ...metaOnly } = entry;
+  viewOnceStore.set(id, metaOnly);
+  while (viewOnceStore.size > MAX_ENTRIES && viewOnceStore.size > 1) {
+    viewOnceStore.delete(viewOnceStore.keys().next().value);
   }
 }
 
 export function cleanViewOnceStore() {
   const now = Date.now();
   for (const [key, val] of viewOnceStore.entries()) {
-    if (now - val.timestamp > MEM_TTL) viewOnceStore.delete(key);
+    if (now - val.timestamp > DISK_TTL) viewOnceStore.delete(key);
   }
-  // re-sync byte counter (in case something deleted from the Map directly)
+  try {
+    for (const file of fs.readdirSync(DISK_DIR)) {
+      if (!file.endsWith(".json")) continue;
+      const full = path.join(DISK_DIR, file);
+      const stat = fs.statSync(full);
+      if (now - stat.mtimeMs > DISK_TTL) {
+        const base = file.slice(0, -5);
+        try { fs.unlinkSync(full); } catch {}
+        try { fs.unlinkSync(path.join(DISK_DIR, base + ".bin")); } catch {}
+      }
+    }
+  } catch {}
   totalBytes = 0;
-  for (const v of viewOnceStore.values()) totalBytes += v.buf?.length || 0;
 }
 
 async function waitForStored(id, tries = 12, step = 250) {
   for (let i = 0; i <= tries; i++) {
-    const s = viewOnceStore.get(id);
+    const s = storeGet(id);
     if (s) return s;
     if (i < tries) await sleep(step);
   }
@@ -485,7 +553,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
     const trigger = isEmojiTrigger ? `emoji (${textBody})` : `keyword (${voKeyword})`;
 
     // 1) fast path: already in memory
-    let stored = stanzaId ? viewOnceStore.get(stanzaId) : null;
+    let stored = stanzaId ? storeGet(stanzaId) : null;
 
     // 2) direct download from the quoted message
     if (!stored && quotedMsg) {
@@ -513,7 +581,7 @@ export async function handleReplyReveal(msg, sock, sessionId) {
 export async function handleManualReveal(msgId, sock, chatJid) {
   try {
     if (!msgId || !chatJid) return;
-    const stored = viewOnceStore.get(msgId);
+    const stored = storeGet(msgId);
     if (!stored) {
       await sock.sendMessage(chatJid, { text: `⚠️ No stored view-once media found for ID: ${msgId}` }).catch(() => {});
       return;
@@ -541,7 +609,7 @@ export async function handleReactionReveal(msg, sock, sessionId) {
     if (!stanzaId) return;
     if (!claim(`react:${stanzaId}`)) return;
 
-    const stored = viewOnceStore.get(stanzaId) || (await waitForStored(stanzaId));
+    const stored = storeGet(stanzaId) || (await waitForStored(stanzaId));
     if (!stored) return;
 
     const selfJid = getSelfJid(sock, sessionId);
@@ -564,7 +632,7 @@ export async function handleRevealByReply(msg, sock, sessionId) {
     const stanzaId = ctxInfo?.stanzaId || ctxInfo?.quotedStanzaId || null;
     if (!stanzaId) return false;
 
-    const stored = viewOnceStore.get(stanzaId) || (await waitForStored(stanzaId, 4));
+    const stored = storeGet(stanzaId) || (await waitForStored(stanzaId, 4));
     if (!stored) return false;
 
     const selfJid = getSelfJid(sock, sessionId || msg?.key?.remoteJid);
