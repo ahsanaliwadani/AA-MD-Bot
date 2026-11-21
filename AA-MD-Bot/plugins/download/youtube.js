@@ -1,5 +1,5 @@
 // ============================================
-// AA MD Bot - YouTube Downloader (v5 - PURE NEXRAY TURBO)
+// AA MD Bot - YouTube Downloader (v6 - NEXRAY AUDIO + ABZTECH 720P VIDEO)
 // Developer: Ahsan Ali Wadani
 // ============================================
 
@@ -17,8 +17,8 @@ const extractUrl = (t) => {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-const NEXRAY_API_TIMEOUT = 35000;
-const NEXRAY_DL_TIMEOUT = 90000;
+const API_TIMEOUT = 35000;
+const DL_TIMEOUT = 90000;
 
 function formatViews(v) {
   if (v === undefined || v === null || v === "") return "N/A";
@@ -48,7 +48,7 @@ function formatDuration(d) {
   return String(d);
 }
 
-// ── Download binary buffer with retry (handles slow CDN warm-up) ────────────
+// ── Download binary buffer with retry ───────────────────────────────────────
 async function downloadBuffer(url, signal, minSize = 10000) {
   if (!url || typeof url !== "string" || !url.startsWith("http")) return null;
   const headerSets = [
@@ -62,7 +62,7 @@ async function downloadBuffer(url, signal, minSize = 10000) {
       try {
         const res = await axios.get(url, {
           responseType: "arraybuffer",
-          timeout: NEXRAY_DL_TIMEOUT,
+          timeout: DL_TIMEOUT,
           maxRedirects: 10,
           maxContentLength: 200 * 1024 * 1024,
           validateStatus: (s) => s >= 200 && s < 300,
@@ -77,13 +77,13 @@ async function downloadBuffer(url, signal, minSize = 10000) {
         if (e.code === "ERR_CANCELED" || signal?.aborted) return null;
       }
     }
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 700));
   }
   return null;
 }
 
-// ── Race multiple NexRay endpoints in parallel, first valid buffer wins ─────
-async function raceNexrayDownloads(tasks, minSize) {
+// ── Parallel race across candidate links ────────────────────────────────────
+async function raceDownloads(tasks, minSize) {
   const controller = new AbortController();
   return new Promise((resolve) => {
     const promises = tasks(controller.signal);
@@ -113,11 +113,11 @@ async function raceNexrayDownloads(tasks, minSize) {
   });
 }
 
-// ── Single-call NexRay ytplay (instant search + direct audio link) ──────────
+// ── NexRay ytplay (instant metadata + direct audio link) ────────────────────
 async function nexrayYtPlay(query) {
   const { data } = await axios.get(
     `https://api.nexray.eu.cc/downloader/ytplay?q=${encodeURIComponent(query)}`,
-    { timeout: NEXRAY_API_TIMEOUT },
+    { timeout: API_TIMEOUT },
   );
   const r = data?.result;
   if (!data?.status || !r) return null;
@@ -135,8 +135,8 @@ async function nexrayYtPlay(query) {
   };
 }
 
-// ── NexRay Audio Candidates ─────────────────────────────────────────────────
-function getNexrayAudioTasks(ytUrl, meta, signal) {
+// ── Audio Tasks (Pure NexRay) ───────────────────────────────────────────────
+function getAudioTasks(ytUrl, meta, signal) {
   const enc = encodeURIComponent(ytUrl);
 
   const tDirect = meta?.directAudioUrl
@@ -149,7 +149,7 @@ function getNexrayAudioTasks(ytUrl, meta, signal) {
 
   const tV1Mp3 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp3?url=${enc}`, {
-      timeout: NEXRAY_API_TIMEOUT,
+      timeout: API_TIMEOUT,
       signal,
     })
     .then(({ data: d }) => {
@@ -164,7 +164,7 @@ function getNexrayAudioTasks(ytUrl, meta, signal) {
 
   const tMp3 = axios
     .get(`https://api.nexray.eu.cc/downloader/ytmp3?url=${enc}`, {
-      timeout: NEXRAY_API_TIMEOUT,
+      timeout: API_TIMEOUT,
       signal,
     })
     .then(({ data: d }) => {
@@ -180,13 +180,37 @@ function getNexrayAudioTasks(ytUrl, meta, signal) {
   return [tDirect, tV1Mp3, tMp3];
 }
 
-// ── NexRay Video Candidates (720p & 480p parallel race) ─────────────────────
-function getNexrayVideoTasks(ytUrl, meta, signal) {
+// ── Video Tasks (AbzTech Mistral 720p Primary + NexRay Fallback) ────────────
+function getVideoTasks(ytUrl, meta, signal) {
   const enc = encodeURIComponent(ytUrl);
 
-  const t720 = axios
+  const tAbzMistral = axios
+    .get(`https://api-abztech.apps.mistral.run/download/ytdl?url=${enc}`, {
+      timeout: API_TIMEOUT,
+      signal,
+    })
+    .then(({ data: d }) => {
+      const url =
+        d?.downloadUrl ||
+        d?.url ||
+        (Array.isArray(d?.video) && d.video[0]?.url) ||
+        d?.result?.url;
+      if (d?.status !== false && typeof url === "string" && url.startsWith("http")) {
+        return {
+          url,
+          title: d?.title || meta?.title || "",
+          duration: d?.duration || meta?.duration || "",
+          thumbnail: d?.thumbnail || meta?.thumbnail || "",
+          filename: `${d?.title || meta?.title || "video"}.mp4`,
+        };
+      }
+      return null;
+    })
+    .catch(() => null);
+
+  const tNexrayV1 = axios
     .get(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${enc}&resolusi=720`, {
-      timeout: NEXRAY_API_TIMEOUT,
+      timeout: API_TIMEOUT,
       signal,
     })
     .then(({ data: d }) => {
@@ -199,24 +223,9 @@ function getNexrayVideoTasks(ytUrl, meta, signal) {
     })
     .catch(() => null);
 
-  const t480 = axios
-    .get(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${enc}&resolusi=480`, {
-      timeout: NEXRAY_API_TIMEOUT,
-      signal,
-    })
-    .then(({ data: d }) => {
-      const r = d?.result || d;
-      const url = r?.url || r?.download_url || r?.downloadUrl || d?.url;
-      if (d?.status !== false && typeof url === "string" && url.startsWith("http")) {
-        return { url, title: r?.title || meta?.title || "", filename: "video.mp4" };
-      }
-      return null;
-    })
-    .catch(() => null);
-
-  const tMp4 = axios
+  const tNexrayMp4 = axios
     .get(`https://api.nexray.eu.cc/downloader/ytmp4?url=${enc}`, {
-      timeout: NEXRAY_API_TIMEOUT,
+      timeout: API_TIMEOUT,
       signal,
     })
     .then(({ data: d }) => {
@@ -229,7 +238,7 @@ function getNexrayVideoTasks(ytUrl, meta, signal) {
     })
     .catch(() => null);
 
-  return [t720, t480, tMp4];
+  return [tAbzMistral, tNexrayV1, tNexrayMp4];
 }
 
 // ── Quick INFO CARD ─────────────────────────────────────────────────────────
@@ -268,7 +277,7 @@ function mediaCaption(meta, botName, type) {
 export default {
   command: "play",
   alias: ["song", "yt", "ytmp3", "mp3", "ytmp4", "video", "mp4"],
-  description: "Download YouTube audio or video via NexRay",
+  description: "Download YouTube audio or video",
   category: "download",
 
   execute: async ({
@@ -320,7 +329,7 @@ export default {
         );
       }
 
-      // 1) Resolve via NexRay ytplay (1 single call gives metadata + direct audio link)
+      // 1) Resolve metadata + URL via NexRay ytplay
       let ytUrl = directUrl;
       let meta = await nexrayYtPlay(query).catch(() => null);
 
@@ -336,14 +345,14 @@ export default {
 
       const minSize = isVideoCmd ? 40000 : 8000;
 
-      // 2) Send Info Card & Race NexRay Downloads in PARALLEL
+      // 2) Send Info Card & Race Downloads in PARALLEL
       const [, result] = await Promise.all([
         sendInfoCard(sock, jid, msg, meta, botName, isVideoCmd ? "video" : "audio"),
-        raceNexrayDownloads(
+        raceDownloads(
           (signal) =>
             isVideoCmd
-              ? getNexrayVideoTasks(ytUrl, meta, signal)
-              : getNexrayAudioTasks(ytUrl, meta, signal),
+              ? getVideoTasks(ytUrl, meta, signal)
+              : getAudioTasks(ytUrl, meta, signal),
           minSize,
         ),
       ]);
@@ -352,11 +361,12 @@ export default {
         await react("❌");
         return reply(
           `❌ *${isVideoCmd ? "Video" : "Audio"} download failed*\n\n` +
-            `NexRay server did not return a playable file for this link. Please try again.`,
+            `Provider links were unreachable or expired. Please try again.`,
         );
       }
 
       if (result.meta.title) meta.title = meta.title || result.meta.title;
+      if (result.meta.duration) meta.duration = meta.duration || result.meta.duration;
 
       // 3) Send Media
       if (isVideoCmd) {
@@ -381,7 +391,7 @@ export default {
 
       await react("✅");
     } catch (err) {
-      console.error("[ YouTube NexRay ]", err.message);
+      console.error("[ YouTube ]", err.message);
       await react("❌").catch(() => {});
       reply(`❌ *Download failed:* ${err.message}`).catch(() => {});
     }
