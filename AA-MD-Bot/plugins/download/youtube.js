@@ -1,5 +1,5 @@
 // ============================================
-// AA MD Bot - YouTube Downloader (v6 - NEXRAY AUDIO + ABZTECH 720P VIDEO)
+// AA MD Bot - YouTube Downloader (v7 - NEXRAY AUDIO + ABZTECH/SAVETUBE VIDEO)
 // Developer: Ahsan Ali Wadani
 // ============================================
 
@@ -17,8 +17,8 @@ const extractUrl = (t) => {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-const API_TIMEOUT = 35000;
-const DL_TIMEOUT = 90000;
+const API_TIMEOUT = 60000;
+const DL_TIMEOUT = 180000;
 
 function formatViews(v) {
   if (v === undefined || v === null || v === "") return "N/A";
@@ -48,13 +48,25 @@ function formatDuration(d) {
   return String(d);
 }
 
-// ── Download binary buffer with retry ───────────────────────────────────────
+// ── Download binary buffer with SaveTube/YouTube header support ─────────────
 async function downloadBuffer(url, signal, minSize = 10000) {
   if (!url || typeof url !== "string" || !url.startsWith("http")) return null;
-  const headerSets = [
-    { "User-Agent": UA, Accept: "*/*" },
-    {},
-  ];
+
+  const isSaveTube = url.includes("savetube");
+  const headerSets = isSaveTube
+    ? [
+        {
+          "User-Agent": UA,
+          Referer: "https://yt.savetube.me/",
+          Origin: "https://yt.savetube.me",
+          Accept: "*/*",
+        },
+        { "User-Agent": UA, Accept: "*/*" },
+      ]
+    : [
+        { "User-Agent": UA, Accept: "*/*" },
+        {},
+      ];
 
   for (let attempt = 0; attempt < 2; attempt++) {
     for (const headers of headerSets) {
@@ -64,20 +76,28 @@ async function downloadBuffer(url, signal, minSize = 10000) {
           responseType: "arraybuffer",
           timeout: DL_TIMEOUT,
           maxRedirects: 10,
-          maxContentLength: 200 * 1024 * 1024,
+          maxContentLength: 250 * 1024 * 1024,
           validateStatus: (s) => s >= 200 && s < 300,
           headers,
           signal,
         });
         const ct = String(res.headers?.["content-type"] || "").toLowerCase();
-        if (ct.includes("text/html") || ct.includes("application/json")) continue;
+        if (ct.includes("text/html") || ct.includes("application/json")) {
+          console.error("[YT CDN rejected content-type]", ct, url.slice(0, 80));
+          continue;
+        }
         const buf = Buffer.from(res.data);
         if (buf.length >= minSize) return buf;
       } catch (e) {
         if (e.code === "ERR_CANCELED" || signal?.aborted) return null;
+        console.error(
+          "[YT CDN download error]",
+          e.response?.status || e.code || e.message,
+          url.slice(0, 80),
+        );
       }
     }
-    await new Promise((r) => setTimeout(r, 700));
+    await new Promise((r) => setTimeout(r, 1000));
   }
   return null;
 }
@@ -180,7 +200,7 @@ function getAudioTasks(ytUrl, meta, signal) {
   return [tDirect, tV1Mp3, tMp3];
 }
 
-// ── Video Tasks (AbzTech Mistral 720p Primary + NexRay Fallback) ────────────
+// ── Video Tasks (AbzTech Mistral 720p + Lower Quality Fallback + NexRay) ────
 function getVideoTasks(ytUrl, meta, signal) {
   const enc = encodeURIComponent(ytUrl);
 
@@ -190,12 +210,16 @@ function getVideoTasks(ytUrl, meta, signal) {
       signal,
     })
     .then(({ data: d }) => {
+      if (d?.status === false) {
+        console.error("[AbzTech Mistral API false]", d?.message || d?.error || JSON.stringify(d).slice(0, 120));
+        return null;
+      }
       const url =
         d?.downloadUrl ||
         d?.url ||
         (Array.isArray(d?.video) && d.video[0]?.url) ||
         d?.result?.url;
-      if (d?.status !== false && typeof url === "string" && url.startsWith("http")) {
+      if (typeof url === "string" && url.startsWith("http")) {
         return {
           url,
           title: d?.title || meta?.title || "",
@@ -206,10 +230,13 @@ function getVideoTasks(ytUrl, meta, signal) {
       }
       return null;
     })
-    .catch(() => null);
+    .catch((e) => {
+      console.error("[AbzTech Mistral request error]", e.response?.status || e.message);
+      return null;
+    });
 
   const tNexrayV1 = axios
-    .get(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${enc}&resolusi=720`, {
+    .get(`https://api.nexray.eu.cc/downloader/v1/ytmp4?url=${enc}&resolusi=480`, {
       timeout: API_TIMEOUT,
       signal,
     })
@@ -329,7 +356,6 @@ export default {
         );
       }
 
-      // 1) Resolve metadata + URL via NexRay ytplay
       let ytUrl = directUrl;
       let meta = await nexrayYtPlay(query).catch(() => null);
 
@@ -345,7 +371,6 @@ export default {
 
       const minSize = isVideoCmd ? 40000 : 8000;
 
-      // 2) Send Info Card & Race Downloads in PARALLEL
       const [, result] = await Promise.all([
         sendInfoCard(sock, jid, msg, meta, botName, isVideoCmd ? "video" : "audio"),
         raceDownloads(
@@ -368,7 +393,6 @@ export default {
       if (result.meta.title) meta.title = meta.title || result.meta.title;
       if (result.meta.duration) meta.duration = meta.duration || result.meta.duration;
 
-      // 3) Send Media
       if (isVideoCmd) {
         await sock.sendMessage(
           jid,
